@@ -536,7 +536,39 @@ main {
 .wizard-diagram #wizard-target { transition: all 0.45s var(--ease); }
 #wizard-msg { margin: 0; }
 
+.wizard-live {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.wizard-live figure { margin: 0; text-align: center; }
+.wizard-live canvas { width: 110px; height: auto; aspect-ratio: 1; }
+.wizard-live figcaption {
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
 /* range */
+
+.range-minmax {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0 8px;
+}
+.range-minmax .edge-ok { color: var(--ink); font-weight: 700; }
+.range-hint { font-size: 12px; }
 
 .range-dials {
   display: flex;

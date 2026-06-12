@@ -164,6 +164,16 @@
       <p id="wizard-msg">Questa procedura ricentra gli stick campionando la posizione di riposo dopo ogni movimento.
         Una volta avviata <b>non pu&ograve; essere annullata</b>: non chiudere la pagina e non scollegare il controller.</p>
     </div>
+    <div id="wizard-live" class="wizard-live hidden">
+      <figure>
+        <canvas id="dial-wiz-l" width="110" height="110" aria-label="Posizione live stick sinistro"></canvas>
+        <figcaption>Sinistro</figcaption>
+      </figure>
+      <figure>
+        <canvas id="dial-wiz-r" width="110" height="110" aria-label="Posizione live stick destro"></canvas>
+        <figcaption>Destro</figcaption>
+      </figure>
+    </div>
     <div class="modal-actions">
       <button id="btn-wizard-cancel" class="btn btn-ghost">Annulla</button>
       <button id="btn-wizard-next" class="btn btn-primary">Inizia</button>
@@ -175,14 +185,18 @@
 <div id="modal-range" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="range-title">
   <div class="modal-panel">
     <h3 id="range-title">Calibrazione del range</h3>
-    <p id="range-msg">Il controller sta campionando. <b>Ruota lentamente entrambi gli stick</b> lungo il bordo,
-      almeno 2 giri in un senso e 2 nell&rsquo;altro.</p>
+    <p id="range-msg">Il controller sta campionando. <b>Ruota lentamente entrambi gli stick premendoli a fondo
+      contro il bordo</b>, almeno 2 giri in un senso e 2 nell&rsquo;altro. Insisti sulle zone dove il tracciato
+      resta corto.</p>
     <div class="range-dials">
       <canvas id="dial-range-l" width="200" height="200" aria-label="Copertura stick sinistro"></canvas>
       <canvas id="dial-range-r" width="200" height="200" aria-label="Copertura stick destro"></canvas>
     </div>
+    <div class="range-minmax mono" id="range-minmax">
+      <span>LX &mdash;</span><span>LY &mdash;</span><span>RX &mdash;</span><span>RY &mdash;</span>
+    </div>
     <div class="range-meta">
-      <span class="mono" id="range-vals">LX +0.00 &middot; LY +0.00 &middot; RX +0.00 &middot; RY +0.00</span>
+      <span id="range-hint" class="range-hint">Estremi non ancora raggiunti</span>
       <span id="range-pct">Copertura 0%</span>
     </div>
     <div class="progress"><i id="range-bar"></i></div>

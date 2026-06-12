@@ -10,7 +10,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c =>
 // Soglie verdetto drift (% di deflessione massima a riposo)
 const DRIFT_OK_MAX = 1.2;
 const DRIFT_MILD_MAX = 3.5;
-const DRIFT_TEST_MS = 2500;
+const DRIFT_TEST_MS = 3000;
+const DRIFT_SETTLE_SAMPLES = 60; // ~250 ms iniziali scartati (assestamento)
 // Il drift è un offset (anche grande) ma stabile: per distinguerlo dal tocco
 // dell'utente si guarda l'escursione del segnale in una finestra breve,
 // mai il valore assoluto.
@@ -57,10 +58,12 @@ const GRID = '#e4e4e0';
 const MID = '#c9c9c5';
 
 class StickDial {
-  constructor(canvas, { traceMode = false } = {}) {
+  constructor(canvas, { traceMode = false, dotRadius = 5 } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.traceMode = traceMode;
+    this.dotRadius = dotRadius;
+    this.target = null; // {x, y} normalizzato: anello bersaglio per il wizard
     this.trail = [];
     this.bins = new Array(RANGE_BINS).fill(0);
     this.x = 0;
@@ -87,8 +90,14 @@ class StickDial {
 
   resetBins() { this.bins.fill(0); }
 
+  // Copertura adattiva: un settore conta se il suo massimo si avvicina al
+  // massimo globale osservato. Così la scala (calibrata o raw) non falsa
+  // il progresso: conta la forma del perimetro, non il valore assoluto.
   coverage() {
-    return this.bins.filter(v => v >= RANGE_RADIUS_OK).length / RANGE_BINS;
+    const globalMax = Math.max(...this.bins);
+    if (globalMax < 0.5) return 0;
+    const thr = Math.max(RANGE_RADIUS_OK * 0.75, globalMax * 0.88);
+    return this.bins.filter(v => v >= thr).length / RANGE_BINS;
   }
 
   draw() {
@@ -143,10 +152,21 @@ class StickDial {
       }
     }
 
+    // anello bersaglio (wizard)
+    if (this.target) {
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(c + this.target.x * R, c + this.target.y * R, this.dotRadius + 6, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // punto corrente
     ctx.fillStyle = INK;
     ctx.beginPath();
-    ctx.arc(c + this.x * R, c + this.y * R, 5, 0, 2 * Math.PI);
+    ctx.arc(c + this.x * R, c + this.y * R, this.dotRadius, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
@@ -155,6 +175,8 @@ const dialL = new StickDial($('dial-l'));
 const dialR = new StickDial($('dial-r'));
 const dialRangeL = new StickDial($('dial-range-l'), { traceMode: true });
 const dialRangeR = new StickDial($('dial-range-r'), { traceMode: true });
+const dialWizL = new StickDial($('dial-wiz-l'), { dotRadius: 4 });
+const dialWizR = new StickDial($('dial-wiz-r'), { dotRadius: 4 });
 
 /* ============================== render loop ============================== */
 
@@ -164,6 +186,14 @@ function frame(ts) {
   dialR.push(sticks.rx, sticks.ry);
   dialL.draw();
   dialR.draw();
+
+  if (!$('wizard-live').classList.contains('hidden')
+      && !$('modal-wizard').classList.contains('hidden')) {
+    dialWizL.push(sticks.lx, sticks.ly);
+    dialWizR.push(sticks.rx, sticks.ry);
+    dialWizL.draw();
+    dialWizR.draw();
+  }
 
   if (ds5) {
     if (rangeSession) {
@@ -325,6 +355,14 @@ function onInputReport(event) {
 
   if (driftTest) driftSample();
 
+  if (rangeSession) {
+    for (const a of ['lx', 'ly', 'rx', 'ry']) {
+      const v = sticks[a];
+      if (v < rangeSession.stats[a].min) rangeSession.stats[a].min = v;
+      if (v > rangeSession.stats[a].max) rangeSession.stats[a].max = v;
+    }
+  }
+
   const now = performance.now();
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
@@ -408,7 +446,12 @@ function driftTick() {
     return;
   }
 
-  const { stable, fraction } = extractStableSamples(driftTest.samples);
+  // scarta l'assestamento iniziale (presa della mano che si stacca, ecc.)
+  const usable = driftTest.samples.length > DRIFT_SETTLE_SAMPLES + 100
+    ? driftTest.samples.slice(DRIFT_SETTLE_SAMPLES)
+    : driftTest.samples;
+
+  const { stable, fraction } = extractStableSamples(usable);
 
   if (fraction < DRIFT_MIN_STABLE) {
     if (driftTest.retries < DRIFT_MAX_RETRIES) {
@@ -420,25 +463,33 @@ function driftTick() {
       return;
     }
     // Segnale in movimento continuo anche dopo i tentativi: diagnosi, non errore.
-    const result = analyzeDrift(driftTest.samples);
+    const result = analyzeDrift(usable);
     result.unstable = true;
     finishDriftTest(result);
     return;
   }
 
-  finishDriftTest(analyzeDrift(stable.length > 50 ? stable : driftTest.samples));
+  finishDriftTest(analyzeDrift(stable.length > 50 ? stable : usable));
 }
 
+function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// Mediana per asse invece della media: un singolo sobbalzo o vibrazione
+// del tavolo non sposta il risultato.
 function analyzeDrift(samples) {
-  const mean = key => samples.reduce((a, s) => a + s[key], 0) / samples.length;
-  const mlx = mean('lx'), mly = mean('ly'), mrx = mean('rx'), mry = mean('ry');
-  const devs = stick => samples
-    .map(s => Math.hypot(s[stick + 'x'] - (stick === 'l' ? mlx : mrx), s[stick + 'y'] - (stick === 'l' ? mly : mry)))
+  const med = key => median(samples.map(s => s[key]));
+  const mlx = med('lx'), mly = med('ly'), mrx = med('rx'), mry = med('ry');
+  const devs = (xk, yk, mx, my) => samples
+    .map(s => Math.hypot(s[xk] - mx, s[yk] - my))
     .sort((a, b) => a - b);
   const p95 = arr => arr[Math.floor(arr.length * 0.95)];
   return {
-    left: { offset: Math.hypot(mlx, mly) * 100, noise: p95(devs('l')) * 100 },
-    right: { offset: Math.hypot(mrx, mry) * 100, noise: p95(devs('r')) * 100 },
+    left: { offset: Math.hypot(mlx, mly) * 100, noise: p95(devs('lx', 'ly', mlx, mly)) * 100, x: mlx, y: mly },
+    right: { offset: Math.hypot(mrx, mry) * 100, noise: p95(devs('rx', 'ry', mrx, mry)) * 100, x: mrx, y: mry },
   };
 }
 
@@ -461,10 +512,12 @@ function finishDriftTest(result) {
   lastDriftResult = result;
 
   for (const [side, el] of [['left', 'verdict-l'], ['right', 'verdict-r']]) {
-    const v = verdictFor(result[side]);
+    const r = result[side];
+    const v = verdictFor(r);
     const badge = $(el);
     badge.className = `verdict ${v.cls}`;
     badge.textContent = v.label;
+    badge.title = `x ${(r.x * 100).toFixed(1)}% · y ${(r.y * 100).toFixed(1)}% · rumore ${r.noise.toFixed(1)}%`;
     badge.classList.remove('hidden');
   }
 
@@ -520,6 +573,23 @@ async function doFlash() {
 
 /* ============================== calibrazione rapida ============================== */
 
+const QUICK_MAX_PASSES = 3;
+const QUICK_SAMPLES_PER_PASS = 8;
+
+// Misura veloce dell'offset residuo (post-calibrazione), con lo stesso
+// filtro di stabilità del test drift.
+async function measureOffset(ms = 1200) {
+  const samples = [];
+  const id = setInterval(() => samples.push({ ...sticks }), 8);
+  await sleep(ms);
+  clearInterval(id);
+  if (samples.length < 40) return null;
+  const { stable } = extractStableSamples(samples);
+  return analyzeDrift(stable.length > 40 ? stable : samples);
+}
+
+// Calibra, verifica, e se l'offset residuo non è sotto soglia ripete:
+// converge da solo invece di sperare nella singola passata.
 async function quickCalibrate() {
   if (!ds5 || busy) return;
   cancelDriftTest();
@@ -529,23 +599,39 @@ async function quickCalibrate() {
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
   try {
-    msg.innerHTML = 'Calibrazione in corso — <b>non toccare gli stick</b>…';
-    bar.style.width = '10%';
     await sleep(800);
-    await ds5.calibBegin();
-    bar.style.width = '25%';
-    for (let i = 0; i < 5; i++) {
-      await sleep(120);
-      await ds5.calibSample();
-      bar.style.width = (25 + (i + 1) * 12) + '%';
+    let worst = null;
+    for (let pass = 1; pass <= QUICK_MAX_PASSES; pass++) {
+      const base = ((pass - 1) / QUICK_MAX_PASSES) * 100;
+      msg.innerHTML = `Passata ${pass}: calibrazione — <b>non toccare gli stick</b>…`;
+      bar.style.width = (base + 4) + '%';
+
+      await ds5.calibBegin();
+      for (let i = 0; i < QUICK_SAMPLES_PER_PASS; i++) {
+        await sleep(100);
+        await ds5.calibSample();
+        bar.style.width = (base + 4 + ((i + 1) / QUICK_SAMPLES_PER_PASS) * 18) + '%';
+      }
+      await sleep(150);
+      await ds5.calibEnd();
+
+      msg.innerHTML = `Passata ${pass}: verifica…`;
+      const result = await measureOffset();
+      bar.style.width = (base + 100 / QUICK_MAX_PASSES) + '%';
+      if (!result) break; // niente dati: lascia il giudizio al test drift finale
+      worst = Math.max(result.left.offset, result.right.offset);
+      log(`Passata ${pass}: offset residuo ${worst.toFixed(2)}%`);
+      if (worst < DRIFT_OK_MAX) break;
+      if (pass < QUICK_MAX_PASSES)
+        msg.innerHTML = `Offset residuo ${worst.toFixed(1)}% — nuova passata…`;
     }
-    await sleep(200);
-    await ds5.calibEnd();
     bar.style.width = '100%';
-    await sleep(350);
+    await sleep(300);
     closeModal('modal-quick');
     setUnsaved(true);
-    toast('Calibrazione rapida completata. Verifica con il test drift.');
+    toast(worst !== null && worst >= DRIFT_OK_MAX
+      ? `Calibrazione completata, offset residuo ${worst.toFixed(1)}%. Se persiste, prova la guidata.`
+      : 'Calibrazione rapida completata.');
     log('Calibrazione rapida completata.');
     busy = false;
     startDriftTest();
@@ -564,12 +650,13 @@ async function quickCalibrate() {
 
 /* ============================== wizard guidato ============================== */
 
-// Posizioni del bersaglio nel diagramma per i 4 angoli
+// Posizioni del bersaglio: nel diagramma (coordinate SVG) e nei mini
+// quadranti live (direzione normalizzata, ~angolo a piena corsa).
 const WIZARD_CORNERS = [
-  { label: 'in alto a sinistra', x: 26, y: 26 },
-  { label: 'in alto a destra', x: 94, y: 26 },
-  { label: 'in basso a sinistra', x: 26, y: 94 },
-  { label: 'in basso a destra', x: 94, y: 94 },
+  { label: 'in alto a sinistra', x: 26, y: 26, tx: -0.7, ty: -0.7 },
+  { label: 'in alto a destra', x: 94, y: 26, tx: 0.7, ty: -0.7 },
+  { label: 'in basso a sinistra', x: 26, y: 94, tx: -0.7, ty: 0.7 },
+  { label: 'in basso a destra', x: 94, y: 94, tx: 0.7, ty: 0.7 },
 ];
 
 let wizard = null; // { step }
@@ -588,7 +675,19 @@ function wizardShowCorner(i) {
   $('wizard-target').setAttribute('cx', c.x);
   $('wizard-target').setAttribute('cy', c.y);
   $('wizard-msg').innerHTML =
-    `Porta <b>entrambi gli stick ${c.label}</b>, poi rilasciali.<br>Quando sono tornati al centro, premi <b>Continua</b>.`;
+    `Porta <b>entrambi gli stick ${c.label}</b> (dentro l'anello tratteggiato qui sotto), poi rilasciali.<br>`
+    + 'Quando sono tornati al centro, premi <b>Continua</b>.';
+  // mini quadranti live: l'utente vede dove sta puntando davvero,
+  // anche con la calibrazione attuale sballata
+  $('wizard-live').classList.remove('hidden');
+  dialWizL.target = { x: c.tx, y: c.ty };
+  dialWizR.target = { x: c.tx, y: c.ty };
+}
+
+function wizardHideLive() {
+  $('wizard-live').classList.add('hidden');
+  dialWizL.target = null;
+  dialWizR.target = null;
 }
 
 async function wizardNext() {
@@ -615,6 +714,7 @@ async function wizardNext() {
       await ds5.calibEnd();
       busy = false;
       $('wizard-diagram').classList.add('hidden');
+      wizardHideLive();
       $('wizard-msg').innerHTML = 'Calibrazione del centro completata. Controlla il risultato con il test drift.';
       btn.textContent = 'Fine';
     } else {
@@ -640,6 +740,7 @@ function openWizard() {
   cancelDriftTest();
   wizard = { step: 0 };
   wizardSetDots(0);
+  wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
   $('wizard-msg').innerHTML = 'Questa procedura ricentra gli stick campionando la posizione di riposo dopo ogni movimento. Una volta avviata <b>non può essere annullata</b>: non chiudere la pagina e non scollegare il controller.';
   $('btn-wizard-next').textContent = 'Inizia';
@@ -663,20 +764,60 @@ async function openRange() {
   busy = true;
   dialRangeL.resetBins();
   dialRangeR.resetBins();
-  rangeSession = { startTs: performance.now() };
+  rangeSession = {
+    startTs: performance.now(),
+    stats: {
+      lx: { min: 0, max: 0 }, ly: { min: 0, max: 0 },
+      rx: { min: 0, max: 0 }, ry: { min: 0, max: 0 },
+    },
+  };
   $('btn-range-done').disabled = true;
   $('range-bar').style.width = '0%';
+  $('range-minmax').innerHTML = '<span>LX —</span><span>LY —</span><span>RX —</span><span>RY —</span>';
+  $('range-hint').textContent = 'Estremi non ancora raggiunti';
   openModal('modal-range');
 }
 
+let lastMinmax = 0;
 function updateRangeUI(ts) {
   const cov = Math.min(dialRangeL.coverage(), dialRangeR.coverage());
   const pct = Math.round(cov * 100);
   $('range-pct').textContent = `Copertura ${pct}%`;
   $('range-bar').style.width = pct + '%';
-  const f = v => (v >= 0 ? '+' : '') + v.toFixed(2);
-  $('range-vals').textContent =
-    `LX ${f(sticks.lx)} · LY ${f(sticks.ly)} · RX ${f(sticks.rx)} · RY ${f(sticks.ry)}`;
+
+  if (ts - lastMinmax > 120) {
+    lastMinmax = ts;
+    const st = rangeSession.stats;
+    // Soglia relativa al massimo osservato dello stick: con la vecchia
+    // calibrazione un bordo compresso non arriva mai a ±1.0, ma conta che
+    // l'utente l'abbia spinto a fondo, non il valore assoluto.
+    const edgeThr = stick => {
+      const axes = stick === 'l' ? [st.lx, st.ly] : [st.rx, st.ry];
+      const maxAbs = Math.max(...axes.flatMap(a => [Math.abs(a.min), Math.abs(a.max)]));
+      return maxAbs > 0.5 ? Math.max(0.5, maxAbs * 0.7) : Infinity;
+    };
+    const thrL = edgeThr('l'), thrR = edgeThr('r');
+    const f = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
+    const span = (name, s, thr) =>
+      `<span>${name} <span class="${s.min <= -thr ? 'edge-ok' : ''}">${f(s.min)}</span>…`
+      + `<span class="${s.max >= thr ? 'edge-ok' : ''}">${f(s.max)}</span></span>`;
+    $('range-minmax').innerHTML =
+      span('LX', st.lx, thrL) + span('LY', st.ly, thrL)
+      + span('RX', st.rx, thrR) + span('RY', st.ry, thrR);
+
+    const missing = [];
+    const dirs = [
+      [st.lx.min > -thrL, 'L sinistra'], [st.lx.max < thrL, 'L destra'],
+      [st.ly.min > -thrL, 'L su'], [st.ly.max < thrL, 'L giù'],
+      [st.rx.min > -thrR, 'R sinistra'], [st.rx.max < thrR, 'R destra'],
+      [st.ry.min > -thrR, 'R su'], [st.ry.max < thrR, 'R giù'],
+    ];
+    for (const [miss, label] of dirs) if (miss) missing.push(label);
+    $('range-hint').textContent = missing.length === 0
+      ? 'Tutti gli estremi raggiunti ✓'
+      : `Mancano: ${missing.join(', ')}`;
+  }
+
   const elapsed = ts - rangeSession.startTs;
   if (pct >= 100 || elapsed > RANGE_UNLOCK_MS) {
     $('btn-range-done').disabled = false;
@@ -784,3 +925,4 @@ boot();
 // Hook di sviluppo: simula la posizione degli stick senza controller.
 window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; };
 window.__senseExtractStable = extractStableSamples;
+window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
