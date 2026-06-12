@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sense Calibrator</title>
+  <meta name="description" content="Diagnostica e ricalibrazione hardware degli stick del DualSense, dal browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="#">SENSE<span>CALIBRATOR</span></a>
+  <div class="topbar-status">
+    <span id="chip-battery" class="chip hidden"></span>
+    <span id="chip-nvs" class="chip hidden" title="Stato della memoria non volatile del controller"></span>
+    <span id="chip-conn" class="chip"><i class="dot" id="conn-dot"></i><span id="chip-conn-text">Non collegato</span></span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ======================= VISTA: HERO ======================= -->
+  <section id="view-hero" class="view view-hero">
+    <h1>Ricalibra i tuoi stick.<br>Per davvero.</h1>
+    <p class="lede">Diagnostica automatica dello stick drift e ricalibrazione hardware del DualSense.
+      Nessuna installazione: tutto dal browser, direttamente nella memoria del controller.</p>
+
+    <div class="hero-cta">
+      <button id="btn-connect" class="btn btn-primary btn-lg">Collega il controller</button>
+      <p class="hint">Chrome o Edge &middot; DualSense collegato via <strong>cavo USB</strong></p>
+    </div>
+
+    <div id="hero-error" class="callout hidden" role="alert"></div>
+
+    <ol class="steps-strip" aria-label="Come funziona">
+      <li><b>1</b><span>Collega via USB</span></li>
+      <li><b>2</b><span>Test drift automatico</span></li>
+      <li><b>3</b><span>Calibrazione</span></li>
+      <li><b>4</b><span>Salva in memoria</span></li>
+    </ol>
+  </section>
+
+  <!-- ======================= VISTA: DEVICE ======================= -->
+  <section id="view-device" class="view hidden">
+
+    <div class="card device-card">
+      <div class="device-id">
+        <h2>DualSense</h2>
+        <p id="device-sub" class="device-sub">&mdash;</p>
+      </div>
+      <dl id="device-info" class="device-info"></dl>
+      <div class="device-actions">
+        <button id="btn-reboot" class="btn btn-ghost btn-sm" title="Riavvia il controller">Riavvia</button>
+        <button id="btn-disconnect" class="btn btn-ghost btn-sm">Scollega</button>
+      </div>
+    </div>
+
+    <div id="drift-card" class="card drift-card" data-state="idle">
+      <div class="drift-head">
+        <h3>Test drift</h3>
+        <button id="btn-retest" class="btn btn-secondary btn-sm">Ripeti test</button>
+      </div>
+      <p id="drift-status" class="drift-status">In attesa&hellip;</p>
+      <div id="drift-progress" class="progress hidden"><i></i></div>
+    </div>
+
+    <div class="grid-sticks">
+      <div class="card stick-card">
+        <h3>Stick sinistro</h3>
+        <canvas id="dial-l" width="240" height="240" aria-label="Posizione stick sinistro"></canvas>
+        <div class="readout">
+          <span>LX <b id="ro-lx">+0.000</b></span>
+          <span>LY <b id="ro-ly">+0.000</b></span>
+          <span>offset <b id="ro-lo">0.0%</b></span>
+        </div>
+        <div id="verdict-l" class="verdict hidden"></div>
+      </div>
+      <div class="card stick-card">
+        <h3>Stick destro</h3>
+        <canvas id="dial-r" width="240" height="240" aria-label="Posizione stick destro"></canvas>
+        <div class="readout">
+          <span>RX <b id="ro-rx">+0.000</b></span>
+          <span>RY <b id="ro-ry">+0.000</b></span>
+          <span>offset <b id="ro-ro">0.0%</b></span>
+        </div>
+        <div id="verdict-r" class="verdict hidden"></div>
+      </div>
+    </div>
+
+    <div class="card actions-card">
+      <div class="action">
+        <div>
+          <h4>Calibrazione rapida</h4>
+          <p>Ricentra gli stick automaticamente in pochi secondi. Non toccare il controller durante il processo.</p>
+        </div>
+        <button id="btn-quick" class="btn btn-primary">Avvia</button>
+      </div>
+      <div class="action">
+        <div>
+          <h4>Calibrazione guidata</h4>
+          <p>Procedura in 4 passaggi muovendo gli stick agli angoli. Pi&ugrave; accurata su drift marcati.</p>
+        </div>
+        <button id="btn-wizard" class="btn btn-secondary">Avvia</button>
+      </div>
+      <div class="action">
+        <div>
+          <h4>Calibrazione range</h4>
+          <p>Ricalibra l&rsquo;escursione massima: ruota gli stick lungo il bordo per coprire tutto il perimetro.</p>
+        </div>
+        <button id="btn-range" class="btn btn-secondary">Avvia</button>
+      </div>
+    </div>
+
+    <div id="banner-unsaved" class="banner hidden">
+      <div>
+        <b>Calibrazione attiva ma temporanea.</b>
+        <span>Si perde allo spegnimento del controller: scrivila in memoria per renderla permanente.</span>
+      </div>
+      <button id="btn-flash" class="btn btn-primary">Scrivi in memoria</button>
+    </div>
+
+    <details class="log-panel">
+      <summary>Log comandi HID</summary>
+      <pre id="log" aria-live="off"></pre>
+    </details>
+
+  </section>
+</main>
+
+<footer class="footer">
+  <span>Protocollo di calibrazione derivato da <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (GPL-3.0).</span>
+  <span>Strumento non ufficiale &middot; usalo a tuo rischio.</span>
+</footer>
+
+<!-- ======================= MODALE: OVERLAY CALIBRAZIONE RAPIDA ======================= -->
+<div id="modal-quick" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quick-title">
+  <div class="modal-panel modal-narrow">
+    <h3 id="quick-title">Calibrazione rapida</h3>
+    <p id="quick-msg">Appoggia il controller su una superficie stabile e <b>non toccare gli stick</b>.</p>
+    <div class="progress"><i id="quick-bar"></i></div>
+    <div class="modal-actions">
+      <button id="btn-quick-cancel" class="btn btn-ghost">Annulla</button>
+      <button id="btn-quick-go" class="btn btn-primary">Calibra ora</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODALE: WIZARD CENTRO ======================= -->
+<div id="modal-wizard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+  <div class="modal-panel">
+    <h3 id="wizard-title">Calibrazione guidata del centro</h3>
+    <div class="wizard-dots" id="wizard-dots" aria-hidden="true">
+      <i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="wizard-body">
+      <svg id="wizard-diagram" class="wizard-diagram hidden" viewBox="0 0 120 120" aria-hidden="true">
+        <rect x="8" y="8" width="104" height="104" rx="18" fill="none" stroke="currentColor" stroke-width="2" opacity="0.25"/>
+        <circle cx="60" cy="60" r="4" fill="currentColor" opacity="0.3"/>
+        <line id="wizard-line" x1="60" y1="60" x2="26" y2="26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <circle id="wizard-target" cx="26" cy="26" r="9" fill="currentColor"/>
+      </svg>
+      <p id="wizard-msg">Questa procedura ricentra gli stick campionando la posizione di riposo dopo ogni movimento.
+        Una volta avviata <b>non pu&ograve; essere annullata</b>: non chiudere la pagina e non scollegare il controller.</p>
+    </div>
+    <div class="modal-actions">
+      <button id="btn-wizard-cancel" class="btn btn-ghost">Annulla</button>
+      <button id="btn-wizard-next" class="btn btn-primary">Inizia</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODALE: RANGE ======================= -->
+<div id="modal-range" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="range-title">
+  <div class="modal-panel">
+    <h3 id="range-title">Calibrazione del range</h3>
+    <p id="range-msg">Il controller sta campionando. <b>Ruota lentamente entrambi gli stick</b> lungo il bordo,
+      almeno 2 giri in un senso e 2 nell&rsquo;altro.</p>
+    <div class="range-dials">
+      <canvas id="dial-range-l" width="200" height="200" aria-label="Copertura stick sinistro"></canvas>
+      <canvas id="dial-range-r" width="200" height="200" aria-label="Copertura stick destro"></canvas>
+    </div>
+    <div class="range-meta">
+      <span class="mono" id="range-vals">LX +0.00 &middot; LY +0.00 &middot; RX +0.00 &middot; RY +0.00</span>
+      <span id="range-pct">Copertura 0%</span>
+    </div>
+    <div class="progress"><i id="range-bar"></i></div>
+    <p class="hint">Se chiudi senza ruotare gli stick la calibrazione sar&agrave; incompleta e andr&agrave; ripetuta.</p>
+    <div class="modal-actions">
+      <button id="btn-range-done" class="btn btn-primary" disabled>Fine</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODALE: FLASH ======================= -->
+<div id="modal-flash" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="flash-title">
+  <div class="modal-panel modal-narrow">
+    <h3 id="flash-title">Scrivere nella memoria del controller?</h3>
+    <p>La calibrazione attuale verr&agrave; salvata <b>permanentemente</b> nella memoria non volatile (NVS) del DualSense
+      e rester&agrave; attiva su PS5, PC e ovunque.</p>
+    <p class="hint">Procedura identica a quella di dualshock-tools, collaudata su milioni di controller. In caso di dubbio
+      puoi sempre ricalibrare di nuovo.</p>
+    <div class="modal-actions">
+      <button id="btn-flash-cancel" class="btn btn-ghost">Annulla</button>
+      <button id="btn-flash-go" class="btn btn-primary">Scrivi permanentemente</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
