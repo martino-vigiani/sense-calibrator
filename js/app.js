@@ -11,7 +11,13 @@ const esc = s => String(s).replace(/[&<>"']/g, c =>
 const DRIFT_OK_MAX = 1.2;
 const DRIFT_MILD_MAX = 3.5;
 const DRIFT_TEST_MS = 2500;
-const DRIFT_TOUCH_RADIUS = 0.35; // oltre = utente sta toccando lo stick
+// Il drift è un offset (anche grande) ma stabile: per distinguerlo dal tocco
+// dell'utente si guarda l'escursione del segnale in una finestra breve,
+// mai il valore assoluto.
+const DRIFT_WINDOW = 30;        // campioni per finestra di stabilità (~120 ms)
+const DRIFT_MOVE_SPREAD = 0.08; // escursione oltre cui è movimento, non drift
+const DRIFT_MIN_STABLE = 0.4;   // frazione minima di campioni stabili
+const DRIFT_MAX_RETRIES = 2;
 
 // Calibrazione range
 const RANGE_BINS = 36;
@@ -344,7 +350,7 @@ function startDriftTest(auto = false) {
   driftTest = {
     samples: [],
     deadline: performance.now() + DRIFT_TEST_MS,
-    attempts: 0,
+    retries: 0,
     auto,
   };
   const card = $('drift-card');
@@ -357,19 +363,30 @@ function startDriftTest(auto = false) {
 }
 
 function driftSample() {
-  const r = Math.max(Math.hypot(sticks.lx, sticks.ly), Math.hypot(sticks.rx, sticks.ry));
-  if (r > DRIFT_TOUCH_RADIUS) {
-    driftTest.attempts += 1;
-    if (driftTest.attempts > 600) { // ~3 interruzioni prolungate a 250 Hz
-      finishDriftTest(null);
-      $('drift-status').textContent = 'Test annullato: stick in movimento. Appoggia il controller e premi "Ripeti test".';
-      return;
-    }
-    driftTest.samples = [];
-    driftTest.deadline = performance.now() + DRIFT_TEST_MS;
-    return;
-  }
   driftTest.samples.push({ ...sticks });
+}
+
+// Classifica ogni campione come stabile o in movimento guardando l'escursione
+// (max-min per asse) nella finestra dei DRIFT_WINDOW campioni precedenti.
+// Un drift fermo, anche enorme, è stabile; una mano sullo stick no.
+function extractStableSamples(samples) {
+  const axes = ['lx', 'ly', 'rx', 'ry'];
+  const stable = [];
+  for (let i = DRIFT_WINDOW; i < samples.length; i++) {
+    let spread = 0;
+    for (const a of axes) {
+      let min = Infinity, max = -Infinity;
+      for (let j = i - DRIFT_WINDOW; j <= i; j++) {
+        const v = samples[j][a];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      spread = Math.max(spread, max - min);
+    }
+    if (spread <= DRIFT_MOVE_SPREAD) stable.push(samples[i]);
+  }
+  const denom = samples.length - DRIFT_WINDOW;
+  return { stable, fraction: denom > 0 ? stable.length / denom : 0 };
 }
 
 function driftTick() {
@@ -379,17 +396,37 @@ function driftTick() {
   const pct = 100 - (remaining / DRIFT_TEST_MS) * 100;
   $('drift-progress').querySelector('i').style.width = pct + '%';
 
-  if (remaining <= 0 && driftTest.samples.length > 50) {
-    finishDriftTest(analyzeDrift(driftTest.samples));
+  if (remaining > 0) {
+    requestAnimationFrame(driftTick);
     return;
   }
-  if (remaining <= 0 && driftTest.samples.length <= 50) {
+
+  if (driftTest.samples.length <= 50) {
     // nessun input report: probabile problema di collegamento
     finishDriftTest(null);
     $('drift-status').textContent = 'Nessun dato dal controller. Verifica il collegamento USB.';
     return;
   }
-  requestAnimationFrame(driftTick);
+
+  const { stable, fraction } = extractStableSamples(driftTest.samples);
+
+  if (fraction < DRIFT_MIN_STABLE) {
+    if (driftTest.retries < DRIFT_MAX_RETRIES) {
+      driftTest.retries += 1;
+      driftTest.samples = [];
+      driftTest.deadline = performance.now() + DRIFT_TEST_MS;
+      $('drift-status').textContent = 'Movimento rilevato — nuovo tentativo: non toccare gli stick…';
+      requestAnimationFrame(driftTick);
+      return;
+    }
+    // Segnale in movimento continuo anche dopo i tentativi: diagnosi, non errore.
+    const result = analyzeDrift(driftTest.samples);
+    result.unstable = true;
+    finishDriftTest(result);
+    return;
+  }
+
+  finishDriftTest(analyzeDrift(stable.length > 50 ? stable : driftTest.samples));
 }
 
 function analyzeDrift(samples) {
@@ -434,14 +471,17 @@ function finishDriftTest(result) {
   const worst = Math.max(result.left.offset, result.right.offset);
   const noisy = Math.max(result.left.noise, result.right.noise) > 1.5;
   let msg;
-  if (worst < DRIFT_OK_MAX) {
+  if (result.unstable) {
+    msg = 'Stick in movimento continuo durante il test. Se non li stavi toccando, il segnale è gravemente '
+      + 'instabile (sensore usurato): la calibrazione del centro può attenuare ma non eliminare il problema.';
+  } else if (worst < DRIFT_OK_MAX) {
     msg = 'Stick centrati correttamente. Nessuna calibrazione necessaria.';
   } else if (worst < DRIFT_MILD_MAX) {
     msg = 'Rilevato drift lieve. Una calibrazione rapida dovrebbe risolverlo.';
   } else {
     msg = 'Rilevato drift marcato. Consigliata la calibrazione rapida; se non basta, usa la guidata.';
   }
-  if (noisy) msg += ' Il segnale è instabile: il potenziometro potrebbe essere usurato.';
+  if (noisy && !result.unstable) msg += ' Il segnale è instabile: il potenziometro potrebbe essere usurato.';
   if (prev && unsaved) {
     const before = Math.max(prev.left.offset, prev.right.offset);
     msg = `Offset massimo: prima ${before.toFixed(1)}% → ora ${worst.toFixed(1)}%. ` + msg;
@@ -743,3 +783,4 @@ boot();
 
 // Hook di sviluppo: simula la posizione degli stick senza controller.
 window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; };
+window.__senseExtractStable = extractStableSamples;
