@@ -814,7 +814,8 @@ function updateRangeUI(ts) {
       [st.ry.min > -thrR, 'R su'], [st.ry.max < thrR, 'R giù'],
     ];
     for (const [miss, label] of dirs) if (miss) missing.push(label);
-    $('range-hint').textContent = missing.length === 0
+    rangeSession.allEdges = missing.length === 0;
+    $('range-hint').textContent = rangeSession.allEdges
       ? 'Tutti gli estremi raggiunti ✓'
       : `Mancano: ${missing.join(', ')}`;
   }
@@ -827,7 +828,10 @@ function updateRangeUI(ts) {
 
 async function finishRange() {
   if (!ds5 || !rangeSession) return;
-  const incomplete = Math.min(dialRangeL.coverage(), dialRangeR.coverage()) < 0.97;
+  // Estremi tutti raggiunti = calibrazione valida anche se qualche settore
+  // diagonale non arriva al 100% di copertura (gate non perfettamente circolare).
+  const incomplete = rangeSession.allEdges !== true
+    && Math.min(dialRangeL.coverage(), dialRangeR.coverage()) < 0.97;
   rangeSession = null;
   try {
     await ds5.rangeEnd();

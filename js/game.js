@@ -28,8 +28,8 @@ const STEADY_SETTLE_MS = 600;      // scartati all'inizio (la mano lascia lo sti
 
 // Bersagli: posizioni fisse (centro, cardinali a piena corsa, diagonali).
 // L'ordine è deterministico così la prova è identica ogni volta.
-const TARGET_FULL = 0.92;          // piena deflessione richiesta sui bordi
-const TARGET_DIAG = 0.65;          // componente diagonale (~0.92 di modulo)
+const TARGET_FULL = 0.85;          // deflessione richiesta sui bordi
+const TARGET_DIAG = 0.6;           // componente diagonale (~0.85 di modulo)
 const TARGETS = [
   { x: 0, y: 0 },
   { x: TARGET_FULL, y: 0 },
@@ -39,18 +39,18 @@ const TARGETS = [
   { x: TARGET_DIAG, y: -TARGET_DIAG },
   { x: -TARGET_DIAG, y: TARGET_DIAG },
 ];
-const TARGET_RADIUS = 0.16;        // raggio della zona valida (in unità stick)
-const TARGET_HOLD_MS = 400;        // permanenza richiesta dentro il bersaglio
-const TARGET_TIMEOUT_MS = 6000;    // tempo massimo per acquisire un bersaglio
-const TARGET_IDEAL_MS = 900;       // tempo "perfetto" di acquisizione (per il punteggio)
+const TARGET_RADIUS = 0.22;        // raggio della zona valida (in unità stick)
+const TARGET_HOLD_MS = 350;        // permanenza richiesta dentro il bersaglio
+const TARGET_TIMEOUT_MS = 9000;    // tempo massimo per acquisire un bersaglio
+const TARGET_IDEAL_MS = 1200;      // tempo "perfetto" di acquisizione (per il punteggio)
 
 // Inseguimento: traiettoria di Lissajous fissa (passa per centro e bordi).
 const TRACK_MS = 20000;
-const TRACK_SETTLE_MS = 700;       // primo tratto escluso dal punteggio (rincorsa iniziale)
-const TRACK_AMP = 0.82;
+const TRACK_SETTLE_MS = 1000;      // primo tratto escluso dal punteggio (rincorsa iniziale)
+const TRACK_AMP = 0.78;
 const TRACK_FREQ_X = 1.0;          // giri/periodo
 const TRACK_FREQ_Y = 2.0;
-const TRACK_PERIOD_MS = 6500;      // durata di un periodo della figura
+const TRACK_PERIOD_MS = 10000;     // durata di un periodo della figura
 
 // Countdown tra prove
 const COUNTDOWN_FROM = 3;
@@ -61,7 +61,8 @@ const W_STEADY = 0.25;
 const W_TARGETS = 0.40;
 const W_TRACK = 0.35;
 
-const STORAGE_KEY = 'senseGameLastScore';
+// v2: taratura difficoltà cambiata — i punteggi v1 non sono confrontabili.
+const STORAGE_KEY = 'senseGameLastScore.v2';
 
 /* ---------------- canvas di gioco ---------------- */
 
@@ -483,8 +484,8 @@ export function initGame(deps) {
     const tp = trackPoint(elapsed);
     setProgress((elapsed / TRACK_MS) * 100);
     scene = {
-      L: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.10, locked: false } },
-      R: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.10, locked: false } },
+      L: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.14, locked: false } },
+      R: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.14, locked: false } },
     };
     if (elapsed > TRACK_SETTLE_MS) {
       phase.L.sum += dist(s.lx, s.ly, tp.x, tp.y); phase.L.n++;
