@@ -111,6 +111,13 @@
         </div>
         <button id="btn-range" class="btn btn-secondary">Avvia</button>
       </div>
+      <div class="action">
+        <div>
+          <h4>Test di precisione</h4>
+          <p>Mini-gioco di circa un minuto: fermezza, bersagli e inseguimento. Punteggio 0&ndash;100 per confrontare prima e dopo la calibrazione.</p>
+        </div>
+        <button id="btn-game" class="btn btn-secondary">Avvia</button>
+      </div>
     </div>
 
     <div id="banner-unsaved" class="banner hidden">
@@ -218,6 +225,47 @@
     <div class="modal-actions">
       <button id="btn-flash-cancel" class="btn btn-ghost">Annulla</button>
       <button id="btn-flash-go" class="btn btn-primary">Scrivi permanentemente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODALE: TEST DI PRECISIONE (GIOCO) ======================= -->
+<div id="modal-game" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="game-phase">
+  <div class="modal-panel modal-wide">
+    <div class="game-head">
+      <h3 id="game-phase">Test di precisione</h3>
+      <button id="btn-game-exit" class="btn btn-ghost btn-sm">Esci</button>
+    </div>
+    <p id="game-instr" class="game-instr">Tre prove, circa un minuto. Premi Inizia quando sei pronto.</p>
+
+    <div id="game-dials" class="game-dials">
+      <figure>
+        <canvas id="game-dial-l" width="220" height="220" aria-label="Quadrante di gioco stick sinistro"></canvas>
+        <figcaption>Sinistro</figcaption>
+      </figure>
+      <div id="game-countdown" class="game-countdown hidden" aria-hidden="true"></div>
+      <figure>
+        <canvas id="game-dial-r" width="220" height="220" aria-label="Quadrante di gioco stick destro"></canvas>
+        <figcaption>Destro</figcaption>
+      </figure>
+    </div>
+
+    <div id="game-progress" class="progress hidden"><i></i></div>
+
+    <div id="game-intro" class="game-intro">
+      <ol class="game-trials">
+        <li><b>Fermezza</b> &mdash; tieni gli stick fermi al centro.</li>
+        <li><b>Bersagli</b> &mdash; raggiungi i bersagli che appaiono, anche a piena corsa.</li>
+        <li><b>Inseguimento</b> &mdash; segui un bersaglio in movimento.</li>
+      </ol>
+      <div class="modal-actions">
+        <button id="btn-game-start" class="btn btn-primary">Inizia</button>
+      </div>
+    </div>
+
+    <div id="game-report" class="game-report hidden"></div>
+    <div id="game-report-actions" class="modal-actions hidden">
+      <button id="btn-game-retry" class="btn btn-secondary btn-sm">Ripeti il test</button>
     </div>
   </div>
 </div>

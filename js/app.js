@@ -1,6 +1,7 @@
 'use strict';
 
 import { DS5, HID_FILTERS } from './ds5.js';
+import { initGame } from './game.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -850,6 +851,7 @@ async function finishRange() {
 function openModal(id) { $(id).classList.remove('hidden'); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 function closeAllModals() {
+  game?.close(); // ferma il loop rAF del gioco, non solo la classe .hidden
   for (const m of document.querySelectorAll('.modal')) m.classList.add('hidden');
 }
 
@@ -885,6 +887,18 @@ $('btn-range-done').addEventListener('click', finishRange);
 $('btn-flash').addEventListener('click', () => openModal('modal-flash'));
 $('btn-flash-cancel').addEventListener('click', () => closeModal('modal-flash'));
 $('btn-flash-go').addEventListener('click', doFlash);
+
+// Test di precisione: il gioco legge solo gli stick (deps), nessun comando HID.
+const game = initGame({
+  getSticks: () => sticks,
+  isAvailable: () => !!ds5 && !busy,
+});
+function openGame(bypassGate = false) {
+  if (!bypassGate && (!ds5 || busy)) return;
+  cancelDriftTest(); // libera la card drift dal suo loop prima di giocare
+  game.open(bypassGate);
+}
+$('btn-game').addEventListener('click', () => openGame());
 
 // avvisa prima di chiudere la pagina con modifiche non salvate
 window.addEventListener('beforeunload', e => {
@@ -926,3 +940,6 @@ boot();
 window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; };
 window.__senseExtractStable = extractStableSamples;
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
+// Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
+// in coppia con __senseSimulate.
+window.__senseGameOpen = () => openGame(true);
