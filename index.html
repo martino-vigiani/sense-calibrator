@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sense Calibrator</title>
-  <meta name="description" content="Diagnostica e ricalibrazione hardware degli stick del DualSense, dal browser.">
+  <meta name="description" content="Diagnose and hardware-recalibrate your DualSense sticks, straight from the browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -14,8 +14,8 @@
   <a class="wordmark" href="#">SENSE<span>CALIBRATOR</span></a>
   <div class="topbar-status">
     <span id="chip-battery" class="chip hidden"></span>
-    <span id="chip-nvs" class="chip hidden" title="Stato della memoria non volatile del controller"></span>
-    <span id="chip-conn" class="chip"><i class="dot" id="conn-dot"></i><span id="chip-conn-text">Non collegato</span></span>
+    <span id="chip-nvs" class="chip hidden" title="State of the controller's non-volatile memory"></span>
+    <span id="chip-conn" class="chip"><i class="dot" id="conn-dot"></i><span id="chip-conn-text">Not connected</span></span>
   </div>
 </header>
 
@@ -23,22 +23,22 @@
 
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
-    <h1>Ricalibra i tuoi stick.<br>Per davvero.</h1>
-    <p class="lede">Diagnostica automatica dello stick drift e ricalibrazione hardware del DualSense.
-      Nessuna installazione: tutto dal browser, direttamente nella memoria del controller.</p>
+    <h1>Recalibrate your sticks.<br>For real.</h1>
+    <p class="lede">Automatic stick-drift diagnostics and hardware recalibration for the DualSense.
+      No install: all from the browser, written straight into the controller's memory.</p>
 
     <div class="hero-cta">
-      <button id="btn-connect" class="btn btn-primary btn-lg">Collega il controller</button>
-      <p class="hint">Chrome o Edge &middot; DualSense collegato via <strong>cavo USB</strong></p>
+      <button id="btn-connect" class="btn btn-primary btn-lg">Connect controller</button>
+      <p class="hint">Chrome or Edge &middot; DualSense connected via <strong>USB cable</strong></p>
     </div>
 
     <div id="hero-error" class="callout hidden" role="alert"></div>
 
-    <ol class="steps-strip" aria-label="Come funziona">
-      <li><b>1</b><span>Collega via USB</span></li>
-      <li><b>2</b><span>Test drift automatico</span></li>
-      <li><b>3</b><span>Calibrazione</span></li>
-      <li><b>4</b><span>Salva in memoria</span></li>
+    <ol class="steps-strip" aria-label="How it works">
+      <li><b>1</b><span>Connect via USB</span></li>
+      <li><b>2</b><span>Automatic drift test</span></li>
+      <li><b>3</b><span>Calibration</span></li>
+      <li><b>4</b><span>Save to memory</span></li>
     </ol>
   </section>
 
@@ -52,24 +52,24 @@
       </div>
       <dl id="device-info" class="device-info"></dl>
       <div class="device-actions">
-        <button id="btn-reboot" class="btn btn-ghost btn-sm" title="Riavvia il controller">Riavvia</button>
-        <button id="btn-disconnect" class="btn btn-ghost btn-sm">Scollega</button>
+        <button id="btn-reboot" class="btn btn-ghost btn-sm" title="Restart the controller">Restart</button>
+        <button id="btn-disconnect" class="btn btn-ghost btn-sm">Disconnect</button>
       </div>
     </div>
 
     <div id="drift-card" class="card drift-card" data-state="idle">
       <div class="drift-head">
-        <h3>Test drift</h3>
-        <button id="btn-retest" class="btn btn-secondary btn-sm">Ripeti test</button>
+        <h3>Drift test</h3>
+        <button id="btn-retest" class="btn btn-secondary btn-sm">Run again</button>
       </div>
-      <p id="drift-status" class="drift-status">In attesa&hellip;</p>
+      <p id="drift-status" class="drift-status">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden"><i></i></div>
     </div>
 
     <div class="grid-sticks">
       <div class="card stick-card">
-        <h3>Stick sinistro</h3>
-        <canvas id="dial-l" width="240" height="240" aria-label="Posizione stick sinistro"></canvas>
+        <h3>Left stick</h3>
+        <canvas id="dial-l" width="240" height="240" aria-label="Left stick position"></canvas>
         <div class="readout">
           <span>LX <b id="ro-lx">+0.000</b></span>
           <span>LY <b id="ro-ly">+0.000</b></span>
@@ -78,8 +78,8 @@
         <div id="verdict-l" class="verdict hidden"></div>
       </div>
       <div class="card stick-card">
-        <h3>Stick destro</h3>
-        <canvas id="dial-r" width="240" height="240" aria-label="Posizione stick destro"></canvas>
+        <h3>Right stick</h3>
+        <canvas id="dial-r" width="240" height="240" aria-label="Right stick position"></canvas>
         <div class="readout">
           <span>RX <b id="ro-rx">+0.000</b></span>
           <span>RY <b id="ro-ry">+0.000</b></span>
@@ -92,44 +92,44 @@
     <div class="card actions-card">
       <div class="action">
         <div>
-          <h4>Calibrazione rapida</h4>
-          <p>Ricentra gli stick automaticamente in pochi secondi. Non toccare il controller durante il processo.</p>
+          <h4>Quick calibration</h4>
+          <p>Re-centers the sticks automatically in a few seconds. Don't touch the controller during the process.</p>
         </div>
-        <button id="btn-quick" class="btn btn-primary">Avvia</button>
+        <button id="btn-quick" class="btn btn-primary">Start</button>
       </div>
       <div class="action">
         <div>
-          <h4>Calibrazione guidata</h4>
-          <p>Procedura in 4 passaggi muovendo gli stick agli angoli. Pi&ugrave; accurata su drift marcati.</p>
+          <h4>Guided calibration</h4>
+          <p>A 4-step procedure moving the sticks to the corners. More accurate on marked drift.</p>
         </div>
-        <button id="btn-wizard" class="btn btn-secondary">Avvia</button>
+        <button id="btn-wizard" class="btn btn-secondary">Start</button>
       </div>
       <div class="action">
         <div>
-          <h4>Calibrazione range</h4>
-          <p>Ricalibra l&rsquo;escursione massima: ruota gli stick lungo il bordo per coprire tutto il perimetro.</p>
+          <h4>Range calibration</h4>
+          <p>Recalibrates the maximum travel: rotate the sticks along the edge to cover the whole perimeter.</p>
         </div>
-        <button id="btn-range" class="btn btn-secondary">Avvia</button>
+        <button id="btn-range" class="btn btn-secondary">Start</button>
       </div>
       <div class="action">
         <div>
-          <h4>Test di precisione</h4>
-          <p>Mini-gioco di circa un minuto: fermezza, bersagli e inseguimento. Punteggio 0&ndash;100 per confrontare prima e dopo la calibrazione.</p>
+          <h4>Precision test</h4>
+          <p>A roughly one-minute mini-game: steadiness, targets and tracking. Score 0&ndash;100 to compare before and after calibration.</p>
         </div>
-        <button id="btn-game" class="btn btn-secondary">Avvia</button>
+        <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
     </div>
 
     <div id="banner-unsaved" class="banner hidden">
       <div>
-        <b>Calibrazione attiva ma temporanea.</b>
-        <span>Si perde allo spegnimento del controller: scrivila in memoria per renderla permanente.</span>
+        <b>Calibration active but temporary.</b>
+        <span>It's lost when the controller powers off: write it to memory to make it permanent.</span>
       </div>
-      <button id="btn-flash" class="btn btn-primary">Scrivi in memoria</button>
+      <button id="btn-flash" class="btn btn-primary">Write to memory</button>
     </div>
 
     <details class="log-panel">
-      <summary>Log comandi HID</summary>
+      <summary>HID command log</summary>
       <pre id="log" aria-live="off"></pre>
     </details>
 
@@ -137,19 +137,19 @@
 </main>
 
 <footer class="footer">
-  <span>Protocollo di calibrazione derivato da <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (GPL-3.0).</span>
-  <span>Strumento non ufficiale &middot; usalo a tuo rischio.</span>
+  <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
+  <span>Unofficial tool &middot; use at your own risk.</span>
 </footer>
 
 <!-- ======================= MODALE: OVERLAY CALIBRAZIONE RAPIDA ======================= -->
 <div id="modal-quick" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quick-title">
   <div class="modal-panel modal-narrow">
-    <h3 id="quick-title">Calibrazione rapida</h3>
-    <p id="quick-msg">Appoggia il controller su una superficie stabile e <b>non toccare gli stick</b>.</p>
+    <h3 id="quick-title">Quick calibration</h3>
+    <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <div class="progress"><i id="quick-bar"></i></div>
     <div class="modal-actions">
-      <button id="btn-quick-cancel" class="btn btn-ghost">Annulla</button>
-      <button id="btn-quick-go" class="btn btn-primary">Calibra ora</button>
+      <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-quick-go" class="btn btn-primary">Calibrate now</button>
     </div>
   </div>
 </div>
@@ -157,7 +157,7 @@
 <!-- ======================= MODALE: WIZARD CENTRO ======================= -->
 <div id="modal-wizard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
   <div class="modal-panel">
-    <h3 id="wizard-title">Calibrazione guidata del centro</h3>
+    <h3 id="wizard-title">Guided center calibration</h3>
     <div class="wizard-dots" id="wizard-dots" aria-hidden="true">
       <i></i><i></i><i></i><i></i><i></i><i></i>
     </div>
@@ -168,22 +168,22 @@
         <line id="wizard-line" x1="60" y1="60" x2="26" y2="26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
         <circle id="wizard-target" cx="26" cy="26" r="9" fill="currentColor"/>
       </svg>
-      <p id="wizard-msg">Questa procedura ricentra gli stick campionando la posizione di riposo dopo ogni movimento.
-        Una volta avviata <b>non pu&ograve; essere annullata</b>: non chiudere la pagina e non scollegare il controller.</p>
+      <p id="wizard-msg">This procedure re-centers the sticks by sampling their resting position after each movement.
+        Once started it <b>cannot be cancelled</b>: don't close the page and don't disconnect the controller.</p>
     </div>
     <div id="wizard-live" class="wizard-live hidden">
       <figure>
-        <canvas id="dial-wiz-l" width="110" height="110" aria-label="Posizione live stick sinistro"></canvas>
-        <figcaption>Sinistro</figcaption>
+        <canvas id="dial-wiz-l" width="110" height="110" aria-label="Live left stick position"></canvas>
+        <figcaption>Left</figcaption>
       </figure>
       <figure>
-        <canvas id="dial-wiz-r" width="110" height="110" aria-label="Posizione live stick destro"></canvas>
-        <figcaption>Destro</figcaption>
+        <canvas id="dial-wiz-r" width="110" height="110" aria-label="Live right stick position"></canvas>
+        <figcaption>Right</figcaption>
       </figure>
     </div>
     <div class="modal-actions">
-      <button id="btn-wizard-cancel" class="btn btn-ghost">Annulla</button>
-      <button id="btn-wizard-next" class="btn btn-primary">Inizia</button>
+      <button id="btn-wizard-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-wizard-next" class="btn btn-primary">Start</button>
     </div>
   </div>
 </div>
@@ -191,25 +191,25 @@
 <!-- ======================= MODALE: RANGE ======================= -->
 <div id="modal-range" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="range-title">
   <div class="modal-panel">
-    <h3 id="range-title">Calibrazione del range</h3>
-    <p id="range-msg">Il controller sta campionando. <b>Ruota lentamente entrambi gli stick premendoli a fondo
-      contro il bordo</b>, almeno 2 giri in un senso e 2 nell&rsquo;altro. Insisti sulle zone dove il tracciato
-      resta corto.</p>
+    <h3 id="range-title">Range calibration</h3>
+    <p id="range-msg">The controller is sampling. <b>Slowly rotate both sticks while pressing them all the way
+      against the edge</b>, at least 2 turns one way and 2 the other. Keep working the areas where the trace
+      stays short.</p>
     <div class="range-dials">
-      <canvas id="dial-range-l" width="200" height="200" aria-label="Copertura stick sinistro"></canvas>
-      <canvas id="dial-range-r" width="200" height="200" aria-label="Copertura stick destro"></canvas>
+      <canvas id="dial-range-l" width="200" height="200" aria-label="Left stick coverage"></canvas>
+      <canvas id="dial-range-r" width="200" height="200" aria-label="Right stick coverage"></canvas>
     </div>
     <div class="range-minmax mono" id="range-minmax">
       <span>LX &mdash;</span><span>LY &mdash;</span><span>RX &mdash;</span><span>RY &mdash;</span>
     </div>
     <div class="range-meta">
-      <span id="range-hint" class="range-hint">Estremi non ancora raggiunti</span>
-      <span id="range-pct">Copertura 0%</span>
+      <span id="range-hint" class="range-hint">Extremes not reached yet</span>
+      <span id="range-pct">Coverage 0%</span>
     </div>
     <div class="progress"><i id="range-bar"></i></div>
-    <p class="hint">Se chiudi senza ruotare gli stick la calibrazione sar&agrave; incompleta e andr&agrave; ripetuta.</p>
+    <p class="hint">If you close without rotating the sticks the calibration will be incomplete and will have to be repeated.</p>
     <div class="modal-actions">
-      <button id="btn-range-done" class="btn btn-primary" disabled>Fine</button>
+      <button id="btn-range-done" class="btn btn-primary" disabled>Done</button>
     </div>
   </div>
 </div>
@@ -217,14 +217,14 @@
 <!-- ======================= MODALE: FLASH ======================= -->
 <div id="modal-flash" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="flash-title">
   <div class="modal-panel modal-narrow">
-    <h3 id="flash-title">Scrivere nella memoria del controller?</h3>
-    <p>La calibrazione attuale verr&agrave; salvata <b>permanentemente</b> nella memoria non volatile (NVS) del DualSense
-      e rester&agrave; attiva su PS5, PC e ovunque.</p>
-    <p class="hint">Procedura identica a quella di dualshock-tools, collaudata su milioni di controller. In caso di dubbio
-      puoi sempre ricalibrare di nuovo.</p>
+    <h3 id="flash-title">Write to the controller's memory?</h3>
+    <p>The current calibration will be saved <b>permanently</b> in the DualSense's non-volatile memory (NVS)
+      and will stay active on PS5, PC and everywhere.</p>
+    <p class="hint">Identical procedure to dualshock-tools', proven on millions of controllers. If in doubt
+      you can always recalibrate again.</p>
     <div class="modal-actions">
-      <button id="btn-flash-cancel" class="btn btn-ghost">Annulla</button>
-      <button id="btn-flash-go" class="btn btn-primary">Scrivi permanentemente</button>
+      <button id="btn-flash-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-flash-go" class="btn btn-primary">Write permanently</button>
     </div>
   </div>
 </div>
@@ -233,20 +233,20 @@
 <div id="modal-game" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="game-phase">
   <div class="modal-panel modal-wide">
     <div class="game-head">
-      <h3 id="game-phase">Test di precisione</h3>
-      <button id="btn-game-exit" class="btn btn-ghost btn-sm">Esci</button>
+      <h3 id="game-phase">Precision test</h3>
+      <button id="btn-game-exit" class="btn btn-ghost btn-sm">Exit</button>
     </div>
-    <p id="game-instr" class="game-instr">Tre prove, circa un minuto. Premi Inizia quando sei pronto.</p>
+    <p id="game-instr" class="game-instr">Three trials, about a minute. Press Start when you're ready.</p>
 
     <div id="game-dials" class="game-dials">
       <figure>
-        <canvas id="game-dial-l" width="220" height="220" aria-label="Quadrante di gioco stick sinistro"></canvas>
-        <figcaption>Sinistro</figcaption>
+        <canvas id="game-dial-l" width="220" height="220" aria-label="Left stick game dial"></canvas>
+        <figcaption>Left</figcaption>
       </figure>
       <div id="game-countdown" class="game-countdown hidden" aria-hidden="true"></div>
       <figure>
-        <canvas id="game-dial-r" width="220" height="220" aria-label="Quadrante di gioco stick destro"></canvas>
-        <figcaption>Destro</figcaption>
+        <canvas id="game-dial-r" width="220" height="220" aria-label="Right stick game dial"></canvas>
+        <figcaption>Right</figcaption>
       </figure>
     </div>
 
@@ -254,18 +254,18 @@
 
     <div id="game-intro" class="game-intro">
       <ol class="game-trials">
-        <li><b>Fermezza</b> &mdash; tieni gli stick fermi al centro.</li>
-        <li><b>Bersagli</b> &mdash; raggiungi i bersagli che appaiono, anche a piena corsa.</li>
-        <li><b>Inseguimento</b> &mdash; segui un bersaglio in movimento.</li>
+        <li><b>Steadiness</b> &mdash; hold the sticks still at the center.</li>
+        <li><b>Targets</b> &mdash; reach the targets that appear, even at full travel.</li>
+        <li><b>Tracking</b> &mdash; follow a moving target.</li>
       </ol>
       <div class="modal-actions">
-        <button id="btn-game-start" class="btn btn-primary">Inizia</button>
+        <button id="btn-game-start" class="btn btn-primary">Start</button>
       </div>
     </div>
 
     <div id="game-report" class="game-report hidden"></div>
     <div id="game-report-actions" class="modal-actions hidden">
-      <button id="btn-game-retry" class="btn btn-secondary btn-sm">Ripeti il test</button>
+      <button id="btn-game-retry" class="btn btn-secondary btn-sm">Run test again</button>
     </div>
   </div>
 </div>

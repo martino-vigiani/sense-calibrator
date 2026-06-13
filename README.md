@@ -25,8 +25,8 @@ Diagnose and hardware-recalibrate the analog sticks of a drifting **PS5 DualSens
 
 2. Open `http://localhost:8000` in **Chrome** or **Edge** (Safari and Firefox do not support WebHID).
 3. Connect the DualSense over a **USB cable** (Bluetooth is not supported for calibration).
-4. Click **Connect controller** (button labeled "Collega il controller"); the drift test runs on its own.
-5. Calibrate if needed. When you are satisfied, click **Write to memory** ("Scrivi in memoria") to make the fix permanent.
+4. Click **Connect controller**; the drift test runs on its own.
+5. Calibrate if needed. When you are satisfied, click **Write to memory** to make the fix permanent.
 
 ## Technical notes
 

@@ -1,8 +1,8 @@
-# How the New SOTA Model [Fable 5](https://www.anthropic.com/claude/fable) Saved Me $60 in 30 Minutes
+# How the New SOTA Model [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5) Saved Me $60 in 30 Minutes
 
 *Fixing my PS5 DualSense stick drift for good, with a browser tool I built instead of buying a new controller.*
 
-My DualSense developed stick drift, and the right stick was the giveaway. I play FC 26, and out of nowhere my players started pulling off skill moves I never asked for, wrecking the flow of every match. The right stick is what triggers skills, and it was reporting a small constant offset at rest, so the game read that phantom tilt as a deliberate flick. I tried the usual software fixes everyone recommends. None of them actually solved it for me. So I did the thing an 18-year-old developer with a Claude Max subscription does: I used [Fable 5](https://www.anthropic.com/claude/fable), Anthropic's new state-of-the-art model, to build my own tool. It is called Sense Calibrator, it runs entirely in a browser, and it writes a permanent fix directly into the controller.
+My DualSense developed stick drift, and the right stick was the giveaway. I play FC 26, and out of nowhere my players started pulling off skill moves I never asked for, wrecking the flow of every match. The right stick is what triggers skills, and it was reporting a small constant offset at rest, so the game read that phantom tilt as a deliberate flick. I tried the usual software fixes everyone recommends. None of them actually solved it for me. So I did the thing an 18-year-old developer with a Claude Max subscription does: I used [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5), Anthropic's new state-of-the-art model, to build my own tool. It is called Sense Calibrator, it runs entirely in a browser, and it writes a permanent fix directly into the controller.
 
 This is how it came together, how it works, and why the result is actually better than anything I tried first.
 
@@ -28,9 +28,9 @@ The open-source community reverse-engineered the calibration command sequence ye
 
 So why build a second tool? Because dualshock-tools drops a non-technical user onto a dashboard of raw controls with no guided flow. The single most common failure in community threads is Bluetooth-versus-USB confusion: WebHID needs a wired connection, most people pair wirelessly by default, and the tool does not stop them or explain it in a way they understand. People also see an "NVS status: 0x03030201" readout and a manual command console, get intimidated, and give up. The protocol was solved. The experience was not. I wanted something my own non-technical self could hand to anyone.
 
-## What I had [Fable 5](https://www.anthropic.com/claude/fable) build
+## What I had [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5) build
 
-I built the whole tool with Anthropic's [Fable 5](https://www.anthropic.com/claude/fable) model. What surprised me was the actual calibration and diagnostic logic. It is more thoughtful than I expected going in. A few pieces are worth walking through.
+I built the whole tool with Anthropic's [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5) model. What surprised me was the actual calibration and diagnostic logic. It is more thoughtful than I expected going in. A few pieces are worth walking through.
 
 ### Drift detection by stability, not by offset
 
@@ -60,7 +60,7 @@ The safety net is simple by design: everything you do lives in RAM until that fi
 
 ### A precision mini-game to prove it worked
 
-Calibration is worthless if you cannot tell whether it helped. So there is an optional 60-second precision test that produces a reproducible 0 to 100 score, meant to be run before and after. It never sends any HID commands, it only reads stick position. Three trials: Fermezza measures how still the stick sits when untouched, Bersagli scores how fast and cleanly both sticks hit seven fixed targets, and Inseguimento has both sticks trace a Lissajous curve while measuring tracking error. The scoring is deterministic, so the same performance always yields the same number, and the previous score is stored and shown as a delta. I ran it before and after on my own controller and watched the number climb, which is a much more satisfying confirmation than "feels better now I guess".
+Calibration is worthless if you cannot tell whether it helped. So there is an optional 60-second precision test that produces a reproducible 0 to 100 score, meant to be run before and after. It never sends any HID commands, it only reads stick position. Three trials: Steadiness measures how still the stick sits when untouched, Targets scores how fast and cleanly both sticks hit seven fixed targets, and Tracking has both sticks trace a Lissajous curve while measuring tracking error. The scoring is deterministic, so the same performance always yields the same number, and the previous score is stored and shown as a delta. I ran it before and after on my own controller and watched the number climb, which is a much more satisfying confirmation than "feels better now I guess".
 
 > _[screenshot placeholder: drift test result, two stick dials with the offset and verdict, capture with a real DualSense connected]_
 
@@ -74,7 +74,7 @@ Calibration is worthless if you cannot tell whether it helped. So there is an op
 
 ## The economics
 
-This is the part I find quietly satisfying. I built the entire thing on the single Claude Max plan I already pay 200 USD a month for, and it came together in about half an hour of back and forth. According to my recorded usage, it took roughly 30 percent of the 5-hour rolling limit and under 10 percent of the weekly limit, all at medium reasoning effort. ([Fable 5](https://www.anthropic.com/claude/fable) is documented in its [system card](https://anthropic.com/claude-fable-5-mythos-5-system-card) if you want the model details.)
+This is the part I find quietly satisfying. I built the entire thing on the single Claude Max plan I already pay 200 USD a month for, and it came together in about half an hour of back and forth. According to my recorded usage, it took roughly 30 percent of the 5-hour rolling limit and under 10 percent of the weekly limit, all at medium reasoning effort. ([Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5) is documented in its [system card](https://anthropic.com/claude-fable-5-mythos-5-system-card) if you want the model details.)
 
 So the real cost was a few dollars of usage out of a budget I had already spent, against a new standard DualSense, which runs about 60 to 75 dollars (75 euros at EU list price, often near 55 on sale). And a new controller is a worse deal than it looks: it fixes one controller, once, until that one drifts too. What I got instead was a permanent cross-platform fix on the controller I already own, plus a reusable open-source tool I can point anyone at the next time a stick goes bad.
 

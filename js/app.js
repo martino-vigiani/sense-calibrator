@@ -225,7 +225,7 @@ requestAnimationFrame(frame);
 function setConnChip(connected) {
   $('conn-dot').classList.toggle('on', connected);
   $('chip-conn').classList.toggle('chip-on', connected);
-  $('chip-conn-text').textContent = connected ? 'Collegato · USB' : 'Non collegato';
+  $('chip-conn-text').textContent = connected ? 'Connected · USB' : 'Not connected';
 }
 
 function showHeroError(html) {
@@ -238,9 +238,9 @@ function setNvChip(nv) {
   const el = $('chip-nvs');
   el.classList.remove('hidden', 'chip-warn', 'chip-on');
   if (!nv) { el.classList.add('hidden'); return; }
-  if (nv.status === 'locked') { el.textContent = 'NVS protetta'; el.classList.add('chip-on'); }
-  else if (nv.status === 'unlocked') { el.textContent = 'NVS sbloccata'; el.classList.add('chip-warn'); }
-  else if (nv.status === 'pending_reboot') { el.textContent = 'Riavvio richiesto'; el.classList.add('chip-warn'); }
+  if (nv.status === 'locked') { el.textContent = 'NVS protected'; el.classList.add('chip-on'); }
+  else if (nv.status === 'unlocked') { el.textContent = 'NVS unlocked'; el.classList.add('chip-warn'); }
+  else if (nv.status === 'pending_reboot') { el.textContent = 'Restart required'; el.classList.add('chip-warn'); }
   else el.textContent = 'NVS ?';
 }
 
@@ -248,7 +248,7 @@ function setBatteryChip() {
   const el = $('chip-battery');
   if (!battery) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  el.textContent = battery.charging ? `In carica · ${battery.level}%` : `Batteria ${battery.level}%`;
+  el.textContent = battery.charging ? `Charging · ${battery.level}%` : `Battery ${battery.level}%`;
 }
 
 async function refreshNv() {
@@ -260,7 +260,7 @@ async function refreshNv() {
 
 async function connect() {
   if (!navigator.hid) {
-    showHeroError('<b>WebHID non disponibile.</b> Usa Chrome o Edge: Safari e Firefox non supportano l’accesso ai dispositivi HID.');
+    showHeroError('<b>WebHID not available.</b> Use Chrome or Edge: Safari and Firefox don’t support access to HID devices.');
     return;
   }
   try {
@@ -268,8 +268,8 @@ async function connect() {
     if (devices.length === 0) return;
     await adopt(devices[0]);
   } catch (error) {
-    showHeroError(`<b>Connessione fallita.</b> ${esc(error.message || error)}`);
-    log(`Errore connessione: ${error.message || error}`);
+    showHeroError(`<b>Connection failed.</b> ${esc(error.message || error)}`);
+    log(`Connection error: ${error.message || error}`);
   }
 }
 
@@ -279,12 +279,12 @@ async function adopt(device) {
 
   if (candidate.isBluetooth()) {
     await candidate.close();
-    showHeroError('<b>Controller in Bluetooth.</b> La calibrazione richiede il collegamento via <b>cavo USB</b>: collegalo e riprova.');
+    showHeroError('<b>Controller on Bluetooth.</b> Calibration requires a <b>USB cable</b> connection: plug it in and try again.');
     return;
   }
 
   ds5 = candidate;
-  log(`Collegato: ${device.productName}`);
+  log(`Connected: ${device.productName}`);
   setConnChip(true);
 
   device.oninputreport = onInputReport;
@@ -303,12 +303,12 @@ async function adopt(device) {
 }
 
 function renderDeviceInfo(info) {
-  $('device-sub').textContent = info.serial || 'numero di serie non disponibile';
+  $('device-sub').textContent = info.serial || 'serial number not available';
   const rows = [];
-  if (info.color) rows.push(['Colore', info.color]);
-  if (info.board) rows.push(['Scheda', info.board]);
+  if (info.color) rows.push(['Color', info.color]);
+  if (info.board) rows.push(['Board', info.board]);
   if (info.buildDate) rows.push(['Firmware', info.buildDate]);
-  if (info.fwversion) rows.push(['Versione', '0x' + info.fwversion.toString(16)]);
+  if (info.fwversion) rows.push(['Version', '0x' + info.fwversion.toString(16)]);
   $('device-info').innerHTML = rows
     .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
     .join('');
@@ -337,7 +337,7 @@ async function disconnect() {
     await d.close().catch(() => {});
   }
   teardown();
-  log('Scollegato.');
+  log('Disconnected.');
 }
 
 /* ============================== input report ============================== */
@@ -381,7 +381,7 @@ function cancelDriftTest() {
   driftTest = null;
   $('drift-card').dataset.state = 'idle';
   $('drift-progress').classList.add('hidden');
-  $('drift-status').textContent = 'In attesa…';
+  $('drift-status').textContent = 'Waiting…';
 }
 
 function startDriftTest(auto = false) {
@@ -394,7 +394,7 @@ function startDriftTest(auto = false) {
   };
   const card = $('drift-card');
   card.dataset.state = 'testing';
-  $('drift-status').textContent = 'Test in corso — non toccare gli stick…';
+  $('drift-status').textContent = 'Test running — don’t touch the sticks…';
   $('drift-progress').classList.remove('hidden');
   $('verdict-l').classList.add('hidden');
   $('verdict-r').classList.add('hidden');
@@ -443,7 +443,7 @@ function driftTick() {
   if (driftTest.samples.length <= 50) {
     // nessun input report: probabile problema di collegamento
     finishDriftTest(null);
-    $('drift-status').textContent = 'Nessun dato dal controller. Verifica il collegamento USB.';
+    $('drift-status').textContent = 'No data from the controller. Check the USB connection.';
     return;
   }
 
@@ -459,7 +459,7 @@ function driftTick() {
       driftTest.retries += 1;
       driftTest.samples = [];
       driftTest.deadline = performance.now() + DRIFT_TEST_MS;
-      $('drift-status').textContent = 'Movimento rilevato — nuovo tentativo: non toccare gli stick…';
+      $('drift-status').textContent = 'Movement detected — retrying: don’t touch the sticks…';
       requestAnimationFrame(driftTick);
       return;
     }
@@ -495,9 +495,9 @@ function analyzeDrift(samples) {
 }
 
 function verdictFor(stick) {
-  if (stick.offset < DRIFT_OK_MAX) return { cls: 'v-ok', label: `Centrato · ${stick.offset.toFixed(1)}%` };
-  if (stick.offset < DRIFT_MILD_MAX) return { cls: 'v-mild', label: `Drift lieve · ${stick.offset.toFixed(1)}%` };
-  return { cls: 'v-bad', label: `Drift marcato · ${stick.offset.toFixed(1)}%` };
+  if (stick.offset < DRIFT_OK_MAX) return { cls: 'v-ok', label: `Centered · ${stick.offset.toFixed(1)}%` };
+  if (stick.offset < DRIFT_MILD_MAX) return { cls: 'v-mild', label: `Mild drift · ${stick.offset.toFixed(1)}%` };
+  return { cls: 'v-bad', label: `Marked drift · ${stick.offset.toFixed(1)}%` };
 }
 
 let lastDriftResult = null;
@@ -518,7 +518,7 @@ function finishDriftTest(result) {
     const badge = $(el);
     badge.className = `verdict ${v.cls}`;
     badge.textContent = v.label;
-    badge.title = `x ${(r.x * 100).toFixed(1)}% · y ${(r.y * 100).toFixed(1)}% · rumore ${r.noise.toFixed(1)}%`;
+    badge.title = `x ${(r.x * 100).toFixed(1)}% · y ${(r.y * 100).toFixed(1)}% · noise ${r.noise.toFixed(1)}%`;
     badge.classList.remove('hidden');
   }
 
@@ -526,19 +526,19 @@ function finishDriftTest(result) {
   const noisy = Math.max(result.left.noise, result.right.noise) > 1.5;
   let msg;
   if (result.unstable) {
-    msg = 'Stick in movimento continuo durante il test. Se non li stavi toccando, il segnale è gravemente '
-      + 'instabile (sensore usurato): la calibrazione del centro può attenuare ma non eliminare il problema.';
+    msg = 'Sticks moving continuously during the test. If you weren’t touching them, the signal is severely '
+      + 'unstable (worn sensor): center calibration can reduce but not eliminate the problem.';
   } else if (worst < DRIFT_OK_MAX) {
-    msg = 'Stick centrati correttamente. Nessuna calibrazione necessaria.';
+    msg = 'Sticks correctly centered. No calibration needed.';
   } else if (worst < DRIFT_MILD_MAX) {
-    msg = 'Rilevato drift lieve. Una calibrazione rapida dovrebbe risolverlo.';
+    msg = 'Mild drift detected. A quick calibration should fix it.';
   } else {
-    msg = 'Rilevato drift marcato. Consigliata la calibrazione rapida; se non basta, usa la guidata.';
+    msg = 'Marked drift detected. Quick calibration recommended; if that’s not enough, use the guided one.';
   }
-  if (noisy && !result.unstable) msg += ' Il segnale è instabile: il potenziometro potrebbe essere usurato.';
+  if (noisy && !result.unstable) msg += ' The signal is unstable: the potentiometer may be worn.';
   if (prev && unsaved) {
     const before = Math.max(prev.left.offset, prev.right.offset);
-    msg = `Offset massimo: prima ${before.toFixed(1)}% → ora ${worst.toFixed(1)}%. ` + msg;
+    msg = `Max offset: before ${before.toFixed(1)}% → now ${worst.toFixed(1)}%. ` + msg;
   }
   $('drift-status').textContent = msg;
 }
@@ -559,14 +559,14 @@ async function doFlash() {
     const nv = await refreshNv();
     setUnsaved(false);
     if (nv?.status === 'pending_reboot') {
-      toast('Salvato. Il controller richiede un riavvio: usa il pulsante "Riavvia".', 5000);
+      toast('Saved. The controller needs a restart: use the "Restart" button.', 5000);
     } else {
-      toast('Calibrazione salvata permanentemente nel controller.');
+      toast('Calibration saved permanently to the controller.');
     }
-    log('Flash completato.');
+    log('Flash complete.');
   } catch (error) {
-    toast(`Errore durante il salvataggio: ${error.message}`, 5000);
-    log(`Errore flash: ${error.message}`);
+    toast(`Error while saving: ${error.message}`, 5000);
+    log(`Flash error: ${error.message}`);
   } finally {
     busy = false;
   }
@@ -604,7 +604,7 @@ async function quickCalibrate() {
     let worst = null;
     for (let pass = 1; pass <= QUICK_MAX_PASSES; pass++) {
       const base = ((pass - 1) / QUICK_MAX_PASSES) * 100;
-      msg.innerHTML = `Passata ${pass}: calibrazione — <b>non toccare gli stick</b>…`;
+      msg.innerHTML = `Pass ${pass}: calibrating — <b>don’t touch the sticks</b>…`;
       bar.style.width = (base + 4) + '%';
 
       await ds5.calibBegin();
@@ -616,36 +616,36 @@ async function quickCalibrate() {
       await sleep(150);
       await ds5.calibEnd();
 
-      msg.innerHTML = `Passata ${pass}: verifica…`;
+      msg.innerHTML = `Pass ${pass}: verifying…`;
       const result = await measureOffset();
       bar.style.width = (base + 100 / QUICK_MAX_PASSES) + '%';
       if (!result) break; // niente dati: lascia il giudizio al test drift finale
       worst = Math.max(result.left.offset, result.right.offset);
-      log(`Passata ${pass}: offset residuo ${worst.toFixed(2)}%`);
+      log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (worst < DRIFT_OK_MAX) break;
       if (pass < QUICK_MAX_PASSES)
-        msg.innerHTML = `Offset residuo ${worst.toFixed(1)}% — nuova passata…`;
+        msg.innerHTML = `Residual offset ${worst.toFixed(1)}% — new pass…`;
     }
     bar.style.width = '100%';
     await sleep(300);
     closeModal('modal-quick');
     setUnsaved(true);
     toast(worst !== null && worst >= DRIFT_OK_MAX
-      ? `Calibrazione completata, offset residuo ${worst.toFixed(1)}%. Se persiste, prova la guidata.`
-      : 'Calibrazione rapida completata.');
-    log('Calibrazione rapida completata.');
+      ? `Calibration complete, residual offset ${worst.toFixed(1)}%. If it persists, try the guided one.`
+      : 'Quick calibration complete.');
+    log('Quick calibration complete.');
     busy = false;
     startDriftTest();
   } catch (error) {
     busy = false;
     closeModal('modal-quick');
-    toast(`Calibrazione fallita: ${error.message}`, 5000);
-    log(`Errore calibrazione rapida: ${error.message}`);
+    toast(`Calibration failed: ${error.message}`, 5000);
+    log(`Quick calibration error: ${error.message}`);
   } finally {
     $('btn-quick-go').disabled = false;
     $('btn-quick-cancel').disabled = false;
     bar.style.width = '0%';
-    msg.innerHTML = 'Appoggia il controller su una superficie stabile e <b>non toccare gli stick</b>.';
+    msg.innerHTML = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
   }
 }
 
@@ -654,10 +654,10 @@ async function quickCalibrate() {
 // Posizioni del bersaglio: nel diagramma (coordinate SVG) e nei mini
 // quadranti live (direzione normalizzata, ~angolo a piena corsa).
 const WIZARD_CORNERS = [
-  { label: 'in alto a sinistra', x: 26, y: 26, tx: -0.7, ty: -0.7 },
-  { label: 'in alto a destra', x: 94, y: 26, tx: 0.7, ty: -0.7 },
-  { label: 'in basso a sinistra', x: 26, y: 94, tx: -0.7, ty: 0.7 },
-  { label: 'in basso a destra', x: 94, y: 94, tx: 0.7, ty: 0.7 },
+  { label: 'to the top left', x: 26, y: 26, tx: -0.7, ty: -0.7 },
+  { label: 'to the top right', x: 94, y: 26, tx: 0.7, ty: -0.7 },
+  { label: 'to the bottom left', x: 26, y: 94, tx: -0.7, ty: 0.7 },
+  { label: 'to the bottom right', x: 94, y: 94, tx: 0.7, ty: 0.7 },
 ];
 
 let wizard = null; // { step }
@@ -676,8 +676,8 @@ function wizardShowCorner(i) {
   $('wizard-target').setAttribute('cx', c.x);
   $('wizard-target').setAttribute('cy', c.y);
   $('wizard-msg').innerHTML =
-    `Porta <b>entrambi gli stick ${c.label}</b> (dentro l'anello tratteggiato qui sotto), poi rilasciali.<br>`
-    + 'Quando sono tornati al centro, premi <b>Continua</b>.';
+    `Move <b>both sticks ${c.label}</b> (inside the dashed ring below), then release them.<br>`
+    + 'When they’ve returned to the center, press <b>Continue</b>.';
   // mini quadranti live: l'utente vede dove sta puntando davvero,
   // anche con la calibrazione attuale sballata
   $('wizard-live').classList.remove('hidden');
@@ -702,7 +702,7 @@ async function wizardNext() {
       busy = true;
       $('btn-wizard-cancel').classList.add('hidden');
       wizardShowCorner(0);
-      btn.textContent = 'Continua';
+      btn.textContent = 'Continue';
     } else if (wizard.step >= 1 && wizard.step <= 3) {
       await sleep(150);
       await ds5.calibSample();
@@ -710,14 +710,14 @@ async function wizardNext() {
     } else if (wizard.step === 4) {
       await sleep(150);
       await ds5.calibSample();
-      btn.textContent = 'Salvataggio…';
+      btn.textContent = 'Saving…';
       await sleep(400);
       await ds5.calibEnd();
       busy = false;
       $('wizard-diagram').classList.add('hidden');
       wizardHideLive();
-      $('wizard-msg').innerHTML = 'Calibrazione del centro completata. Controlla il risultato con il test drift.';
-      btn.textContent = 'Fine';
+      $('wizard-msg').innerHTML = 'Center calibration complete. Check the result with the drift test.';
+      btn.textContent = 'Done';
     } else {
       closeModal('modal-wizard');
       setUnsaved(true);
@@ -729,8 +729,8 @@ async function wizardNext() {
   } catch (error) {
     busy = false;
     closeModal('modal-wizard');
-    toast(`Calibrazione fallita: ${error.message}`, 5000);
-    log(`Errore wizard: ${error.message}`);
+    toast(`Calibration failed: ${error.message}`, 5000);
+    log(`Wizard error: ${error.message}`);
   } finally {
     btn.disabled = false;
   }
@@ -743,8 +743,8 @@ function openWizard() {
   wizardSetDots(0);
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
-  $('wizard-msg').innerHTML = 'Questa procedura ricentra gli stick campionando la posizione di riposo dopo ogni movimento. Una volta avviata <b>non può essere annullata</b>: non chiudere la pagina e non scollegare il controller.';
-  $('btn-wizard-next').textContent = 'Inizia';
+  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started it <b>cannot be cancelled</b>: don’t close the page and don’t disconnect the controller.';
+  $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
   openModal('modal-wizard');
 }
@@ -759,7 +759,7 @@ async function openRange() {
   try {
     await ds5.rangeBegin();
   } catch (error) {
-    toast(`Avvio calibrazione range fallito: ${error.message}`, 5000);
+    toast(`Failed to start range calibration: ${error.message}`, 5000);
     return;
   }
   busy = true;
@@ -775,7 +775,7 @@ async function openRange() {
   $('btn-range-done').disabled = true;
   $('range-bar').style.width = '0%';
   $('range-minmax').innerHTML = '<span>LX —</span><span>LY —</span><span>RX —</span><span>RY —</span>';
-  $('range-hint').textContent = 'Estremi non ancora raggiunti';
+  $('range-hint').textContent = 'Extremes not reached yet';
   openModal('modal-range');
 }
 
@@ -783,7 +783,7 @@ let lastMinmax = 0;
 function updateRangeUI(ts) {
   const cov = Math.min(dialRangeL.coverage(), dialRangeR.coverage());
   const pct = Math.round(cov * 100);
-  $('range-pct').textContent = `Copertura ${pct}%`;
+  $('range-pct').textContent = `Coverage ${pct}%`;
   $('range-bar').style.width = pct + '%';
 
   if (ts - lastMinmax > 120) {
@@ -808,16 +808,16 @@ function updateRangeUI(ts) {
 
     const missing = [];
     const dirs = [
-      [st.lx.min > -thrL, 'L sinistra'], [st.lx.max < thrL, 'L destra'],
-      [st.ly.min > -thrL, 'L su'], [st.ly.max < thrL, 'L giù'],
-      [st.rx.min > -thrR, 'R sinistra'], [st.rx.max < thrR, 'R destra'],
-      [st.ry.min > -thrR, 'R su'], [st.ry.max < thrR, 'R giù'],
+      [st.lx.min > -thrL, 'L left'], [st.lx.max < thrL, 'L right'],
+      [st.ly.min > -thrL, 'L up'], [st.ly.max < thrL, 'L down'],
+      [st.rx.min > -thrR, 'R left'], [st.rx.max < thrR, 'R right'],
+      [st.ry.min > -thrR, 'R up'], [st.ry.max < thrR, 'R down'],
     ];
     for (const [miss, label] of dirs) if (miss) missing.push(label);
     rangeSession.allEdges = missing.length === 0;
     $('range-hint').textContent = rangeSession.allEdges
-      ? 'Tutti gli estremi raggiunti ✓'
-      : `Mancano: ${missing.join(', ')}`;
+      ? 'All extremes reached ✓'
+      : `Missing: ${missing.join(', ')}`;
   }
 
   const elapsed = ts - rangeSession.startTs;
@@ -838,13 +838,13 @@ async function finishRange() {
     closeModal('modal-range');
     setUnsaved(true);
     toast(incomplete
-      ? 'Range salvato ma con copertura incompleta: valuta di ripetere la calibrazione.'
-      : 'Calibrazione range completata.');
-    log('Calibrazione range completata.');
+      ? 'Range saved but with incomplete coverage: consider repeating the calibration.'
+      : 'Range calibration complete.');
+    log('Range calibration complete.');
   } catch (error) {
     closeModal('modal-range');
-    toast(`Errore calibrazione range: ${error.message}`, 5000);
-    log(`Errore range: ${error.message}`);
+    toast(`Range calibration error: ${error.message}`, 5000);
+    log(`Range error: ${error.message}`);
   } finally {
     busy = false;
   }
@@ -863,10 +863,10 @@ function closeAllModals() {
 
 async function rebootController() {
   if (!ds5 || busy) return;
-  if (unsaved && !confirm('Hai una calibrazione non salvata: riavviando il controller andrà persa. Continuare?'))
+  if (unsaved && !confirm('You have an unsaved calibration: restarting the controller will lose it. Continue?'))
     return;
   await ds5.reboot();
-  toast('Controller riavviato: ricollegalo quando si è spento.', 5000);
+  toast('Controller restarted: reconnect it once it has powered off.', 5000);
   // la disconnessione fisica arriverà dall'evento hid
 }
 
@@ -913,15 +913,15 @@ window.addEventListener('beforeunload', e => {
 
 async function boot() {
   if (!navigator.hid) {
-    showHeroError('<b>WebHID non disponibile.</b> Apri questa pagina con Chrome o Edge. Se la stai aprendo da file://, servila da localhost (es. <code>python3 -m http.server</code>).');
+    showHeroError('<b>WebHID not available.</b> Open this page with Chrome or Edge. If you’re opening it from file://, serve it from localhost (e.g. <code>python3 -m http.server</code>).');
     $('btn-connect').disabled = true;
     return;
   }
 
   navigator.hid.addEventListener('disconnect', e => {
     if (ds5 && e.device === ds5.device) {
-      log('Controller scollegato.');
-      teardown('Controller scollegato.');
+      log('Controller disconnected.');
+      teardown('Controller disconnected.');
     }
   });
 
@@ -930,11 +930,11 @@ async function boot() {
     const devices = await navigator.hid.getDevices();
     const known = devices.find(d => d.vendorId === 0x054c && d.productId === 0x0ce6);
     if (known) {
-      log('DualSense già autorizzato: connessione automatica…');
+      log('DualSense already authorized: connecting automatically…');
       await adopt(known);
     }
   } catch (error) {
-    log(`Auto-connessione fallita: ${error.message || error}`);
+    log(`Auto-connection failed: ${error.message || error}`);
   }
 }
 

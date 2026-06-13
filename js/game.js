@@ -210,11 +210,11 @@ function overallScore(s) {
 }
 
 function verdictFor(score) {
-  if (score >= 90) return 'Precisione eccellente';
-  if (score >= 75) return 'Buona precisione';
-  if (score >= 55) return 'Precisione discreta';
-  if (score >= 35) return 'Precisione scarsa';
-  return 'Precisione critica';
+  if (score >= 90) return 'Excellent precision';
+  if (score >= 75) return 'Good precision';
+  if (score >= 55) return 'Fair precision';
+  if (score >= 35) return 'Poor precision';
+  return 'Critical precision';
 }
 
 /* ---------------- posizione traiettoria di inseguimento ---------------- */
@@ -295,7 +295,7 @@ export function initGame(deps) {
   }
 
   function showCountdown(n) {
-    elCountdown.textContent = n > 0 ? String(n) : 'Via';
+    elCountdown.textContent = n > 0 ? String(n) : 'Go';
     elCountdown.classList.remove('hidden');
   }
   function hideCountdown() { elCountdown.classList.add('hidden'); }
@@ -315,7 +315,7 @@ export function initGame(deps) {
     canvasL.clearTrail();
     canvasR.clearTrail();
     running = true;
-    enterCountdown('Fermezza', 'Lascia gli stick al centro senza toccarli.', beginSteady);
+    enterCountdown('Steadiness', 'Leave the sticks at the center without touching them.', beginSteady);
   }
 
   // Countdown 3-2-1 prima di ogni prova, così l'utente si prepara.
@@ -342,7 +342,7 @@ export function initGame(deps) {
       showCountdown(phase.stepsLeft);
     } else if (!phase.shownVia) {
       phase.shownVia = true;
-      showCountdown(0); // "Via"
+      showCountdown(0); // "Go"
     } else {
       hideCountdown();
       const next = phase.next;
@@ -353,8 +353,8 @@ export function initGame(deps) {
   /* --- Prova 1: Fermezza --- */
 
   function beginSteady() {
-    elPhase.textContent = 'Fermezza';
-    elInstr.textContent = 'Non toccare gli stick. Misuriamo il drift residuo.';
+    elPhase.textContent = 'Steadiness';
+    elInstr.textContent = 'Don’t touch the sticks. We’re measuring the residual drift.';
     phase = {
       kind: 'steady',
       start: performance.now(),
@@ -374,15 +374,15 @@ export function initGame(deps) {
     if (elapsed >= STEADY_MS) {
       scores.L.steady = scoreSteady(phase.L.n ? phase.L.sum / phase.L.n : 0);
       scores.R.steady = scoreSteady(phase.R.n ? phase.R.sum / phase.R.n : 0);
-      enterCountdown('Bersagli', 'Porta entrambi i punti dentro i bersagli e tienili fermi.', beginTargets);
+      enterCountdown('Targets', 'Bring both dots inside the targets and hold them still.', beginTargets);
     }
   }
 
   /* --- Prova 2: Bersagli (simultanea sui due stick) --- */
 
   function beginTargets() {
-    elPhase.textContent = 'Bersagli';
-    elInstr.textContent = 'Porta i punti dentro i bersagli e mantienili per un istante.';
+    elPhase.textContent = 'Targets';
+    elInstr.textContent = 'Bring the dots inside the targets and hold them there for a moment.';
     phase = {
       kind: 'targets',
       index: 0,
@@ -455,7 +455,7 @@ export function initGame(deps) {
       if (phase.index >= TARGETS.length) {
         scores.L.targets = scoreTargets(phase.L.records);
         scores.R.targets = scoreTargets(phase.R.records);
-        enterCountdown('Inseguimento', 'Segui il bersaglio che si muove con il punto.', beginTrack);
+        enterCountdown('Tracking', 'Follow the moving target with the dot.', beginTrack);
       } else {
         setTargetScene();
       }
@@ -465,8 +465,8 @@ export function initGame(deps) {
   /* --- Prova 3: Inseguimento --- */
 
   function beginTrack() {
-    elPhase.textContent = 'Inseguimento';
-    elInstr.textContent = 'Tieni il punto sopra il bersaglio in movimento.';
+    elPhase.textContent = 'Tracking';
+    elInstr.textContent = 'Keep the dot on top of the moving target.';
     const path = trackPathSamples();
     phase = {
       kind: 'track',
@@ -529,34 +529,34 @@ export function initGame(deps) {
     if (prev != null) {
       const delta = res.overall - prev;
       const sign = delta > 0 ? '+' : '';
-      compare = `<p class="game-compare">Precedente ${prev} &rarr; Oggi ${res.overall} `
+      compare = `<p class="game-compare">Previous ${prev} &rarr; Today ${res.overall} `
         + `<span class="game-delta">(${sign}${delta})</span></p>`;
     } else {
-      compare = `<p class="game-compare">Primo risultato salvato. Ripeti il test dopo una calibrazione per confrontarlo.</p>`;
+      compare = `<p class="game-compare">First result saved. Run the test again after a calibration to compare it.</p>`;
     }
 
     elReport.innerHTML = `
       <div class="game-overall">
         <span class="game-overall-num">${res.overall}</span>
-        <span class="game-overall-cap">su 100</span>
+        <span class="game-overall-cap">out of 100</span>
       </div>
       <p class="game-verdict">${verdictFor(res.overall)}</p>
       ${compare}
       <div class="game-breakdown">
         <div class="game-stick-col">
-          <h4>Stick sinistro &middot; ${res.L.total}</h4>
-          ${row('Fermezza', res.L.steady)}
-          ${row('Bersagli', res.L.targets)}
-          ${row('Inseguimento', res.L.track)}
+          <h4>Left stick &middot; ${res.L.total}</h4>
+          ${row('Steadiness', res.L.steady)}
+          ${row('Targets', res.L.targets)}
+          ${row('Tracking', res.L.track)}
         </div>
         <div class="game-stick-col">
-          <h4>Stick destro &middot; ${res.R.total}</h4>
-          ${row('Fermezza', res.R.steady)}
-          ${row('Bersagli', res.R.targets)}
-          ${row('Inseguimento', res.R.track)}
+          <h4>Right stick &middot; ${res.R.total}</h4>
+          ${row('Steadiness', res.R.steady)}
+          ${row('Targets', res.R.targets)}
+          ${row('Tracking', res.R.track)}
         </div>
       </div>
-      <p class="game-formula">Punteggio = Fermezza 25% + Bersagli 40% + Inseguimento 35%. Stessa prestazione, stesso punteggio.</p>
+      <p class="game-formula">Score = Steadiness 25% + Targets 40% + Tracking 35%. Same performance, same score.</p>
     `;
   }
 
@@ -607,11 +607,11 @@ export function initGame(deps) {
     elDials.classList.remove('hidden'); // i quadranti restano vivi per provare gli stick
     elProgress.classList.add('hidden');
     hideCountdown();
-    elPhase.textContent = 'Test di precisione';
-    elInstr.textContent = 'Tre prove, circa un minuto. Premi Inizia quando sei pronto.';
+    elPhase.textContent = 'Precision test';
+    elInstr.textContent = 'Three trials, about a minute. Press Start when you’re ready.';
     scene = { L: {}, R: {} };
     const prev = loadPrevious();
-    btnStart.textContent = prev != null ? `Inizia (precedente ${prev})` : 'Inizia';
+    btnStart.textContent = prev != null ? `Start (previous ${prev})` : 'Start';
   }
 
   // open(bypassGate): bypassGate=true salta isAvailable (hook dev senza controller).

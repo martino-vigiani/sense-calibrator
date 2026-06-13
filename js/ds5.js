@@ -81,7 +81,7 @@ export class DS5 {
     try {
       await this.device.sendFeatureReport(reportId, buf);
     } catch (error) {
-      throw new Error(`sendFeatureReport 0x${reportId.toString(16)} fallito: ${error.message || error}`);
+      throw new Error(`sendFeatureReport 0x${reportId.toString(16)} failed: ${error.message || error}`);
     }
   }
 
@@ -103,29 +103,29 @@ export class DS5 {
 
   async calibBegin() {
     const r = await this.calibCommand([1, 1, 1], 0x83010101);
-    if (!r.ok) throw new Error(`Avvio calibrazione centro fallito (0x${r.word.toString(16)})`);
+    if (!r.ok) throw new Error(`Failed to start center calibration (0x${r.word.toString(16)})`);
   }
 
   async calibSample() {
     const r = await this.calibCommand([3, 1, 1], 0x83010101);
-    if (!r.ok) throw new Error(`Campionamento fallito (0x${r.word.toString(16)})`);
+    if (!r.ok) throw new Error(`Sampling failed (0x${r.word.toString(16)})`);
   }
 
   async calibEnd() {
     const r = await this.calibCommand([2, 1, 1], 0x83010102);
-    if (!r.ok) throw new Error(`Scrittura calibrazione centro fallita (0x${r.word.toString(16)})`);
+    if (!r.ok) throw new Error(`Failed to write center calibration (0x${r.word.toString(16)})`);
   }
 
   async rangeBegin() {
     const r = await this.calibCommand([1, 1, 2], 0x83010201);
-    if (!r.ok) throw new Error(`Avvio calibrazione range fallito (0x${r.word.toString(16)})`);
+    if (!r.ok) throw new Error(`Failed to start range calibration (0x${r.word.toString(16)})`);
   }
 
   async rangeEnd() {
     const r = await this.calibCommand([2, 1, 2], 0x83010202);
     // code 3 = calibrazione già chiusa: non è un errore reale.
     if (!r.ok && r.code !== 3)
-      throw new Error(`Chiusura calibrazione range fallita (0x${r.word.toString(16)})`);
+      throw new Error(`Failed to close range calibration (0x${r.word.toString(16)})`);
   }
 
   async queryNvStatus() {
@@ -159,7 +159,7 @@ export class DS5 {
       await this.nvsUnlock();
     } catch (error) {
       await sleep(500);
-      throw new Error('Sblocco NVS fallito', { cause: error });
+      throw new Error('NVS unlock failed', { cause: error });
     }
     await this.nvsLock();
   }
