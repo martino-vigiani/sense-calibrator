@@ -28,7 +28,7 @@ Diagnostica e ricalibrazione hardware degli stick analogici del **DualSense (PS5
 
 ## Note tecniche
 
-- Protocollo di calibrazione (feature report `0x82`/`0x83`, gestione NVS via `0x80`/`0x81`) derivato da [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) (GPL-3.0), il tool open source di riferimento per la calibrazione dei controller Sony.
+- Protocollo di calibrazione (feature report `0x82`/`0x83`, gestione NVS via `0x80`/`0x81`) derivato da [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) (MIT, © the_al), il tool open source di riferimento per la calibrazione dei controller Sony.
 - La calibrazione applicata resta in RAM finché non viene scritta in NVS (ciclo unlock → lock): spegnere il controller prima della scrittura annulla tutto. È la rete di sicurezza del flusso.
 - Solo DualSense standard (`054C:0CE6`). DualSense Edge e DualShock 4 non sono supportati.
 
