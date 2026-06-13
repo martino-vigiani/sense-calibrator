@@ -1,37 +1,43 @@
 # Sense Calibrator
 
-Diagnostica e ricalibrazione hardware degli stick analogici del **DualSense (PS5)** affetti da stick drift, direttamente dal browser via WebHID. Nessuna installazione, nessun driver.
+Diagnose and hardware-recalibrate the analog sticks of a drifting **PS5 DualSense**, straight from the browser over WebHID. No installation, no drivers.
 
-![piattaforma](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-DualSense-black)
+![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-DualSense-black) ![license](https://img.shields.io/badge/license-MIT-black)
 
-## Cosa fa
+> 📖 **The story behind this tool:** how I fixed my controller's stick drift by building this with Anthropic's Fable 5 model, instead of buying a new one — [**read ARTICLE.md**](ARTICLE.md).
 
-- **Test drift automatico** alla connessione: misura l'offset di riposo degli stick e classifica il drift (centrato / lieve / marcato), con rilevazione del rumore di segnale (potenziometro usurato).
-- **Calibrazione rapida**: ricentra gli stick in automatico in pochi secondi, senza toccare il controller.
-- **Calibrazione guidata**: procedura in 4 passaggi (stick agli angoli) per drift più ostinati.
-- **Calibrazione range**: ricalibra l'escursione massima ruotando gli stick, con indicatore di copertura in tempo reale.
-- **Scrittura permanente**: la calibrazione è temporanea (si perde a controller spento) finché non la scrivi esplicitamente nella memoria NVS del controller. Una volta scritta vale ovunque: PS5, PC, Mac.
-- Visualizzazione live degli stick, log dei comandi HID, riconnessione automatica.
+## What it does
 
-## Come si usa
+- **Automatic drift test** on connect: measures the sticks' resting offset and classifies the drift (centered / mild / marked), with signal-noise detection for a worn potentiometer.
+- **Quick calibration**: re-centers the sticks automatically in a few seconds, without touching the controller.
+- **Guided calibration**: a four-corner procedure (push the sticks into each corner) for more stubborn drift.
+- **Range calibration**: recalibrates the full stick travel by rotating the sticks, with a real-time coverage indicator.
+- **Permanent write**: calibration is temporary (lost when the controller powers off) until you explicitly write it to the controller's NVS memory. Once written it applies everywhere: PS5, PC, Mac.
+- Live stick visualization, HID command log, automatic reconnect.
 
-1. Avvia un server locale nella cartella del progetto (WebHID richiede un contesto sicuro, `file://` non funziona):
+## How to use it
+
+1. Start a local server in the project folder (WebHID requires a secure context, `file://` does not work):
 
    ```sh
    python3 -m http.server 8000
    ```
 
-2. Apri `http://localhost:8000` in **Chrome** o **Edge** (Safari e Firefox non supportano WebHID).
-3. Collega il DualSense via **cavo USB** (il Bluetooth non è supportato per la calibrazione).
-4. Premi **Collega il controller** e segui le indicazioni: il test drift parte da solo.
-5. Se serve, calibra; quando sei soddisfatto, premi **Scrivi in memoria** per rendere il fix permanente.
+2. Open `http://localhost:8000` in **Chrome** or **Edge** (Safari and Firefox do not support WebHID).
+3. Connect the DualSense over a **USB cable** (Bluetooth is not supported for calibration).
+4. Click **Connect controller** (button labeled "Collega il controller"); the drift test runs on its own.
+5. Calibrate if needed. When you are satisfied, click **Write to memory** ("Scrivi in memoria") to make the fix permanent.
 
-## Note tecniche
+## Technical notes
 
-- Protocollo di calibrazione (feature report `0x82`/`0x83`, gestione NVS via `0x80`/`0x81`) derivato da [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) (MIT, © the_al), il tool open source di riferimento per la calibrazione dei controller Sony.
-- La calibrazione applicata resta in RAM finché non viene scritta in NVS (ciclo unlock → lock): spegnere il controller prima della scrittura annulla tutto. È la rete di sicurezza del flusso.
-- Solo DualSense standard (`054C:0CE6`). DualSense Edge e DualShock 4 non sono supportati.
+- The calibration protocol (feature reports `0x82`/`0x83`, NVS management via `0x80`/`0x81`) is derived from [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) (MIT, © the_al), the reference open-source tool for calibrating Sony controllers.
+- Applied calibration stays in RAM until it is written to NVS (an unlock → lock cycle): powering the controller off before writing reverts everything. That is the safety net of the flow.
+- Standard DualSense only (`054C:0CE6`). DualSense Edge and DualShock 4 are not supported.
 
-## Avvertenze
+## Disclaimer
 
-Strumento non ufficiale, non affiliato a Sony. La scrittura in NVS usa comandi reverse-engineered ampiamente collaudati, ma resta a tuo rischio.
+Unofficial tool, not affiliated with Sony. The NVS write uses widely tested reverse-engineered commands, but you use it at your own risk.
+
+## License
+
+[MIT](LICENSE). The calibration protocol derives from the MIT-licensed [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) project by the_al; its copyright notice is preserved in [`LICENSE`](LICENSE).
