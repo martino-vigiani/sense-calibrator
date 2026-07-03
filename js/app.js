@@ -300,6 +300,11 @@ async function adopt(device) {
   $('view-device').classList.remove('hidden');
   $('hero-error').classList.add('hidden');
 
+  recordEvent('connect', {
+    color: info.color ?? null,
+    build: info.buildDate ?? null,
+  });
+
   // test drift automatico dopo un breve assestamento
   setTimeout(() => startDriftTest(true), 900);
 }
@@ -516,6 +521,7 @@ function verdictFor(stick) {
 let lastDriftResult = null;
 
 function finishDriftTest(result) {
+  const auto = driftTest?.auto === true;
   driftTest = null;
   const card = $('drift-card');
   card.dataset.state = 'idle';
@@ -537,6 +543,12 @@ function finishDriftTest(result) {
 
   const worst = Math.max(result.left.offset, result.right.offset);
   const noisy = Math.max(result.left.noise, result.right.noise) > 1.5;
+  recordEvent('drift', {
+    auto,
+    res: summarizeResult(result),
+    worst: +worst.toFixed(2),
+    unstable: result.unstable === true,
+  });
   let msg;
   if (result.unstable) {
     msg = 'Sticks moving continuously during the test. If you weren’t touching them, the signal is severely '
@@ -570,6 +582,7 @@ async function doFlash() {
   try {
     await ds5.flash();
     const nv = await refreshNv();
+    recordEvent('flash', { ok: true, nv: nv?.status ?? null });
     setUnsaved(false);
     if (nv?.status === 'pending_reboot') {
       toast('Saved. The controller needs a restart: use the "Restart" button.', 5000);
@@ -578,6 +591,7 @@ async function doFlash() {
     }
     log('Flash complete.');
   } catch (error) {
+    recordEvent('flash', { ok: false, err: String(error.message || error).slice(0, 120) });
     toast(`Error while saving: ${error.message}`, 5000);
     log(`Flash error: ${error.message}`);
   } finally {
@@ -662,6 +676,18 @@ const CALIB_STORE_KEY      = 'sense-calib-sessions';
 const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
 const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
 
+// Ogni azione significativa produce un evento tipizzato: connect, drift,
+// quick, wizard, range, flash, game. Stessi vincoli di anonimato per tutti.
+function recordEvent(kind, data = {}) {
+  recordCalibSession({
+    kind,
+    t: new Date().toISOString(),
+    board: deviceInfo?.board ?? null,
+    fw: deviceInfo?.fwversion ?? null,
+    ...data,
+  });
+}
+
 function summarizeResult(r) {
   if (!r) return null;
   const f = v => +v.toFixed(3);
@@ -704,6 +730,7 @@ async function quickCalibrate() {
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
   const session = {
+    kind: 'quick',
     t: new Date().toISOString(),
     board: deviceInfo?.board ?? null,
     fw: deviceInfo?.fwversion ?? null,
@@ -884,6 +911,7 @@ async function wizardNext() {
       await sleep(400);
       await ds5.calibEnd();
       busy = false;
+      recordEvent('wizard', { done: true });
       $('wizard-diagram').classList.add('hidden');
       wizardHideLive();
       $('wizard-msg').innerHTML = 'Center calibration complete. Check the result with the drift test.';
@@ -1002,9 +1030,16 @@ async function finishRange() {
   // diagonale non arriva al 100% di copertura (gate non perfettamente circolare).
   const incomplete = rangeSession.allEdges !== true
     && Math.min(dialRangeL.coverage(), dialRangeR.coverage()) < 0.97;
+  const rangeStats = {
+    covL: +dialRangeL.coverage().toFixed(2),
+    covR: +dialRangeR.coverage().toFixed(2),
+    allEdges: rangeSession.allEdges === true,
+    ms: Math.round(performance.now() - rangeSession.startTs),
+  };
   rangeSession = null;
   try {
     await ds5.rangeEnd();
+    recordEvent('range', { ...rangeStats, incomplete });
     closeModal('modal-range');
     setUnsaved(true);
     toast(incomplete
@@ -1066,6 +1101,7 @@ $('btn-flash-go').addEventListener('click', doFlash);
 const game = initGame({
   getSticks: () => sticks,
   isAvailable: () => !!ds5 && !busy,
+  onReport: res => recordEvent('game', res),
 });
 function openGame(bypassGate = false) {
   if (!bypassGate && (!ds5 || busy)) return;
@@ -1081,13 +1117,16 @@ window.addEventListener('beforeunload', e => {
 
 /* ============================== consenso telemetria ============================== */
 
-// Inizializza la checkbox allo stato salvato e persiste ogni cambio.
-const telemetryBox = $('telemetry-consent');
-if (telemetryBox) {
-  telemetryBox.checked = localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1';
-  telemetryBox.addEventListener('change', () => {
-    localStorage.setItem(TELEMETRY_CONSENT_KEY, telemetryBox.checked ? '1' : '0');
-  });
+// Due checkbox sincronizzate (dialogo calibrazione rapida + footer):
+// stesso stato in localStorage, cambiarne una aggiorna l'altra.
+const consentBoxes = ['telemetry-consent', 'telemetry-consent-footer'].map($).filter(Boolean);
+function setConsent(on) {
+  localStorage.setItem(TELEMETRY_CONSENT_KEY, on ? '1' : '0');
+  for (const box of consentBoxes) box.checked = on;
+}
+for (const box of consentBoxes) {
+  box.checked = localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1';
+  box.addEventListener('change', () => setConsent(box.checked));
 }
 
 /* ============================== boot ============================== */

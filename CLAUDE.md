@@ -35,7 +35,7 @@ Comments in the JS are in Italian; UI strings are English.
 
 ## Telemetry
 
-Calibration sessions always go to `localStorage` (`sense-calib-sessions`, capped at 200). Network upload to `https://subralabs.com/api/calib/v1/sessions` happens only with explicit opt-in consent (`sense-telemetry-consent` in localStorage). Payload is anonymous — see README table; never add device identifiers to it. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
+Every significant action emits a typed event via `recordEvent(kind, data)` in app.js — kinds: `connect`, `drift`, `quick`, `wizard`, `range`, `flash`, `game`. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200). Network upload to `https://subralabs.com/api/calib/v1/sessions` happens only with explicit opt-in consent (`sense-telemetry-consent` in localStorage; two synced checkboxes: footer + quick-calibration dialog). Payload is anonymous — see README table; never add device identifiers to it. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
 
 ## Dev hooks
 

@@ -82,21 +82,19 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 
 ## Telemetry & privacy
 
-Sense Calibrator can optionally upload anonymous calibration data to a self-hosted endpoint to help improve the algorithm over time. This is **opt-in and off by default**.
+Sense Calibrator can optionally upload anonymous usage data to a self-hosted endpoint to help improve the algorithm over time. This is **opt-in and off by default**.
 
-**What is sent** (when you enable it):
+**What is sent** (when you enable it): every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`) and `fw` (firmware version integer), plus:
 
-| Field | Description |
+| Event `kind` | Extra fields |
 |---|---|
-| `t` | ISO 8601 timestamp of the session |
-| `board` | Controller board model (e.g. `BDM-030`) |
-| `fw` | Firmware version integer |
-| `before` | Stick offsets and noise before calibration |
-| `passes` | Residual offset after each calibration pass |
-| `after` | Stick offsets and noise after calibration |
-| `unstableEvents` | Number of times the stability gate widened or was bypassed |
-| `gate` | Final stability-gate spread value used |
-| `gateOff` | Whether gating was disabled entirely |
+| `connect` | Controller color name, firmware build date |
+| `drift` | Measured offsets and noise, worst offset, whether the test was automatic, unstable flag |
+| `quick` | Offsets/noise before and after, residual offset per pass, stability-gate telemetry (`unstableEvents`, `gate`, `gateOff`) |
+| `wizard` | Completion flag |
+| `range` | Coverage per stick, whether all extremes were reached, duration |
+| `flash` | Success/failure and NVS status (error message text on failure) |
+| `game` | Precision-test scores (steadiness / targets / tracking per stick, totals) |
 
 **What is never collected:** serial number, any device identifier, IP address (not stored server-side), browser fingerprint, or any personal information.
 
@@ -104,7 +102,7 @@ Sense Calibrator can optionally upload anonymous calibration data to a self-host
 
 **Local copy:** calibration sessions are always stored in `localStorage` under the key `sense-calib-sessions`, regardless of whether upload consent is given.
 
-To enable, check **"Share anonymous calibration data to improve the algorithm"** in the quick-calibration dialog. The preference persists in `localStorage` and can be changed at any time.
+To enable, check **"Share anonymous usage data"** in the page footer or in the quick-calibration dialog (the two checkboxes are the same setting). The preference persists in `localStorage` and can be changed at any time.
 
 ---
 

@@ -143,6 +143,10 @@
 <footer class="footer">
   <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
   <span>Unofficial tool &middot; use at your own risk.</span>
+  <label class="telemetry-label" title="board model, firmware, calibration results, test scores — never serial numbers, device IDs or IP">
+    <input type="checkbox" id="telemetry-consent-footer">
+    Share anonymous usage data (<a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent</a>)
+  </label>
 </footer>
 
 <!-- ======================= MODALE: OVERLAY CALIBRAZIONE RAPIDA ======================= -->
@@ -151,9 +155,9 @@
     <h3 id="quick-title">Quick calibration</h3>
     <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <div class="progress"><i id="quick-bar"></i></div>
-    <label class="telemetry-label" title="board model, firmware, offsets — never serial numbers">
+    <label class="telemetry-label" title="board model, firmware, calibration results, test scores — never serial numbers, device IDs or IP">
       <input type="checkbox" id="telemetry-consent">
-      Share anonymous calibration data to improve the algorithm
+      Share anonymous usage data to improve the algorithm
     </label>
     <div class="modal-actions">
       <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>

@@ -8,6 +8,7 @@
    initGame(deps, opts)
      deps.getSticks  -> () => ({ lx, ly, rx, ry })   (-1..1, y giù)
      deps.isAvailable -> () => bool                   (gate apertura)
+     deps.onReport   -> (res) => void  opzionale: punteggi a fine sequenza
 
    Ritorna { open } ma il wiring usa anche window.__senseGameOpen
    come hook dev che bypassa il gate.
@@ -511,8 +512,10 @@ export function initGame(deps) {
     const overall = Math.round((totalL + totalR) / 2);
 
     const prev = loadPrevious();
-    renderReport({ L: { ...scores.L, total: totalL }, R: { ...scores.R, total: totalR }, overall }, prev);
+    const report = { L: { ...scores.L, total: totalL }, R: { ...scores.R, total: totalR }, overall };
+    renderReport(report, prev);
     saveResult(overall);
+    deps.onReport?.(report);
 
     elDials.classList.add('hidden');
     elProgress.classList.add('hidden');
