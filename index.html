@@ -3,10 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sense Calibrator</title>
-  <meta name="description" content="Diagnose and hardware-recalibrate your DualSense sticks, straight from the browser.">
+  <title>Fix PS5 Stick Drift from Your Browser | Sense Calibrator</title>
+  <meta name="description" content="Fix PS5 DualSense stick drift free in 2 minutes. Diagnose and permanently recalibrate sticks from your browser over USB. No install, no drivers, open source.">
+  <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/">
+  <meta property="og:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
+  <meta property="og:description" content="Free tool that diagnoses and permanently recalibrates drifting DualSense sticks over WebHID. Nothing to install.">
+  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/01-landing.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebApplication",
+        "name": "Sense Calibrator",
+        "url": "https://martino-vigiani.github.io/sense-calibrator/",
+        "description": "Free browser tool that diagnoses and permanently recalibrates PS5 DualSense stick drift over WebHID. No install, no drivers.",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any (Chrome or Edge required)",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "license": "https://github.com/martino-vigiani/sense-calibrator/blob/main/LICENSE"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What causes PS5 stick drift?",
+            "acceptedAnswer": { "@type": "Answer", "text": "The analog sticks read their position through small potentiometers. With wear, their resting value shifts away from the stored center calibration, so the console sees movement that is not there. In many cases the sensor is fine: the stored calibration is simply wrong, and rewriting it fixes the drift." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does this permanently fix stick drift?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes, when the drift is a calibration offset. The fix is written into the controller's own memory, so it applies everywhere: PS5, PC, Mac. If the potentiometer is mechanically worn, calibration reduces the drift but cannot repair the hardware. The built-in drift test tells you which case you have." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it safe for my controller?",
+            "acceptedAnswer": { "@type": "Answer", "text": "The tool uses the same widely tested calibration commands as the open-source dualshock-tools project. Nothing is permanent until you click Write to memory: powering the controller off before that reverts every change. Unofficial tool, use at your own risk." }
+          },
+          {
+            "@type": "Question",
+            "name": "Why do I need a USB cable and Chrome or Edge?",
+            "acceptedAnswer": { "@type": "Answer", "text": "The controller's calibration commands are only reliable over USB, and the WebHID technology used to talk to it is available in Chromium browsers (Chrome, Edge). Safari and Firefox do not support WebHID." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it work with DualSense Edge or DualShock 4?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Only the standard PS5 DualSense is supported." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it really free?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer." }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 
@@ -27,7 +86,7 @@
 
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
-    <h1>Recalibrate your sticks.<br>For real.</h1>
+    <h1>Fix PS5 stick drift.<br>For real.</h1>
     <p class="lede">Automatic stick-drift diagnostics and hardware recalibration for the DualSense.
       No install: all from the browser, written straight into the controller's memory.</p>
 
@@ -44,6 +103,34 @@
       <li><b>3</b><span>Calibration</span></li>
       <li><b>4</b><span>Save to memory</span></li>
     </ol>
+
+    <section class="faq" aria-label="Stick drift FAQ">
+      <h2>Stick drift FAQ</h2>
+      <details>
+        <summary>What causes PS5 stick drift?</summary>
+        <p>The analog sticks read their position through small potentiometers. With wear, their resting value shifts away from the stored center calibration, so the console sees movement that is not there. In many cases the sensor is fine: the stored calibration is simply wrong, and rewriting it fixes the drift.</p>
+      </details>
+      <details>
+        <summary>Does this permanently fix stick drift?</summary>
+        <p>Yes, when the drift is a calibration offset. The fix is written into the controller's own memory, so it applies everywhere: PS5, PC, Mac. If the potentiometer is mechanically worn, calibration reduces the drift but cannot repair the hardware. The built-in drift test tells you which case you have.</p>
+      </details>
+      <details>
+        <summary>Is it safe for my controller?</summary>
+        <p>The tool uses the same widely tested calibration commands as the open-source dualshock-tools project. Nothing is permanent until you click "Write to memory": powering the controller off before that reverts every change. Unofficial tool, use at your own risk.</p>
+      </details>
+      <details>
+        <summary>Why do I need a USB cable and Chrome or Edge?</summary>
+        <p>The controller's calibration commands are only reliable over USB, and the WebHID technology used to talk to it is available in Chromium browsers (Chrome, Edge). Safari and Firefox do not support WebHID.</p>
+      </details>
+      <details>
+        <summary>Does it work with DualSense Edge or DualShock 4?</summary>
+        <p>No. Only the standard PS5 DualSense is supported.</p>
+      </details>
+      <details>
+        <summary>Is it really free?</summary>
+        <p>Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer.</p>
+      </details>
+    </section>
   </section>
 
   <!-- ======================= VISTA: DEVICE ======================= -->

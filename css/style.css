@@ -215,6 +215,48 @@ main {
   font-weight: 700;
 }
 
+/* ---------------- faq ---------------- */
+
+.faq {
+  max-width: 560px;
+  margin: 72px auto 0;
+  text-align: left;
+}
+.faq h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 6px;
+}
+.faq details {
+  border-top: 1px solid var(--line);
+}
+.faq details:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.faq summary {
+  padding: 13px 0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: '+';
+  float: right;
+  color: var(--ink-3);
+}
+.faq details[open] summary::after { content: '\2212'; }
+.faq p {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
 /* ---------------- bottoni ---------------- */
 
 .btn {
