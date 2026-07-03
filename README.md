@@ -4,6 +4,8 @@ Your PS5 controller is drifting. A €2 potentiometer is miscalibrated. You don'
 
 Sense Calibrator diagnoses analog stick drift and writes a permanent hardware recalibration directly into the DualSense's non-volatile memory, over WebHID. The fix travels with the controller to every platform — PS5, PC, Mac.
 
+**▶ Try it now: [martino-vigiani.github.io/sense-calibrator](https://martino-vigiani.github.io/sense-calibrator/)** — Chrome/Edge, DualSense over USB.
+
 ![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-DualSense-black) ![license](https://img.shields.io/badge/license-MIT-black)
 
 ![Sense Calibrator landing](paper/assets/01-landing.png)
@@ -17,6 +19,10 @@ Sense Calibrator diagnoses analog stick drift and writes a permanent hardware re
 ## Quick start
 
 Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** (Bluetooth is detected and rejected), a standard DualSense (`054C:0CE6`).
+
+**Easiest:** open the [hosted version](https://martino-vigiani.github.io/sense-calibrator/), connect the controller over USB, click **Connect controller**.
+
+**Or run it locally:**
 
 1. Clone or download this repo, then start a local HTTP server (WebHID requires a secure context — `file://` does not work):
 
@@ -71,7 +77,6 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 - USB only. **Bluetooth calibration is not supported** (WebHID blocks it by design).
 - Chrome or Edge only. Safari and Firefox have no WebHID.
 - Calibration corrects offset drift (a stable non-zero resting value). It cannot repair mechanical wear — if the potentiometer wiper is physically degraded, you may need a hardware fix eventually.
-- No live deployment yet — run it locally with the quick-start steps above.
 
 ---
 
