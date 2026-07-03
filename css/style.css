@@ -614,6 +614,27 @@ main {
 #range-pct { font-weight: 700; color: var(--ink); }
 #range-vals { font-variant-numeric: tabular-nums; }
 
+/* telemetria opt-in */
+
+.telemetry-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  line-height: 1.45;
+}
+.telemetry-label input[type="checkbox"] {
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--ink);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
 /* ---------------- toast ---------------- */
 
 .toasts {

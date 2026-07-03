@@ -29,6 +29,7 @@ const RANGE_UNLOCK_MS = 15000;
 let ds5 = null;
 let sticks = { lx: 0, ly: 0, rx: 0, ry: 0 };
 let battery = null;
+let deviceInfo = null;
 let unsaved = false;
 let busy = false; // una calibrazione alla volta
 
@@ -291,6 +292,7 @@ async function adopt(device) {
 
   // info dispositivo (non bloccanti)
   const info = await ds5.getInfo();
+  deviceInfo = info;
   renderDeviceInfo(info);
   await refreshNv();
 
@@ -317,6 +319,7 @@ function renderDeviceInfo(info) {
 function teardown(message = null) {
   ds5 = null;
   battery = null;
+  deviceInfo = null;
   rangeSession = null;
   driftTest = null;
   busy = false;
@@ -343,6 +346,15 @@ async function disconnect() {
 /* ============================== input report ============================== */
 
 let lastBattery = 0;
+
+// Chi attende campioni stick (waitForStable) viene notificato dagli input
+// report HID: continuano ad arrivare anche quando i timer della pagina sono
+// throttlati (finestra in background durante la calibrazione).
+const stickListeners = new Set();
+function notifyStickSample() {
+  for (const fn of stickListeners) fn();
+}
+
 function onInputReport(event) {
   if (event.reportId !== 0x01 || event.data.byteLength < 4) return;
   const d = event.data;
@@ -353,6 +365,7 @@ function onInputReport(event) {
     rx: n(d.getUint8(2)),
     ry: n(d.getUint8(3)),
   };
+  notifyStickSample();
 
   if (driftTest) driftSample();
 
@@ -574,12 +587,65 @@ async function doFlash() {
 
 /* ============================== calibrazione rapida ============================== */
 
-const QUICK_MAX_PASSES = 3;
-const QUICK_SAMPLES_PER_PASS = 8;
+const QUICK_MAX_PASSES = 4;
+const QUICK_SAMPLES_PER_PASS = 12;
+// Gating di stabilità: ogni calibSample viene inviato solo quando il segnale
+// è rimasto entro QUICK_STABLE_SPREAD per QUICK_STABLE_MS. Così un tocco,
+// una vibrazione o un cavo mosso non contaminano la media del firmware.
+const QUICK_STABLE_SPREAD = 0.035;  // più severo di DRIFT_MOVE_SPREAD
+// Uno stick consumato oscilla da solo: il gate si adatta al rumore proprio
+// del controller (stimato dalla misura baseline) e non scende mai sotto
+// QUICK_STABLE_SPREAD né sale oltre QUICK_STABLE_SPREAD_MAX. Così il jitter
+// automatico non blocca la calibrazione, ma l'escursione grande di una mano
+// viene ancora respinta.
+const QUICK_STABLE_SPREAD_MAX = 0.12;
+const QUICK_STABLE_MS = 300;
+const QUICK_STABLE_TIMEOUT = 5000;
+// Sotto questo miglioramento tra passate l'offset residuo è al pavimento
+// del rumore: ripetere non serve più.
+const QUICK_CONVERGE_EPS = 0.15;    // punti percentuali
+const QUICK_NOISE_WORN = 1.5;       // noise p95 oltre cui il sensore è consumato
 
-// Misura veloce dell'offset residuo (post-calibrazione), con lo stesso
+// Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
+// Ritorna false se il segnale non si stabilizza entro `timeoutMs`.
+// Guidato dagli input report HID, non da un timer: il gating resta preciso
+// anche con i timer della pagina throttlati.
+function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT } = {}) {
+  return new Promise(resolve => {
+    const start = performance.now();
+    const win = [];
+    const done = ok => {
+      stickListeners.delete(onSample);
+      clearTimeout(guard);
+      resolve(ok);
+    };
+    const onSample = () => {
+      const now = performance.now();
+      win.push({ ...sticks, t: now });
+      while (win.length && win[0].t < now - holdMs) win.shift();
+      if (win.length >= 10 && now - win[0].t >= holdMs * 0.8) {
+        let maxSpread = 0;
+        for (const a of ['lx', 'ly', 'rx', 'ry']) {
+          let min = Infinity, max = -Infinity;
+          for (const s of win) {
+            if (s[a] < min) min = s[a];
+            if (s[a] > max) max = s[a];
+          }
+          maxSpread = Math.max(maxSpread, max - min);
+        }
+        if (maxSpread <= spread) return done(true);
+      }
+      if (now - start >= timeoutMs) done(false);
+    };
+    stickListeners.add(onSample);
+    // guardia per il caso "nessun input report" (controller muto)
+    const guard = setTimeout(() => done(false), timeoutMs + 250);
+  });
+}
+
+// Misura dell'offset residuo (pre/post calibrazione), con lo stesso
 // filtro di stabilità del test drift.
-async function measureOffset(ms = 1200) {
+async function measureOffset(ms = 1500) {
   const samples = [];
   const id = setInterval(() => samples.push({ ...sticks }), 8);
   await sleep(ms);
@@ -589,8 +655,46 @@ async function measureOffset(ms = 1200) {
   return analyzeDrift(stable.length > 40 ? stable : samples);
 }
 
-// Calibra, verifica, e se l'offset residuo non è sotto soglia ripete:
-// converge da solo invece di sperare nella singola passata.
+/* --------- telemetria locale + upload anonimo opt-in --------- */
+// localStorage sempre; invio in rete solo se l'utente ha dato consenso esplicito.
+// Non vengono mai inviati seriale, IP o altri identificatori.
+const CALIB_STORE_KEY      = 'sense-calib-sessions';
+const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
+const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
+
+function summarizeResult(r) {
+  if (!r) return null;
+  const f = v => +v.toFixed(3);
+  return {
+    off: [f(r.left.offset), f(r.right.offset)],
+    noise: [f(r.left.noise), f(r.right.noise)],
+  };
+}
+
+function recordCalibSession(entry) {
+  try {
+    const arr = JSON.parse(localStorage.getItem(CALIB_STORE_KEY) || '[]');
+    arr.push(entry);
+    localStorage.setItem(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
+  } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
+
+  // Upload anonimo: solo se il consenso è attivo; fuoco-e-dimentica, mai bloccante.
+  if (localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1') {
+    fetch(TELEMETRY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(entry),
+      keepalive: true,
+      signal: AbortSignal.timeout(4000),
+    })
+      .then(() => log('Anonymous telemetry sent.'))
+      .catch(() => {})
+  }
+}
+
+// Calibra con campioni gated sulla stabilità, verifica, e ripete finché
+// l'offset scende: si ferma da solo a soglia raggiunta o a convergenza
+// (miglioramento sotto epsilon = pavimento del rumore).
 async function quickCalibrate() {
   if (!ds5 || busy) return;
   cancelDriftTest();
@@ -599,40 +703,106 @@ async function quickCalibrate() {
   const msg = $('quick-msg');
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
+  const session = {
+    t: new Date().toISOString(),
+    board: deviceInfo?.board ?? null,
+    fw: deviceInfo?.fwversion ?? null,
+    before: null,
+    passes: [],
+    after: null,
+    unstableEvents: 0,
+  };
   try {
-    await sleep(800);
+    msg.innerHTML = 'Waiting for the sticks to settle…';
+    // Attesa iniziale col gate largo del test drift: serve solo a lasciar
+    // staccare la mano, non a giudicare il jitter proprio dello stick.
+    await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000 });
+    const before = await measureOffset(1000);
+    session.before = summarizeResult(before);
+
+    // Gate adattivo: noise è il p95 (in %) della deviazione dalla mediana,
+    // quindi l'escursione max-min attesa del jitter è ~2×p95.
+    let gateSpread = QUICK_STABLE_SPREAD;
+    if (before) {
+      const noise = Math.max(before.left.noise, before.right.noise) / 100;
+      gateSpread = Math.min(QUICK_STABLE_SPREAD_MAX, Math.max(QUICK_STABLE_SPREAD, noise * 2.5));
+      if (gateSpread > QUICK_STABLE_SPREAD)
+        log(`Noisy signal: stability gate widened to ±${(gateSpread * 100).toFixed(1)}%.`);
+    }
+    let gateOff = false;
+
     let worst = null;
+    let prevWorst = null;
+    let result = null;
     for (let pass = 1; pass <= QUICK_MAX_PASSES; pass++) {
       const base = ((pass - 1) / QUICK_MAX_PASSES) * 100;
       msg.innerHTML = `Pass ${pass}: calibrating — <b>don’t touch the sticks</b>…`;
-      bar.style.width = (base + 4) + '%';
+      bar.style.width = (base + 3) + '%';
 
       await ds5.calibBegin();
       for (let i = 0; i < QUICK_SAMPLES_PER_PASS; i++) {
-        await sleep(100);
+        if (!gateOff) {
+          const stable = await waitForStable({ spread: gateSpread });
+          if (!stable) {
+            // Segnale mai fermo entro il gate: campiona comunque (il firmware
+            // media), traccia l'evento e allarga il gate una volta invece di
+            // pagare il timeout su ogni campione successivo.
+            session.unstableEvents += 1;
+            if (gateSpread < QUICK_STABLE_SPREAD_MAX) {
+              gateSpread = Math.min(QUICK_STABLE_SPREAD_MAX, gateSpread * 1.6);
+              log(`Gate widened to ±${(gateSpread * 100).toFixed(1)}% (signal moving on its own).`);
+            } else {
+              gateOff = true;
+              log('Signal never stable even at the widest gate: sampling without gating.');
+            }
+            msg.innerHTML = `Pass ${pass}: unstable signal — <b>don’t touch the sticks</b>…`;
+          }
+        } else {
+          await sleep(100);
+        }
         await ds5.calibSample();
-        bar.style.width = (base + 4 + ((i + 1) / QUICK_SAMPLES_PER_PASS) * 18) + '%';
+        await sleep(60);
+        bar.style.width = (base + 3 + ((i + 1) / QUICK_SAMPLES_PER_PASS) * 16) + '%';
       }
       await sleep(150);
       await ds5.calibEnd();
 
       msg.innerHTML = `Pass ${pass}: verifying…`;
-      const result = await measureOffset();
+      result = await measureOffset();
       bar.style.width = (base + 100 / QUICK_MAX_PASSES) + '%';
       if (!result) break; // niente dati: lascia il giudizio al test drift finale
       worst = Math.max(result.left.offset, result.right.offset);
+      session.passes.push(+worst.toFixed(2));
       log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (worst < DRIFT_OK_MAX) break;
+      if (prevWorst !== null && prevWorst - worst < QUICK_CONVERGE_EPS) {
+        log('Converged: residual offset at the noise floor, further passes won’t help.');
+        break;
+      }
+      prevWorst = worst;
       if (pass < QUICK_MAX_PASSES)
         msg.innerHTML = `Residual offset ${worst.toFixed(1)}% — new pass…`;
     }
+
+    session.after = summarizeResult(result);
+    session.gate = +gateSpread.toFixed(3);
+    session.gateOff = gateOff;
+    recordCalibSession(session);
+
     bar.style.width = '100%';
     await sleep(300);
     closeModal('modal-quick');
     setUnsaved(true);
-    toast(worst !== null && worst >= DRIFT_OK_MAX
-      ? `Calibration complete, residual offset ${worst.toFixed(1)}%. If it persists, try the guided one.`
-      : 'Quick calibration complete.');
+    const worn = result && Math.max(result.left.noise, result.right.noise) > QUICK_NOISE_WORN;
+    if (worst === null || worst < DRIFT_OK_MAX) {
+      toast('Quick calibration complete.');
+    } else if (worn) {
+      toast(`Calibration complete, residual offset ${worst.toFixed(1)}%. The signal is noisy (worn sensor): this is likely the hardware limit.`, 6000);
+    } else if (session.unstableEvents > 0) {
+      toast(`Calibration complete, residual offset ${worst.toFixed(1)}%. Movement was detected during sampling: repeat on a stable surface.`, 6000);
+    } else {
+      toast(`Calibration complete, residual offset ${worst.toFixed(1)}%. If it persists, try the guided one.`, 6000);
+    }
     log('Quick calibration complete.');
     busy = false;
     startDriftTest();
@@ -909,6 +1079,17 @@ window.addEventListener('beforeunload', e => {
   if (unsaved || busy) { e.preventDefault(); e.returnValue = ''; }
 });
 
+/* ============================== consenso telemetria ============================== */
+
+// Inizializza la checkbox allo stato salvato e persiste ogni cambio.
+const telemetryBox = $('telemetry-consent');
+if (telemetryBox) {
+  telemetryBox.checked = localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1';
+  telemetryBox.addEventListener('change', () => {
+    localStorage.setItem(TELEMETRY_CONSENT_KEY, telemetryBox.checked ? '1' : '0');
+  });
+}
+
 /* ============================== boot ============================== */
 
 async function boot() {
@@ -941,8 +1122,11 @@ async function boot() {
 boot();
 
 // Hook di sviluppo: simula la posizione degli stick senza controller.
-window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; };
+window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; notifyStickSample(); };
 window.__senseExtractStable = extractStableSamples;
+window.__senseWaitForStable = waitForStable;
+// Storico locale delle calibrazioni (telemetria per futura calibrazione ML).
+window.__senseCalibSessions = () => JSON.parse(localStorage.getItem(CALIB_STORE_KEY) || '[]');
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
 // in coppia con __senseSimulate.
