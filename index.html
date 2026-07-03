@@ -52,7 +52,7 @@
     <div class="card device-card">
       <div class="device-id">
         <h2>DualSense</h2>
-        <p id="device-sub" class="device-sub">&mdash;</p>
+        <p id="device-sub" class="device-sub">...</p>
       </div>
       <dl id="device-info" class="device-info"></dl>
       <div class="device-actions">
@@ -118,7 +118,7 @@
       <div class="action">
         <div>
           <h4>Precision test</h4>
-          <p>A roughly one-minute mini-game: steadiness, targets and tracking. Score 0&ndash;100 to compare before and after calibration.</p>
+          <p>A roughly one-minute mini-game: steadiness, targets and tracking. Score 0 to 100 to compare before and after calibration.</p>
         </div>
         <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
@@ -143,9 +143,9 @@
 <footer class="footer">
   <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
   <span>Unofficial tool &middot; use at your own risk.</span>
-  <label class="telemetry-label" title="board model, firmware, calibration results, test scores — never serial numbers, device IDs or IP">
+  <label class="telemetry-label" title="board model, firmware, calibration results, test scores (never serial numbers, device IDs or IP)">
     <input type="checkbox" id="telemetry-consent-footer">
-    Share anonymous usage data to improve the algorithm &mdash; on by default (<a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)
+    Share anonymous usage data to improve the algorithm (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)
   </label>
 </footer>
 
@@ -155,7 +155,7 @@
     <h3 id="quick-title">Quick calibration</h3>
     <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <div class="progress"><i id="quick-bar"></i></div>
-    <label class="telemetry-label" title="board model, firmware, calibration results, test scores — never serial numbers, device IDs or IP">
+    <label class="telemetry-label" title="board model, firmware, calibration results, test scores (never serial numbers, device IDs or IP)">
       <input type="checkbox" id="telemetry-consent">
       Share anonymous usage data to improve the algorithm
     </label>
@@ -212,7 +212,7 @@
       <canvas id="dial-range-r" width="200" height="200" aria-label="Right stick coverage"></canvas>
     </div>
     <div class="range-minmax mono" id="range-minmax">
-      <span>LX &mdash;</span><span>LY &mdash;</span><span>RX &mdash;</span><span>RY &mdash;</span>
+      <span>LX</span><span>LY</span><span>RX</span><span>RY</span>
     </div>
     <div class="range-meta">
       <span id="range-hint" class="range-hint">Extremes not reached yet</span>
@@ -266,9 +266,9 @@
 
     <div id="game-intro" class="game-intro">
       <ol class="game-trials">
-        <li><b>Steadiness</b> &mdash; hold the sticks still at the center.</li>
-        <li><b>Targets</b> &mdash; reach the targets that appear, even at full travel.</li>
-        <li><b>Tracking</b> &mdash; follow a moving target.</li>
+        <li><b>Steadiness:</b> hold the sticks still at the center.</li>
+        <li><b>Targets:</b> reach the targets that appear, even at full travel.</li>
+        <li><b>Tracking:</b> follow a moving target.</li>
       </ol>
       <div class="modal-actions">
         <button id="btn-game-start" class="btn btn-primary">Start</button>

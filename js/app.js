@@ -412,7 +412,7 @@ function startDriftTest(auto = false) {
   };
   const card = $('drift-card');
   card.dataset.state = 'testing';
-  $('drift-status').textContent = 'Test running — don’t touch the sticks…';
+  $(‘drift-status’).textContent = ‘Test running: don’t touch the sticks…’;
   $('drift-progress').classList.remove('hidden');
   $('verdict-l').classList.add('hidden');
   $('verdict-r').classList.add('hidden');
@@ -477,7 +477,7 @@ function driftTick() {
       driftTest.retries += 1;
       driftTest.samples = [];
       driftTest.deadline = performance.now() + DRIFT_TEST_MS;
-      $('drift-status').textContent = 'Movement detected — retrying: don’t touch the sticks…';
+      $(‘drift-status’).textContent = ‘Movement detected. Retrying: don’t touch the sticks…’;
       requestAnimationFrame(driftTick);
       return;
     }
@@ -767,7 +767,7 @@ async function quickCalibrate() {
     let result = null;
     for (let pass = 1; pass <= QUICK_MAX_PASSES; pass++) {
       const base = ((pass - 1) / QUICK_MAX_PASSES) * 100;
-      msg.innerHTML = `Pass ${pass}: calibrating — <b>don’t touch the sticks</b>…`;
+      msg.innerHTML = `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
       bar.style.width = (base + 3) + '%';
 
       await ds5.calibBegin();
@@ -786,7 +786,7 @@ async function quickCalibrate() {
               gateOff = true;
               log('Signal never stable even at the widest gate: sampling without gating.');
             }
-            msg.innerHTML = `Pass ${pass}: unstable signal — <b>don’t touch the sticks</b>…`;
+            msg.innerHTML = `Pass ${pass}: unstable signal. <b>Don’t touch the sticks.</b>`;
           }
         } else {
           await sleep(100);
@@ -812,7 +812,7 @@ async function quickCalibrate() {
       }
       prevWorst = worst;
       if (pass < QUICK_MAX_PASSES)
-        msg.innerHTML = `Residual offset ${worst.toFixed(1)}% — new pass…`;
+        msg.innerHTML = `Residual offset ${worst.toFixed(1)}%, running another pass…`;
     }
 
     session.after = summarizeResult(result);
@@ -976,7 +976,7 @@ async function openRange() {
   };
   $('btn-range-done').disabled = true;
   $('range-bar').style.width = '0%';
-  $('range-minmax').innerHTML = '<span>LX —</span><span>LY —</span><span>RX —</span><span>RY —</span>';
+  $('range-minmax').innerHTML = '<span>LX</span><span>LY</span><span>RX</span><span>RY</span>';
   $('range-hint').textContent = 'Extremes not reached yet';
   openModal('modal-range');
 }
@@ -1138,7 +1138,7 @@ for (const box of consentBoxes) {
 if (telemetryEnabled() && !localStorage.getItem(TELEMETRY_NOTICE_KEY)) {
   localStorage.setItem(TELEMETRY_NOTICE_KEY, '1');
   toast('Anonymous usage data is shared by default to improve the calibration algorithm (ML training). '
-    + 'No serial numbers, IDs or IP — opt out anytime in the footer.', 9000);
+    + 'No serial numbers, IDs or IP addresses are collected. Opt out anytime in the footer.', 9000);
 }
 
 /* ============================== boot ============================== */
