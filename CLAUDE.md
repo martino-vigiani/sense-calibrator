@@ -22,7 +22,7 @@ Three ES modules under `js/`, loaded from `index.html`:
 
 - **`js/ds5.js`** — DualSense HID protocol layer, no DOM. The `DS5` class wraps a WebHID device: calibration commands (feature reports `0x82` send / `0x83` response, checked against expected status words), NVS lock/unlock/status (`0x80`/`0x81`), device info, battery parsing. Protocol sequences derive from the dualshock-tools project. Key invariant: feature report buffers must be padded to the size declared by the HID descriptor (`allocReq`) or the firmware silently discards the command.
 - **`js/app.js`** — all UI and calibration logic: connection/reconnect, input report parsing, automatic drift test, quick calibration (stability-gated sampling with adaptive gate + convergence passes), 4-corner guided wizard, range calibration with coverage bins, NVS write flow, telemetry. Tuning constants (drift thresholds, stability windows, gate spreads) live at the top of the file and of each section.
-- **`js/game.js`** — self-contained stick-precision minigame (steadiness / targets / Lissajous tracking). Talks to app.js only through injected deps (`getSticks`, `isAvailable`); never touches HID.
+- **`js/game.js`** — self-contained precision test with three calibration-diagnostic checks (center hold / edge reach / snap-back), each measuring a calibration property rather than user skill. Talks to app.js only through injected deps (`getSticks`, `isAvailable`, optional `onReport`); never touches HID.
 
 Comments in the JS are in Italian; UI strings are English.
 

@@ -45,7 +45,7 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 - **Quick calibration:** re-centers the sticks automatically. Samples are stability-gated (touch or vibration never contaminates the average), the gate adapts to the controller's own noise floor, and passes repeat until the residual offset converges. The final verdict distinguishes a fixable offset from worn hardware that needs physical repair.
 - **Guided four-corner calibration:** for stubborn drift. Push sticks into each corner while live dials show actual vs. target position.
 - **Range calibration:** rotate both sticks to recalibrate full travel. A 36-bin polar coverage map unlocks the save button only once the full perimeter is covered.
-- **Precision mini-game:** optional scored test (steadiness, fixed targets, Lissajous tracking) producing a reproducible 0 to 100 score per stick, so you can prove the fix worked before and after.
+- **Precision test:** three quick calibration checks (center hold, edge reach, snap-back), each measuring a calibration property rather than hand skill. Reproducible 0 to 100 score per stick, so you can prove the fix worked before and after.
 - **Permanent NVS write:** calibration is temporary until you explicitly write it to the controller's non-volatile storage. Once written, the fix applies everywhere.
 - Live stick visualization, HID command log, automatic reconnect.
 
@@ -96,7 +96,7 @@ Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is
 | `wizard` | Completion flag |
 | `range` | Coverage per stick, whether all extremes were reached, duration |
 | `flash` | Success/failure and NVS status (error message text on failure) |
-| `game` | Precision-test scores (steadiness / targets / tracking per stick, totals) |
+| `game` | Precision-test scores (center / reach / snap-back per stick, totals) |
 
 **What is never collected:** serial number, any device identifier, IP address (not stored server-side), browser fingerprint, or any personal information.
 

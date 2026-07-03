@@ -1,9 +1,15 @@
 'use strict';
 
 /* ============================================================
-   Test di precisione — mini-gioco di diagnostica degli stick.
+   Test di precisione — tre prove diagnostiche di calibrazione.
    Modulo autonomo: legge solo la posizione degli stick via deps,
    non tocca l'HID e non conosce lo stato di app.js.
+
+   Ogni prova misura una proprietà della calibrazione, non
+   l'abilità dell'utente:
+     Center    -> offset residuo a riposo (drift)
+     Reach     -> copertura del fondo corsa (range)
+     Snap-back -> dove si ferma lo stick rilasciato (ricentraggio)
 
    initGame(deps, opts)
      deps.getSticks  -> () => ({ lx, ly, rx, ry })   (-1..1, y giù)
@@ -21,54 +27,43 @@ const MID = '#c9c9c5';
 const $ = id => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-/* ---------------- parametri di gioco (fissi: punteggi stabili) ---------------- */
+/* ---------------- parametri (fissi: punteggi stabili) ---------------- */
 
-// Fermezza
-const STEADY_MS = 10000;
-const STEADY_SETTLE_MS = 600;      // scartati all'inizio (la mano lascia lo stick)
+// Center: media della distanza dal centro a riposo.
+const CENTER_MS = 6000;
+const CENTER_SETTLE_MS = 600;   // scartati all'inizio (la mano lascia lo stick)
+const CENTER_ZERO = 0.05;       // 5% di offset medio -> punteggio 0
 
-// Bersagli: posizioni fisse (centro, cardinali a piena corsa, diagonali).
-// L'ordine è deterministico così la prova è identica ogni volta.
-const TARGET_FULL = 0.85;          // deflessione richiesta sui bordi
-const TARGET_DIAG = 0.6;           // componente diagonale (~0.85 di modulo)
-const TARGETS = [
-  { x: 0, y: 0 },
-  { x: TARGET_FULL, y: 0 },
-  { x: -TARGET_FULL, y: 0 },
-  { x: 0, y: -TARGET_FULL },
-  { x: 0, y: TARGET_FULL },
-  { x: TARGET_DIAG, y: -TARGET_DIAG },
-  { x: -TARGET_DIAG, y: TARGET_DIAG },
-];
-const TARGET_RADIUS = 0.22;        // raggio della zona valida (in unità stick)
-const TARGET_HOLD_MS = 350;        // permanenza richiesta dentro il bersaglio
-const TARGET_TIMEOUT_MS = 9000;    // tempo massimo per acquisire un bersaglio
-const TARGET_IDEAL_MS = 1200;      // tempo "perfetto" di acquisizione (per il punteggio)
+// Reach: rotazione a fondo corsa, massimo raggio per settore.
+const REACH_MS = 10000;
+const REACH_BINS = 12;
+const REACH_OK = 0.9;           // raggio minimo perché un settore conti
 
-// Inseguimento: traiettoria di Lissajous fissa (passa per centro e bordi).
-const TRACK_MS = 20000;
-const TRACK_SETTLE_MS = 1000;      // primo tratto escluso dal punteggio (rincorsa iniziale)
-const TRACK_AMP = 0.78;
-const TRACK_FREQ_X = 1.0;          // giri/periodo
-const TRACK_FREQ_Y = 2.0;
-const TRACK_PERIOD_MS = 10000;     // durata di un periodo della figura
+// Snap-back: flick al bordo, rilascio, misura del punto di riposo.
+const SNAP_FLICKS = 3;          // flick richiesti per stick
+const SNAP_ARM = 0.75;          // raggio oltre cui il flick è "armato"
+const SNAP_RELEASE = 0.25;      // raggio sotto cui lo stick è stato rilasciato
+const SNAP_SETTLE_MS = 450;     // attesa perché lo stick si fermi davvero
+const SNAP_MEASURE_MS = 400;    // finestra di misura del punto di riposo
+const SNAP_TIMEOUT_MS = 25000;  // tempo massimo per la prova intera
+const SNAP_ZERO = 0.05;         // 5% di riposo medio -> punteggio 0
 
 // Countdown tra prove
 const COUNTDOWN_FROM = 3;
 const COUNTDOWN_STEP_MS = 800;
 
 // Pesi del punteggio complessivo per stick (somma = 1).
-const W_STEADY = 0.25;
-const W_TARGETS = 0.40;
-const W_TRACK = 0.35;
+const W_CENTER = 0.40;
+const W_REACH = 0.25;
+const W_SNAP = 0.35;
 
-// v2: taratura difficoltà cambiata — i punteggi v1 non sono confrontabili.
-const STORAGE_KEY = 'senseGameLastScore.v2';
+// v3: prove cambiate (center/reach/snap) — i punteggi v2 non sono confrontabili.
+const STORAGE_KEY = 'senseGameLastScore.v3';
 
 /* ---------------- canvas di gioco ---------------- */
 
 // Quadrante di gioco: stesso scaling DPR di StickDial in app.js.
-// Disegna bersaglio, traiettoria e posizione corrente in coordinate -1..1.
+// Disegna anello bersaglio e posizione corrente in coordinate -1..1.
 class GameCanvas {
   constructor(canvas) {
     this.canvas = canvas;
@@ -92,7 +87,6 @@ class GameCanvas {
 
   clearTrail() { this.trail = []; }
 
-  // toPx: da unità stick (-1..1) a pixel logici nel quadrante.
   draw(scene) {
     const { ctx, size } = this;
     const c = size / 2;
@@ -110,18 +104,6 @@ class GameCanvas {
     ctx.moveTo(c, c - R); ctx.lineTo(c, c + R);
     ctx.stroke();
 
-    // traiettoria di inseguimento (fantasma)
-    if (scene && scene.path && scene.path.length > 1) {
-      ctx.strokeStyle = GRID;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      for (let i = 0; i < scene.path.length; i++) {
-        const p = scene.path[i];
-        i === 0 ? ctx.moveTo(px(p.x), px(p.y)) : ctx.lineTo(px(p.x), px(p.y));
-      }
-      ctx.stroke();
-    }
-
     // scia del puntatore utente
     for (let i = 1; i < this.trail.length; i++) {
       const a = this.trail[i - 1];
@@ -134,34 +116,29 @@ class GameCanvas {
       ctx.stroke();
     }
 
-    // bersaglio (anello + crocino) o segnalino mobile dell'inseguimento
-    if (scene && scene.target) {
-      const t = scene.target;
-      const rr = (t.radius != null ? t.radius : TARGET_RADIUS) * R;
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = t.locked ? 3 : 1.5;
-      ctx.setLineDash(t.locked ? [] : [4, 4]);
+    // anello bersaglio: al centro (Center/Snap) o sul bordo (Reach)
+    if (scene && scene.ring) {
+      const r = scene.ring;
+      ctx.strokeStyle = r.locked ? INK : MID;
+      ctx.lineWidth = r.locked ? 2.5 : 1.5;
+      ctx.setLineDash(r.locked ? [] : [4, 4]);
       ctx.beginPath();
-      ctx.arc(px(t.x), px(t.y), rr, 0, 2 * Math.PI);
+      ctx.arc(c, c, r.radius * R, 0, 2 * Math.PI);
       ctx.stroke();
       ctx.setLineDash([]);
-      // crocino interno
-      ctx.strokeStyle = MID;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(px(t.x) - 5, px(t.y)); ctx.lineTo(px(t.x) + 5, px(t.y));
-      ctx.moveTo(px(t.x), px(t.y) - 5); ctx.lineTo(px(t.x), px(t.y) + 5);
-      ctx.stroke();
     }
 
-    // bersaglio fisso al centro (prova Fermezza)
-    if (scene && scene.centerHold) {
-      ctx.strokeStyle = MID;
-      ctx.setLineDash([3, 4]);
-      ctx.beginPath();
-      ctx.arc(c, c, TARGET_RADIUS * R, 0, 2 * Math.PI);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // settori mancanti della prova Reach (tacche sul perimetro)
+    if (scene && scene.bins) {
+      for (let i = 0; i < REACH_BINS; i++) {
+        if (scene.bins[i] >= REACH_OK) continue;
+        const ang = (i + 0.5) / REACH_BINS * 2 * Math.PI - Math.PI;
+        ctx.strokeStyle = MID;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(c, c, R + 6, ang - 0.18, ang + 0.18);
+        ctx.stroke();
+      }
     }
 
     // punto corrente dell'utente
@@ -174,66 +151,37 @@ class GameCanvas {
 
 /* ---------------- punteggi (mappature monotone, deterministiche) ---------------- */
 
-// Tutte le mappature error->score sono lineari a tratti e prive di casualità:
+// Tutte le mappature errore->punteggio sono lineari e prive di casualità:
 // la stessa prestazione produce sempre lo stesso punteggio.
 
-// Fermezza: errore = distanza radiale media dal centro (in unità stick).
-// 0 -> 100, 0.20 (=20% deflessione) -> 0.
-function scoreSteady(meanDist) {
-  return Math.round(clamp(100 - (meanDist / 0.20) * 100, 0, 100));
+// Center e Snap: distanza dal centro (unità stick). 0 -> 100, ZERO -> 0.
+function scoreOffset(meanDist, zero) {
+  return Math.round(clamp(100 - (meanDist / zero) * 100, 0, 100));
 }
 
-// Bersagli: combina tempo di acquisizione e overshoot, mediati sui bersagli.
-// timeScore: ideale TARGET_IDEAL_MS -> 100, timeout -> 0.
-// overshoot = quanto si supera il bersaglio prima di stabilizzarsi.
-function scoreTargets(records) {
-  if (!records.length) return 0;
-  let sum = 0;
-  for (const r of records) {
-    if (!r.acquired) continue; // bersaglio mancato entro il timeout: contributo 0
-    const t = clamp((r.time - TARGET_IDEAL_MS) / (TARGET_TIMEOUT_MS - TARGET_IDEAL_MS), 0, 1);
-    const timeScore = 100 - t * 100;
-    // overshoot in unità stick oltre il bordo del bersaglio: 0 -> 100, 0.35 -> 0
-    const overScore = clamp(100 - (r.overshoot / 0.35) * 100, 0, 100);
-    sum += timeScore * 0.7 + overScore * 0.3;
-  }
-  return Math.round(sum / records.length);
+// Reach: frazione di settori che raggiungono il fondo corsa.
+function scoreReach(bins) {
+  const ok = bins.filter(v => v >= REACH_OK).length;
+  return Math.round((ok / REACH_BINS) * 100);
 }
 
-// Inseguimento: errore = distanza media puntatore-bersaglio durante il tratto utile.
-// 0 -> 100, 0.40 -> 0.
-function scoreTrack(meanErr) {
-  return Math.round(clamp(100 - (meanErr / 0.40) * 100, 0, 100));
+// Snap: media dei punti di riposo misurati; nessun flick registrato -> 0.
+function scoreSnap(rests) {
+  if (!rests.length) return 0;
+  const mean = rests.reduce((a, b) => a + b, 0) / rests.length;
+  return scoreOffset(mean, SNAP_ZERO);
 }
 
 function overallScore(s) {
-  return Math.round(s.steady * W_STEADY + s.targets * W_TARGETS + s.track * W_TRACK);
+  return Math.round(s.center * W_CENTER + s.reach * W_REACH + s.snap * W_SNAP);
 }
 
 function verdictFor(score) {
-  if (score >= 90) return 'Excellent precision';
-  if (score >= 75) return 'Good precision';
-  if (score >= 55) return 'Fair precision';
-  if (score >= 35) return 'Poor precision';
-  return 'Critical precision';
-}
-
-/* ---------------- posizione traiettoria di inseguimento ---------------- */
-
-// Lissajous deterministica: passa per il centro e sfiora i bordi.
-function trackPoint(elapsedMs) {
-  const ph = (elapsedMs / TRACK_PERIOD_MS) * 2 * Math.PI;
-  return {
-    x: TRACK_AMP * Math.sin(TRACK_FREQ_X * ph),
-    y: TRACK_AMP * Math.sin(TRACK_FREQ_Y * ph),
-  };
-}
-
-// Campiona la figura per disegnarla come riferimento (un periodo completo).
-function trackPathSamples(n = 160) {
-  const pts = [];
-  for (let i = 0; i <= n; i++) pts.push(trackPoint((i / n) * TRACK_PERIOD_MS));
-  return pts;
+  if (score >= 90) return 'Excellent calibration';
+  if (score >= 75) return 'Good calibration';
+  if (score >= 55) return 'Fair calibration';
+  if (score >= 35) return 'Poor calibration';
+  return 'Critical calibration';
 }
 
 /* ============================================================
@@ -289,8 +237,6 @@ export function initGame(deps) {
 
   /* ---------------- helper di stato ---------------- */
 
-  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
-
   function setProgress(pct) {
     elProgressBar.style.width = clamp(pct, 0, 100) + '%';
   }
@@ -305,8 +251,8 @@ export function initGame(deps) {
 
   function startSequence() {
     scores = {
-      L: { steady: 0, targets: 0, track: 0 },
-      R: { steady: 0, targets: 0, track: 0 },
+      L: { center: 0, reach: 0, snap: 0 },
+      R: { center: 0, reach: 0, snap: 0 },
     };
     elIntro.classList.add('hidden');
     elReport.classList.add('hidden');
@@ -316,7 +262,7 @@ export function initGame(deps) {
     canvasL.clearTrail();
     canvasR.clearTrail();
     running = true;
-    enterCountdown('Steadiness', 'Leave the sticks at the center without touching them.', beginSteady);
+    enterCountdown('Center', 'Leave the sticks alone. Measuring the resting offset.', beginCenter);
   }
 
   // Countdown 3-2-1 prima di ogni prova, così l'utente si prepara.
@@ -351,150 +297,140 @@ export function initGame(deps) {
     }
   }
 
-  /* --- Prova 1: Fermezza --- */
+  /* --- Prova 1: Center --- */
 
-  function beginSteady() {
-    elPhase.textContent = 'Steadiness';
-    elInstr.textContent = 'Don’t touch the sticks. We’re measuring the residual drift.';
+  function beginCenter() {
+    elPhase.textContent = 'Center';
+    elInstr.textContent = 'Don’t touch the sticks. Measuring the resting offset.';
     phase = {
-      kind: 'steady',
+      kind: 'center',
       start: performance.now(),
       L: { sum: 0, n: 0 },
       R: { sum: 0, n: 0 },
     };
-    scene = { L: { centerHold: true }, R: { centerHold: true } };
+    scene = {
+      L: { ring: { radius: 0.12, locked: false } },
+      R: { ring: { radius: 0.12, locked: false } },
+    };
   }
 
-  function tickSteady(ts, s) {
+  function tickCenter(ts, s) {
     const elapsed = ts - phase.start;
-    setProgress((elapsed / STEADY_MS) * 100);
-    if (elapsed > STEADY_SETTLE_MS) {
+    setProgress((elapsed / CENTER_MS) * 100);
+    if (elapsed > CENTER_SETTLE_MS) {
       phase.L.sum += Math.hypot(s.lx, s.ly); phase.L.n++;
       phase.R.sum += Math.hypot(s.rx, s.ry); phase.R.n++;
     }
-    if (elapsed >= STEADY_MS) {
-      scores.L.steady = scoreSteady(phase.L.n ? phase.L.sum / phase.L.n : 0);
-      scores.R.steady = scoreSteady(phase.R.n ? phase.R.sum / phase.R.n : 0);
-      enterCountdown('Targets', 'Bring both dots inside the targets and hold them still.', beginTargets);
+    scene.L.ring.locked = Math.hypot(s.lx, s.ly) <= 0.12;
+    scene.R.ring.locked = Math.hypot(s.rx, s.ry) <= 0.12;
+    if (elapsed >= CENTER_MS) {
+      scores.L.center = scoreOffset(phase.L.n ? phase.L.sum / phase.L.n : 0, CENTER_ZERO);
+      scores.R.center = scoreOffset(phase.R.n ? phase.R.sum / phase.R.n : 0, CENTER_ZERO);
+      enterCountdown('Reach', 'Rotate both sticks slowly along the edge, full circles.', beginReach);
     }
   }
 
-  /* --- Prova 2: Bersagli (simultanea sui due stick) --- */
+  /* --- Prova 2: Reach --- */
 
-  function beginTargets() {
-    elPhase.textContent = 'Targets';
-    elInstr.textContent = 'Bring the dots inside the targets and hold them there for a moment.';
+  function beginReach() {
+    elPhase.textContent = 'Reach';
+    elInstr.textContent = 'Rotate both sticks along the edge. Cover the whole perimeter.';
     phase = {
-      kind: 'targets',
-      index: 0,
-      L: { records: [], state: newTargetState() },
-      R: { records: [], state: newTargetState() },
-    };
-    setTargetScene();
-  }
-
-  function newTargetState() {
-    return { start: performance.now(), insideSince: null, entered: false, overshoot: 0, done: false };
-  }
-
-  function setTargetScene() {
-    const t = TARGETS[phase.index];
-    phase.L.state = newTargetState();
-    phase.R.state = newTargetState();
-    canvasL.clearTrail();
-    canvasR.clearTrail();
-    scene = {
-      L: { target: { x: t.x, y: t.y, radius: TARGET_RADIUS, locked: false } },
-      R: { target: { x: t.x, y: t.y, radius: TARGET_RADIUS, locked: false } },
-    };
-  }
-
-  // Aggiorna lo stato di acquisizione di un singolo stick verso il bersaglio.
-  function tickTargetStick(ts, side, ux, uy, t) {
-    const st = phase[side].state;
-    if (st.done) return;
-    const d = dist(ux, uy, t.x, t.y);
-    const inside = d <= TARGET_RADIUS;
-
-    if (inside) {
-      st.entered = true;
-      if (st.insideSince == null) st.insideSince = ts;
-      scene[side].target.locked = true;
-      if (ts - st.insideSince >= TARGET_HOLD_MS) {
-        st.done = true;
-        st.acquired = true;
-        phase[side].records.push({
-          acquired: true,
-          time: ts - st.start - TARGET_HOLD_MS,
-          overshoot: clamp(st.overshoot, 0, 0.35),
-        });
-      }
-    } else {
-      // overshoot = entrare nel bersaglio e poi sforare di nuovo fuori:
-      // misura di quanto si è "tirato" l'ingresso, non la centratura.
-      if (st.entered) st.overshoot = Math.max(st.overshoot, d - TARGET_RADIUS);
-      st.insideSince = null;
-      scene[side].target.locked = false;
-    }
-
-    // timeout: bersaglio mancato
-    if (!st.done && ts - st.start >= TARGET_TIMEOUT_MS) {
-      st.done = true;
-      st.acquired = false;
-      phase[side].records.push({ acquired: false, time: TARGET_TIMEOUT_MS, overshoot: 0 });
-    }
-  }
-
-  function tickTargets(ts, s) {
-    const t = TARGETS[phase.index];
-    tickTargetStick(ts, 'L', s.lx, s.ly, t);
-    tickTargetStick(ts, 'R', s.rx, s.ry, t);
-    setProgress((phase.index / TARGETS.length) * 100);
-
-    if (phase.L.state.done && phase.R.state.done) {
-      phase.index += 1;
-      if (phase.index >= TARGETS.length) {
-        scores.L.targets = scoreTargets(phase.L.records);
-        scores.R.targets = scoreTargets(phase.R.records);
-        enterCountdown('Tracking', 'Follow the moving target with the dot.', beginTrack);
-      } else {
-        setTargetScene();
-      }
-    }
-  }
-
-  /* --- Prova 3: Inseguimento --- */
-
-  function beginTrack() {
-    elPhase.textContent = 'Tracking';
-    elInstr.textContent = 'Keep the dot on top of the moving target.';
-    const path = trackPathSamples();
-    phase = {
-      kind: 'track',
+      kind: 'reach',
       start: performance.now(),
-      path,
-      L: { sum: 0, n: 0 },
-      R: { sum: 0, n: 0 },
+      L: { bins: new Array(REACH_BINS).fill(0) },
+      R: { bins: new Array(REACH_BINS).fill(0) },
     };
     canvasL.clearTrail();
     canvasR.clearTrail();
+    scene = {
+      L: { ring: { radius: REACH_OK, locked: false }, bins: phase.L.bins },
+      R: { ring: { radius: REACH_OK, locked: false }, bins: phase.R.bins },
+    };
   }
 
-  function tickTrack(ts, s) {
+  function reachAccumulate(bins, x, y) {
+    const r = Math.hypot(x, y);
+    const bin = Math.floor(((Math.atan2(y, x) + Math.PI) / (2 * Math.PI)) * REACH_BINS) % REACH_BINS;
+    if (r > bins[bin]) bins[bin] = r;
+    return r;
+  }
+
+  function tickReach(ts, s) {
     const elapsed = ts - phase.start;
-    const tp = trackPoint(elapsed);
-    setProgress((elapsed / TRACK_MS) * 100);
-    scene = {
-      L: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.14, locked: false } },
-      R: { path: phase.path, target: { x: tp.x, y: tp.y, radius: 0.14, locked: false } },
-    };
-    if (elapsed > TRACK_SETTLE_MS) {
-      phase.L.sum += dist(s.lx, s.ly, tp.x, tp.y); phase.L.n++;
-      phase.R.sum += dist(s.rx, s.ry, tp.x, tp.y); phase.R.n++;
+    setProgress((elapsed / REACH_MS) * 100);
+    scene.L.ring.locked = reachAccumulate(phase.L.bins, s.lx, s.ly) >= REACH_OK;
+    scene.R.ring.locked = reachAccumulate(phase.R.bins, s.rx, s.ry) >= REACH_OK;
+    if (elapsed >= REACH_MS) {
+      scores.L.reach = scoreReach(phase.L.bins);
+      scores.R.reach = scoreReach(phase.R.bins);
+      enterCountdown('Snap-back', 'Flick each stick to the edge and let it go. Three times per stick.', beginSnap);
     }
-    if (elapsed >= TRACK_MS) {
-      scores.L.track = scoreTrack(phase.L.n ? phase.L.sum / phase.L.n : 1);
-      scores.R.track = scoreTrack(phase.R.n ? phase.R.sum / phase.R.n : 1);
+  }
+
+  /* --- Prova 3: Snap-back --- */
+
+  // Macchina a stati per stick: wait -> armed -> settling -> measuring -> wait.
+  // Il punto di riposo si misura solo dopo un flick vero (armato oltre SNAP_ARM)
+  // e dopo che lo stick ha avuto il tempo di fermarsi.
+  function snapState() {
+    return { rests: [], stage: 'wait', stageAt: 0, sum: 0, n: 0 };
+  }
+
+  function beginSnap() {
+    elPhase.textContent = 'Snap-back';
+    elInstr.textContent = 'Flick each stick to the edge and let it go. Three times per stick.';
+    phase = {
+      kind: 'snap',
+      start: performance.now(),
+      L: snapState(),
+      R: snapState(),
+    };
+    canvasL.clearTrail();
+    canvasR.clearTrail();
+    scene = {
+      L: { ring: { radius: 0.12, locked: false } },
+      R: { ring: { radius: 0.12, locked: false } },
+    };
+  }
+
+  function tickSnapStick(ts, st, x, y) {
+    if (st.rests.length >= SNAP_FLICKS) return;
+    const r = Math.hypot(x, y);
+    if (st.stage === 'wait') {
+      if (r >= SNAP_ARM) { st.stage = 'armed'; st.stageAt = ts; }
+    } else if (st.stage === 'armed') {
+      if (r <= SNAP_RELEASE) { st.stage = 'settling'; st.stageAt = ts; }
+    } else if (st.stage === 'settling') {
+      // Se l'utente riparte durante l'assestamento, il flick si riarma.
+      if (r >= SNAP_ARM) { st.stage = 'armed'; st.stageAt = ts; return; }
+      if (ts - st.stageAt >= SNAP_SETTLE_MS) {
+        st.stage = 'measuring'; st.stageAt = ts; st.sum = 0; st.n = 0;
+      }
+    } else if (st.stage === 'measuring') {
+      if (r >= SNAP_ARM) { st.stage = 'armed'; st.stageAt = ts; return; }
+      st.sum += r; st.n++;
+      if (ts - st.stageAt >= SNAP_MEASURE_MS) {
+        st.rests.push(st.n ? st.sum / st.n : r);
+        st.stage = 'wait';
+      }
+    }
+  }
+
+  function tickSnap(ts, s) {
+    tickSnapStick(ts, phase.L, s.lx, s.ly);
+    tickSnapStick(ts, phase.R, s.rx, s.ry);
+    scene.L.ring.locked = phase.L.rests.length >= SNAP_FLICKS;
+    scene.R.ring.locked = phase.R.rests.length >= SNAP_FLICKS;
+    const total = phase.L.rests.length + phase.R.rests.length;
+    setProgress((total / (SNAP_FLICKS * 2)) * 100);
+    elInstr.textContent = `Flick and release. Left ${phase.L.rests.length}/${SNAP_FLICKS}, right ${phase.R.rests.length}/${SNAP_FLICKS}.`;
+
+    const done = phase.L.rests.length >= SNAP_FLICKS && phase.R.rests.length >= SNAP_FLICKS;
+    const timedOut = ts - phase.start >= SNAP_TIMEOUT_MS;
+    if (done || timedOut) {
+      scores.L.snap = scoreSnap(phase.L.rests);
+      scores.R.snap = scoreSnap(phase.R.rests);
       finishSequence();
     }
   }
@@ -548,18 +484,18 @@ export function initGame(deps) {
       <div class="game-breakdown">
         <div class="game-stick-col">
           <h4>Left stick &middot; ${res.L.total}</h4>
-          ${row('Steadiness', res.L.steady)}
-          ${row('Targets', res.L.targets)}
-          ${row('Tracking', res.L.track)}
+          ${row('Center', res.L.center)}
+          ${row('Reach', res.L.reach)}
+          ${row('Snap-back', res.L.snap)}
         </div>
         <div class="game-stick-col">
           <h4>Right stick &middot; ${res.R.total}</h4>
-          ${row('Steadiness', res.R.steady)}
-          ${row('Targets', res.R.targets)}
-          ${row('Tracking', res.R.track)}
+          ${row('Center', res.R.center)}
+          ${row('Reach', res.R.reach)}
+          ${row('Snap-back', res.R.snap)}
         </div>
       </div>
-      <p class="game-formula">Score = Steadiness 25% + Targets 40% + Tracking 35%. Same performance, same score.</p>
+      <p class="game-formula">Score = Center 40% + Reach 25% + Snap-back 35%. Same performance, same score.</p>
     `;
   }
 
@@ -589,9 +525,9 @@ export function initGame(deps) {
 
     if (phase) {
       if (phase.kind === 'countdown') tickCountdown(ts);
-      else if (phase.kind === 'steady') tickSteady(ts, s);
-      else if (phase.kind === 'targets') tickTargets(ts, s);
-      else if (phase.kind === 'track') tickTrack(ts, s);
+      else if (phase.kind === 'center') tickCenter(ts, s);
+      else if (phase.kind === 'reach') tickReach(ts, s);
+      else if (phase.kind === 'snap') tickSnap(ts, s);
     }
 
     // disegno sempre, anche a riposo (intro/report): mostra la posizione viva
@@ -611,7 +547,7 @@ export function initGame(deps) {
     elProgress.classList.add('hidden');
     hideCountdown();
     elPhase.textContent = 'Precision test';
-    elInstr.textContent = 'Three trials, about a minute. Press Start when you’re ready.';
+    elInstr.textContent = 'Three quick checks, about 40 seconds. Press Start when you’re ready.';
     scene = { L: {}, R: {} };
     const prev = loadPrevious();
     btnStart.textContent = prev != null ? `Start (previous ${prev})` : 'Start';
