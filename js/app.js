@@ -669,12 +669,16 @@ async function measureOffset(ms = 1500) {
   return analyzeDrift(stable.length > 40 ? stable : samples);
 }
 
-/* --------- telemetria locale + upload anonimo opt-in --------- */
-// localStorage sempre; invio in rete solo se l'utente ha dato consenso esplicito.
-// Non vengono mai inviati seriale, IP o altri identificatori.
+/* --------- telemetria locale + upload anonimo (opt-out) --------- */
+// localStorage sempre. L'upload è attivo di default: i dati sono anonimi per
+// costruzione (mai seriale, ID, IP o fingerprint) e servono ad addestrare
+// miglioramenti data-driven dell'algoritmo. '0' esplicito = opt-out persistito.
 const CALIB_STORE_KEY      = 'sense-calib-sessions';
 const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
+const TELEMETRY_NOTICE_KEY = 'sense-telemetry-notice';
 const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
+
+const telemetryEnabled = () => localStorage.getItem(TELEMETRY_CONSENT_KEY) !== '0';
 
 // Ogni azione significativa produce un evento tipizzato: connect, drift,
 // quick, wizard, range, flash, game. Stessi vincoli di anonimato per tutti.
@@ -704,8 +708,8 @@ function recordCalibSession(entry) {
     localStorage.setItem(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
   } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
 
-  // Upload anonimo: solo se il consenso è attivo; fuoco-e-dimentica, mai bloccante.
-  if (localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1') {
+  // Upload anonimo: fuoco-e-dimentica, mai bloccante; rispetta l'opt-out.
+  if (telemetryEnabled()) {
     fetch(TELEMETRY_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1125,8 +1129,16 @@ function setConsent(on) {
   for (const box of consentBoxes) box.checked = on;
 }
 for (const box of consentBoxes) {
-  box.checked = localStorage.getItem(TELEMETRY_CONSENT_KEY) === '1';
+  box.checked = telemetryEnabled();
   box.addEventListener('change', () => setConsent(box.checked));
+}
+
+// Avviso una tantum al primo avvio: la condivisione è attiva di default,
+// l'opt-out è nel footer. Trasparenza prima di qualunque invio.
+if (telemetryEnabled() && !localStorage.getItem(TELEMETRY_NOTICE_KEY)) {
+  localStorage.setItem(TELEMETRY_NOTICE_KEY, '1');
+  toast('Anonymous usage data is shared by default to improve the calibration algorithm (ML training). '
+    + 'No serial numbers, IDs or IP — opt out anytime in the footer.', 9000);
 }
 
 /* ============================== boot ============================== */

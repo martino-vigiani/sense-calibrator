@@ -35,7 +35,7 @@ Comments in the JS are in Italian; UI strings are English.
 
 ## Telemetry
 
-Every significant action emits a typed event via `recordEvent(kind, data)` in app.js — kinds: `connect`, `drift`, `quick`, `wizard`, `range`, `flash`, `game`. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200). Network upload to `https://subralabs.com/api/calib/v1/sessions` happens only with explicit opt-in consent (`sense-telemetry-consent` in localStorage; two synced checkboxes: footer + quick-calibration dialog). Payload is anonymous — see README table; never add device identifiers to it. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
+Every significant action emits a typed event via `recordEvent(kind, data)` in app.js — kinds: `connect`, `drift`, `quick`, `wizard`, `range`, `flash`, `game`. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200). Network upload to `https://subralabs.com/api/calib/v1/sessions` is **on by default (opt-out)**: `telemetryEnabled()` is true unless `sense-telemetry-consent` is explicitly `'0'`; a one-time first-launch toast discloses it (`sense-telemetry-notice`), and two synced checkboxes (footer + quick-calibration dialog) control the opt-out. Payload is anonymous — see README table; never add device identifiers to it. The data feeds ML-driven tuning of the calibration algorithm, so keep events rich but always identifier-free. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
 
 ## Dev hooks
 

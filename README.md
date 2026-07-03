@@ -82,9 +82,11 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 
 ## Telemetry & privacy
 
-Sense Calibrator can optionally upload anonymous usage data to a self-hosted endpoint to help improve the algorithm over time. This is **opt-in and off by default**.
+Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is **on by default, with a one-time notice on first launch and a one-click opt-out in the page footer** (same model as Homebrew or VS Code telemetry).
 
-**What is sent** (when you enable it): every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`) and `fw` (firmware version integer), plus:
+**Why collect everything:** the calibration algorithm is tuned on real-world data. Aggregated sessions across board revisions and firmware versions are the training set for making it better — learning which stability-gate parameters work per board, predicting from the noise signature whether a stick is fixable or mechanically worn, and tuning how many convergence passes are actually needed. The more (anonymous) sessions, the better the algorithm gets for everyone — which is also why using the [hosted version](https://martino-vigiani.github.io/sense-calibrator/) helps: you always run the latest algorithm, and your anonymous sessions feed the next improvement.
+
+**What is sent:** every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`) and `fw` (firmware version integer), plus:
 
 | Event `kind` | Extra fields |
 |---|---|
@@ -102,7 +104,7 @@ Sense Calibrator can optionally upload anonymous usage data to a self-hosted end
 
 **Local copy:** calibration sessions are always stored in `localStorage` under the key `sense-calib-sessions`, regardless of whether upload consent is given.
 
-To enable, check **"Share anonymous usage data"** in the page footer or in the quick-calibration dialog (the two checkboxes are the same setting). The preference persists in `localStorage` and can be changed at any time.
+To opt out, uncheck **"Share anonymous usage data"** in the page footer or in the quick-calibration dialog (the two checkboxes are the same setting). The preference persists in `localStorage` and can be changed at any time; nothing is ever sent after opt-out.
 
 ---
 
