@@ -412,7 +412,7 @@ function startDriftTest(auto = false) {
   };
   const card = $('drift-card');
   card.dataset.state = 'testing';
-  $(‘drift-status’).textContent = ‘Test running: don’t touch the sticks…’;
+  $('drift-status').textContent = 'Test running: don’t touch the sticks…';
   $('drift-progress').classList.remove('hidden');
   $('verdict-l').classList.add('hidden');
   $('verdict-r').classList.add('hidden');
@@ -477,7 +477,7 @@ function driftTick() {
       driftTest.retries += 1;
       driftTest.samples = [];
       driftTest.deadline = performance.now() + DRIFT_TEST_MS;
-      $(‘drift-status’).textContent = ‘Movement detected. Retrying: don’t touch the sticks…’;
+      $('drift-status').textContent = 'Movement detected. Retrying: don’t touch the sticks…';
       requestAnimationFrame(driftTick);
       return;
     }
