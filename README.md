@@ -12,7 +12,7 @@ Sense Calibrator diagnoses analog stick drift and writes a permanent hardware re
 
 <!-- TODO: demo GIF -->
 
-> 📖 **The story behind this tool:** how I fixed my controller's stick drift by building this with Anthropic's Fable 5 model, instead of buying a new one. [**Read ARTICLE.md**](ARTICLE.md).
+> 📖 **The story behind this tool:** how I fixed my controller's stick drift by building this with Anthropic's Fable 5 model, instead of buying a new one. [**Read ARTICLE.md**](ARTICLE.md), also published as SubraLabs Lab Paper #3: [**subralabs.com/lab/sense-calibrator**](https://subralabs.com/lab/sense-calibrator.html).
 
 ---
 
