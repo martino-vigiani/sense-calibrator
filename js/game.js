@@ -191,6 +191,10 @@ function verdictFor(score) {
 export function initGame(deps) {
   const getSticks = deps.getSticks;
   const isAvailable = deps.isAvailable;
+  // Apertura/chiusura del modale delegate ad app.js quando fornite: lì vive
+  // l'animazione di uscita. Senza di esse il gioco resta autonomo.
+  const showModal = deps.showModal;
+  const hideModal = deps.hideModal;
 
   // Elementi DOM (tutti presenti in index.html).
   const modal = $('modal-game');
@@ -562,7 +566,7 @@ export function initGame(deps) {
     canvasL.clearTrail();
     canvasR.clearTrail();
     showIntro();
-    modal.classList.remove('hidden');
+    showModal ? showModal() : modal.classList.remove('hidden');
     startLoop();
   }
 
@@ -570,7 +574,9 @@ export function initGame(deps) {
     stopLoop();          // niente loop fantasma
     running = false;
     phase = null;
-    modal.classList.add('hidden');
+    // usa la chiusura animata di app.js quando disponibile, così l'uscita del
+    // gioco è coerente con gli altri modali
+    hideModal ? hideModal() : modal.classList.add('hidden');
     hideCountdown();
   }
 

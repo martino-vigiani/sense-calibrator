@@ -235,6 +235,52 @@ function showHeroError(html) {
   el.classList.remove('hidden');
 }
 
+/* Browser senza WebHID (mobile e tablet in generale, Safari, Firefox).
+   Solo presentazione: sostituisce la CTA con un'istruzione chiara e lascia
+   leggibili hero, steps e FAQ. Nessun impatto sulla calibrazione. */
+function showUnsupported() {
+  const touchOnly = window.matchMedia('(pointer: coarse)').matches;
+  if (!touchOnly) {
+    $('unsupported-title').textContent = 'Open this page in Chrome or Edge';
+    $('unsupported-msg').innerHTML = 'Recalibrating a DualSense means talking to it over a USB cable, and only '
+      + '<b>Chromium browsers</b> — Chrome, Edge, Brave, Opera — are allowed to do that. '
+      + 'Safari and Firefox don’t support WebHID.';
+  }
+  $('btn-connect').disabled = true;
+  document.querySelector('.hero-cta').classList.add('hidden');
+  // "NOT CONNECTED" qui è rumore: non si potrà mai connettere nulla.
+  // Liberato lo spazio, la topbar può tenere l'etichetta "GitHub" (vedi CSS).
+  $('chip-conn').classList.add('hidden');
+  document.body.classList.add('no-hid');
+  $('unsupported').classList.remove('hidden');
+}
+
+// "Copia link": su mobile l'azione utile è mandarsi la pagina sul desktop.
+const btnCopyLink = $('btn-copy-link');
+if (btnCopyLink) {
+  btnCopyLink.addEventListener('click', async () => {
+    const url = location.href;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      ok = true;
+    } catch {
+      // contesti non sicuri / permessi negati
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    btnCopyLink.textContent = ok ? 'Link copied' : 'Press and hold to copy';
+    toast(ok ? 'Link copied — open it on a desktop with Chrome or Edge.' : url);
+    setTimeout(() => { btnCopyLink.textContent = 'Copy link'; }, 2400);
+  });
+}
+
 function setNvChip(nv) {
   const el = $('chip-nvs');
   el.classList.remove('hidden', 'chip-warn', 'chip-on');
@@ -1085,11 +1131,42 @@ async function finishRange() {
 
 /* ============================== modali ============================== */
 
-function openModal(id) { $(id).classList.remove('hidden'); }
-function closeModal(id) { $(id).classList.add('hidden'); }
+// L'entrata era animata e l'uscita no: il modale spariva di colpo. L'uscita
+// ora è simmetrica ma più corta (l'utente ha già deciso), e `display:none`
+// arriva solo a animazione finita.
+const MODAL_CLOSE_MS = 160;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const closeTimers = new Map();
+
+function openModal(id) {
+  const el = $(id);
+  // riapertura durante la chiusura: annulla il timer, o `hidden` arriverebbe dopo
+  clearTimeout(closeTimers.get(el));
+  closeTimers.delete(el);
+  el.classList.remove('closing', 'hidden');
+}
+
+function closeModal(id) {
+  const el = $(id);
+  if (el.classList.contains('hidden') || closeTimers.has(el)) return;
+  el.classList.add('closing');
+  closeTimers.set(el, setTimeout(() => {
+    closeTimers.delete(el);
+    el.classList.remove('closing');
+    el.classList.add('hidden');
+  }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
+}
+
+// Chiusura secca: si usa nel teardown (controller scollegato), dove la vista
+// sottostante cambia sotto i piedi e animare l'uscita mostrerebbe il salto.
 function closeAllModals() {
   game?.close(); // ferma il loop rAF del gioco, non solo la classe .hidden
-  for (const m of document.querySelectorAll('.modal')) m.classList.add('hidden');
+  for (const m of document.querySelectorAll('.modal')) {
+    clearTimeout(closeTimers.get(m));
+    closeTimers.delete(m);
+    m.classList.remove('closing');
+    m.classList.add('hidden');
+  }
 }
 
 /* ============================== reboot ============================== */
@@ -1130,6 +1207,8 @@ const game = initGame({
   getSticks: () => sticks,
   isAvailable: () => !!ds5 && !busy,
   onReport: res => recordEvent('game', res),
+  showModal: () => openModal('modal-game'),
+  hideModal: () => closeModal('modal-game'),
 });
 function openGame(bypassGate = false) {
   if (!bypassGate && (!ds5 || busy)) return;
@@ -1169,7 +1248,12 @@ function resolveNotice(keepSharing) {
   } else {
     toast('Nothing was sent. You can re-enable sharing anytime in the footer.', 5000);
   }
-  $('telemetry-notice').classList.add('hidden');
+  const el = $('telemetry-notice');
+  el.classList.add('closing');
+  setTimeout(() => {
+    el.classList.remove('closing');
+    el.classList.add('hidden');
+  }, reduceMotion.matches ? 0 : 180);
 }
 
 if (telemetryEnabled() && !noticeSeen()) {
@@ -1206,8 +1290,10 @@ document.addEventListener('keydown', e => {
 
 async function boot() {
   if (!navigator.hid) {
-    showHeroError('<b>WebHID not available.</b> Open this page with Chrome or Edge. If you’re opening it from file://, serve it from localhost (e.g. <code>python3 -m http.server</code>).');
-    $('btn-connect').disabled = true;
+    showUnsupported();
+    if (location.protocol === 'file:') {
+      showHeroError('<b>Opened from file://.</b> WebHID needs a secure context: serve the folder over HTTP (e.g. <code>python3 -m http.server</code>).');
+    }
     return;
   }
 

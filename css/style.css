@@ -34,16 +34,22 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* niente parole lunghe che sfondano il viewport a 320px */
+  overflow-wrap: break-word;
 }
 
 main {
   width: 100%;
   max-width: 920px;
   margin: 0 auto;
-  padding: 0 24px;
+  /* il floor scende a 18px sotto i 600px (vedi blocco responsive in fondo) */
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
   flex: 1;
+  min-width: 0;
 }
 
 .hidden { display: none !important; }
@@ -58,7 +64,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  gap: 10px;
+  padding: 14px max(24px, env(safe-area-inset-right)) 14px max(24px, env(safe-area-inset-left));
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -71,6 +78,8 @@ main {
   letter-spacing: 0.14em;
   color: var(--ink);
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .wordmark span {
   font-weight: 300;
@@ -78,7 +87,17 @@ main {
   margin-left: 2px;
 }
 
-.topbar-status { display: flex; gap: 8px; align-items: center; }
+/* i chip possono andare a capo: su schermi stretti "Connected · USB" +
+   batteria + NVS non stanno mai su una riga sola accanto al wordmark. */
+.topbar-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
+  min-width: 0;
+}
 
 .chip {
   display: inline-flex;
@@ -117,7 +136,7 @@ main {
   white-space: nowrap;
   transition: transform 0.16s var(--ease-out), box-shadow 0.16s var(--ease-out);
 }
-.gh-chip svg { width: 15px; height: 15px; fill: currentColor; }
+.gh-chip svg { width: 15px; height: 15px; fill: currentColor; flex-shrink: 0; }
 .gh-chip:active { transform: scale(0.97); }
 .gh-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 @media (hover: hover) and (pointer: fine) {
@@ -152,7 +171,8 @@ main {
 
 .view-hero {
   text-align: center;
-  padding: 9vh 0 6vh;
+  /* vh puro dava 30px di aria su iPhone landscape e 250px su desktop 27" */
+  padding: clamp(36px, 9vh, 120px) 0 clamp(32px, 6vh, 80px);
 }
 
 .view-hero h1 {
@@ -190,6 +210,58 @@ main {
 }
 .callout:not(.hidden) { animation: viewIn 0.3s var(--ease-out); }
 
+/* ---------------- browser non supportato / mobile ---------------- */
+
+/* Sostituisce la CTA quando WebHID non esiste. Non è un errore: è
+   un'istruzione. Il resto della landing e la FAQ restano leggibili. */
+.unsupported {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 22px 24px 20px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: left;
+  animation: viewIn 0.3s var(--ease-out);
+}
+.unsupported-eyebrow {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.unsupported-title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.unsupported-msg {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.unsupported-msg b { color: var(--ink); font-weight: 600; }
+.unsupported-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.unsupported-actions .btn { flex: 0 1 auto; }
+.unsupported-note {
+  margin: 14px 0 0;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
 .steps-strip {
   display: flex;
   justify-content: center;
@@ -197,7 +269,7 @@ main {
   flex-wrap: wrap;
   list-style: none;
   padding: 0;
-  margin: 64px 0 0;
+  margin: clamp(36px, 8vw, 64px) 0 0;
 }
 .steps-strip li {
   display: flex;
@@ -227,7 +299,7 @@ main {
 
 .faq {
   max-width: 560px;
-  margin: 72px auto 0;
+  margin: clamp(44px, 9vw, 72px) auto 0;
   text-align: left;
 }
 .faq h2 {
@@ -257,7 +329,10 @@ main {
   color: var(--ink-2);
   transition: color 0.18s var(--ease);
 }
-.faq summary:hover { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) {
+  .faq summary:hover { color: var(--ink); }
+  .faq summary:hover::after { color: var(--ink-2); }
+}
 .faq details[open] summary { color: var(--ink); }
 .faq summary:focus-visible {
   outline: 2px solid var(--ink);
@@ -273,7 +348,6 @@ main {
   color: var(--ink-3);
   transition: transform 0.2s var(--ease-out), color 0.18s var(--ease);
 }
-.faq summary:hover::after { color: var(--ink-2); }
 .faq details[open] summary::after {
   content: '+';
   transform: rotate(45deg);
@@ -428,22 +502,29 @@ main {
   color: var(--ink-3);
   font-weight: 700;
 }
+/* Il canvas non supera mai la dimensione dichiarata nel markup (240px):
+   il backing store è 240*DPR, quindi si rimpicciolisce ma non sfoca mai. */
 .stick-card canvas {
-  width: min(240px, 70vw);
+  display: block;
+  width: 100%;
+  max-width: 240px;
   height: auto;
   aspect-ratio: 1;
+  margin: 0 auto;
 }
 
 .readout {
   display: flex;
   justify-content: center;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   margin-top: 8px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--ink-3);
 }
+.readout > span { white-space: nowrap; }
 .readout b {
   font-family: var(--mono);
   font-weight: 500;
@@ -461,11 +542,22 @@ main {
   letter-spacing: 0.07em;
   text-transform: uppercase;
   border: 1px solid var(--line-2);
+  background: transparent;
   color: var(--ink-2);
   animation: viewIn 0.3s var(--ease-out);
+  /* Il passaggio "Marked drift" → "Centered" è il momento in cui l'utente
+     vede che il fix ha funzionato: deve trasformarsi, non essere sostituito. */
+  transition: background-color 0.26s var(--ease), border-color 0.26s var(--ease),
+              color 0.26s var(--ease), box-shadow 0.26s var(--ease);
 }
 .verdict.v-ok { border-color: var(--ink); color: var(--ink); }
-.verdict.v-mild { border: 2px solid var(--ink); color: var(--ink); }
+/* Il peso doppio è un box-shadow inset, non un border 2px: cambiare la
+   border-width sposterebbe il badge di 1px per lato a ogni ri-test. */
+.verdict.v-mild {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+  color: var(--ink);
+}
 .verdict.v-bad { background: var(--ink); border-color: var(--ink); color: #fff; }
 
 /* actions */
@@ -529,7 +621,9 @@ main {
   user-select: none;
   transition: color 0.18s var(--ease);
 }
-.log-panel summary:hover { color: var(--ink-2); }
+@media (hover: hover) and (pointer: fine) {
+  .log-panel summary:hover { color: var(--ink-2); }
+}
 .log-panel summary:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
@@ -545,6 +639,10 @@ main {
   max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
+  /* pre-wrap da solo non spezza un dump esadecimale senza spazi */
+  overflow-wrap: anywhere;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* ---------------- progress ---------------- */
@@ -572,9 +670,16 @@ main {
   inset: 0;
   z-index: 50;
   display: flex;
-  align-items: center;
+  /* flex-start + margin auto sul panel: centra quando c'è spazio, ma se il
+     pannello è più alto del viewport resta scrollabile e non viene tagliato
+     in cima (align-items:center taglierebbe). */
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px;
+  padding: 24px max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+           max(24px, env(safe-area-inset-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: rgba(247, 247, 245, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -582,9 +687,20 @@ main {
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* Uscita simmetrica all'entrata ma più rapida: l'utente ha già deciso,
+   il sistema deve solo togliersi di mezzo. */
+.modal.closing { animation: fadeOut 0.16s var(--ease-out) forwards; }
+.modal.closing .modal-panel { animation: panelOut 0.16s var(--ease-out) forwards; }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes panelOut {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+
 .modal-panel {
   width: 100%;
   max-width: 560px;
+  margin: auto;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -650,13 +766,20 @@ main {
 .wizard-live {
   display: flex;
   justify-content: center;
-  gap: 30px;
+  gap: clamp(14px, 5vw, 30px);
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
-.wizard-live figure { margin: 0; text-align: center; }
-.wizard-live canvas { width: 110px; height: auto; aspect-ratio: 1; }
+.wizard-live figure { margin: 0; text-align: center; flex: 0 1 110px; min-width: 0; }
+.wizard-live canvas {
+  display: block;
+  width: 100%;
+  max-width: 110px;
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
 .wizard-live figcaption {
   margin-top: 4px;
   font-size: 10px;
@@ -684,11 +807,15 @@ main {
 .range-dials {
   display: flex;
   justify-content: center;
-  gap: 26px;
+  gap: clamp(12px, 4vw, 26px);
   margin: 18px 0 8px;
 }
+/* 38vw non teneva conto del padding del modale: a 320px i due quadranti
+   sfondavano il pannello. Adesso si restringono dentro il contenitore. */
 .range-dials canvas {
-  width: min(200px, 38vw);
+  flex: 0 1 200px;
+  min-width: 0;
+  max-width: 200px;
   height: auto;
   aspect-ratio: 1;
 }
@@ -716,12 +843,15 @@ main {
   cursor: pointer;
   line-height: 1.45;
 }
+/* il testo va in uno <span>: senza, il link inline diventava un flex item a
+   sé e la frase si spezzava con gap e parentesi orfane */
+.telemetry-label > span { min-width: 0; }
 .telemetry-label input[type="checkbox"] {
-  margin: 1px 0 0;
+  margin: 2px 0 0;
   flex-shrink: 0;
   accent-color: var(--ink);
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   cursor: pointer;
 }
 
@@ -729,7 +859,7 @@ main {
 
 .toasts {
   position: fixed;
-  bottom: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
@@ -779,6 +909,12 @@ main {
   padding: 18px 20px 16px;
   animation: noticeIn 0.36s var(--ease-out);
 }
+/* Esce dal basso, da dove è entrato: stessa direzione, metà del tempo. */
+.notice.closing { animation: noticeOut 0.18s var(--ease-out) forwards; }
+@keyframes noticeOut {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, 12px); }
+}
 .notice.hidden { display: none; }
 .notice h4 {
   font-size: 14px;
@@ -806,9 +942,25 @@ main {
   from { opacity: 0; transform: translate(-50%, 16px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
-@media (max-width: 520px) {
-  .notice-actions { flex-direction: column-reverse; }
-  .notice-actions .btn { width: 100%; }
+/* Sotto i 560px diventa un bottom sheet ancorato al bordo: occupava metà
+   schermo e copriva la CTA. Bottoni affiancati = ~90px di altezza in meno. */
+@media (max-width: 560px) {
+  .notice {
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    max-height: 72vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-width: 1px 0 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 16px 18px calc(14px + env(safe-area-inset-bottom));
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+  .notice p { font-size: 12px; }
+  .notice-actions { gap: 10px; margin-top: 12px; }
+  .notice-actions .btn { flex: 1 1 0; }
 }
 
 /* ---------------- footer ---------------- */
@@ -816,25 +968,27 @@ main {
 .footer {
   display: flex;
   justify-content: center;
-  gap: 18px;
+  align-items: center;
+  gap: 10px 18px;
   flex-wrap: wrap;
-  padding: 26px 24px 34px;
+  padding: 26px max(24px, env(safe-area-inset-right))
+           calc(34px + env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   font-size: 12px;
   color: var(--ink-3);
+  text-align: center;
 }
+.footer > span { min-width: 0; }
 .footer a {
   color: var(--ink-2);
   transition: color 0.18s var(--ease);
 }
-.footer a:hover { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) {
+  .footer a:hover { color: var(--ink); }
+}
 .footer a:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
   border-radius: 3px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* ---------------- test di precisione (gioco) ---------------- */
@@ -860,14 +1014,17 @@ main {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 36px;
+  gap: clamp(12px, 5vw, 36px);
   margin: 6px 0 4px;
 }
-.game-dials figure { margin: 0; text-align: center; }
+.game-dials figure { margin: 0; text-align: center; flex: 0 1 220px; min-width: 0; }
 .game-dials canvas {
-  width: min(220px, 38vw);
+  display: block;
+  width: 100%;
+  max-width: 220px;
   height: auto;
   aspect-ratio: 1;
+  margin: 0 auto;
 }
 .game-dials figcaption {
   margin-top: 4px;
@@ -884,7 +1041,7 @@ main {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  font-size: 64px;
+  font-size: clamp(42px, 14vw, 64px);
   font-weight: 750;
   letter-spacing: -0.04em;
   color: var(--ink);
@@ -917,7 +1074,7 @@ main {
   margin-top: 4px;
 }
 .game-overall-num {
-  font-size: 64px;
+  font-size: clamp(42px, 14vw, 64px);
   font-weight: 750;
   letter-spacing: -0.04em;
   line-height: 1;
@@ -981,4 +1138,118 @@ main {
   font-size: 11.5px;
   color: var(--ink-3);
   text-align: center;
+}
+
+/* ============================================================
+   Responsive — schermi stretti
+   ============================================================ */
+
+/* tablet portrait e finestre desktop strette */
+@media (max-width: 760px) {
+  .action p { max-width: none; }
+  .device-info { gap: 18px; }
+}
+
+@media (max-width: 600px) {
+  main {
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+
+  /* topbar: icona GitHub senza etichetta, chip più compatti. Non più sticky:
+     a controller connesso i 4 chip vanno a capo e uno header appiccicato da
+     130px si mangerebbe un quinto dello schermo. */
+  .topbar {
+    position: static;
+    padding: 11px max(16px, env(safe-area-inset-right)) 11px max(16px, env(safe-area-inset-left));
+    gap: 8px;
+  }
+  .gh-label { display: none; } /* resta l'icona, aria-label già presente */
+  /* senza WebHID il chip di stato sparisce: c'è spazio per l'etichetta */
+  @media (min-width: 360px) {
+    body.no-hid .gh-label { display: inline; }
+  }
+  .gh-chip { padding: 8px 11px; }
+  .chip { font-size: 10px; padding: 5px 10px; letter-spacing: 0.04em; }
+
+  .card { padding: 18px 18px; }
+  .actions-card { padding: 4px 18px; }
+
+  /* le azioni impilano: il testo non deve vivere in una colonna da 90px */
+  .action {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px 0;
+  }
+  .action .btn { width: 100%; }
+
+  /* in colonna: altrimenti le info finivano in una colonna stretta a destra */
+  .device-card { flex-direction: column; align-items: stretch; gap: 16px; }
+  .device-info { gap: 12px 22px; flex: none; }
+  .device-actions { width: 100%; }
+  .device-actions .btn { flex: 1 1 0; }
+
+  .banner { padding: 16px 18px; }
+  .banner .btn-primary { width: 100%; }
+
+  /* diagramma sopra e testo sotto: affiancati restava una colonna da 120px */
+  .wizard-body { flex-direction: column; align-items: center; gap: 14px; min-height: 0; }
+  .wizard-diagram { width: 92px; }
+
+  .modal { padding: 16px max(12px, env(safe-area-inset-right))
+                   max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .modal-panel { padding: 22px 18px; border-radius: 18px; }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 auto; }
+
+  .footer { gap: 12px 16px; padding-top: 22px; }
+  .footer > span, .footer > .telemetry-label { flex: 1 1 100%; }
+  .telemetry-label { justify-content: center; text-align: left; }
+}
+
+/* "CALIBRATOR" + chip di stato mandavano la topbar a capo su due righe
+   sticky: sotto i 520px resta la sola parola-marchio. */
+@media (max-width: 520px) {
+  .wordmark span { display: none; }
+}
+
+@media (max-width: 400px) {
+  .view-hero h1 { font-size: clamp(30px, 9.5vw, 38px); }
+  .lede { font-size: 15.5px; }
+  .steps-strip li { padding: 8px 13px; font-size: 12px; }
+  .unsupported { padding: 18px 18px 16px; }
+  .unsupported-actions .btn { width: 100%; }
+}
+
+/* ============================================================
+   Touch: aree di tocco e affordance
+   ============================================================ */
+
+@media (pointer: coarse) {
+  .btn, .btn-sm { min-height: 44px; padding-top: 11px; padding-bottom: 11px; }
+  .gh-chip { min-height: 40px; }
+  .chip { min-height: 32px; } /* stato, non target */
+  /* la label è tutta cliccabile: si guadagna area senza ingrossare il quadratino */
+  .telemetry-label { padding: 6px 0; }
+  .telemetry-label input[type="checkbox"] { width: 18px; height: 18px; margin-top: 0; }
+  .faq summary { padding: 15px 0; }
+}
+
+/* ============================================================
+   Reduced motion — ultima regola: vince su tutto quanto sopra
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    /* senza questo il pulse infinito del dot ricicla a ~frame rate */
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Reduced motion = meno movimento, non zero transizioni. Il morph del
+     verdetto non si muove: cambia colore, ed è ciò che rende leggibile il
+     passaggio "prima/dopo". Toglierlo peggiora la comprensione. */
+  .verdict { transition-duration: 0.26s !important; }
 }
