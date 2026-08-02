@@ -70,11 +70,25 @@ class StickDial {
     this.bins = new Array(RANGE_BINS).fill(0);
     this.x = 0;
     this.y = 0;
+    this.size = canvas.width; // dimensione logica dal markup, letta una volta sola
+    this.dpr = 0;
+    this.applyDpr();
+  }
+
+  // Rialloca il backing store al devicePixelRatio corrente. Va richiamata
+  // quando il DPR cambia (finestra spostata su un monitor con densità diversa,
+  // zoom del browser): senza, il canvas resta scalato per il vecchio DPR e i
+  // quadranti restano sfocati fino a un reload.
+  applyDpr() {
     const dpr = window.devicePixelRatio || 1;
-    this.size = canvas.width; // dimensione logica dal markup
-    canvas.width = this.size * dpr;
-    canvas.height = this.size * dpr;
+    if (dpr === this.dpr) return false;
+    this.dpr = dpr;
+    // assegnare width/height azzera lo stato del contesto, trasformazione inclusa
+    this.canvas.width = this.size * dpr;
+    this.canvas.height = this.size * dpr;
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
+    return true;
   }
 
   push(x, y) {
@@ -179,6 +193,24 @@ const dialRangeL = new StickDial($('dial-range-l'), { traceMode: true });
 const dialRangeR = new StickDial($('dial-range-r'), { traceMode: true });
 const dialWizL = new StickDial($('dial-wiz-l'), { dotRadius: 4 });
 const dialWizR = new StickDial($('dial-wiz-r'), { dotRadius: 4 });
+const allDials = [dialL, dialR, dialRangeL, dialRangeR, dialWizL, dialWizR];
+
+// Il DPR non ha un evento dedicato: si osserva con una media query costruita
+// sul valore corrente, che scatta appena quel valore smette di essere vero.
+// Va riarmata a ogni cambio, perché la query è legata al DPR di allora.
+let dprQuery = null;
+function watchDpr() {
+  dprQuery?.removeEventListener('change', onDprChange);
+  dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  dprQuery.addEventListener('change', onDprChange);
+}
+function onDprChange() {
+  // applyDpr azzera il canvas: i quadranti attivi si ridisegnano al frame
+  // successivo, gli altri quando il loro modale torna visibile.
+  for (const d of allDials) d.applyDpr();
+  watchDpr();
+}
+watchDpr();
 
 /* ============================== render loop ============================== */
 
@@ -1256,7 +1288,12 @@ function resolveNotice(keepSharing) {
   }, reduceMotion.matches ? 0 : 180);
 }
 
-if (telemetryEnabled() && !noticeSeen()) {
+// Senza WebHID non esiste controller, quindi nessun evento può essere prodotto
+// e non c'è niente da divulgare: mostrare l'avviso sarebbe solo attrito per chi
+// apre il link dal telefono. Il flag resta non impostato, così la scelta viene
+// chiesta davvero la prima volta che la pagina si apre su un browser che può
+// usare il tool. L'opt-out nel footer resta comunque visibile e funzionante.
+if (navigator.hid && telemetryEnabled() && !noticeSeen()) {
   $('telemetry-notice').classList.remove('hidden');
   $('btn-notice-ok').addEventListener('click', () => resolveNotice(true));
   $('btn-notice-optout').addEventListener('click', () => resolveNotice(false));
