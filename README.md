@@ -82,7 +82,9 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 
 ## Telemetry & privacy
 
-Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is **on by default, with a one-time notice on first launch and a one-click opt-out in the page footer** (same model as Homebrew or VS Code telemetry).
+Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is **on by default**, with a one-time notice on first launch and a one-click opt-out (same model as Homebrew or VS Code telemetry).
+
+**Nothing is uploaded before you have seen that notice.** Events recorded while the notice is still on screen are held in memory; choosing *Keep sharing* sends them, choosing *Don't share* discards them and sets the opt-out permanently. After that, the setting lives in the page footer and in the quick-calibration dialog, and can be changed at any time.
 
 **Why collect everything:** the calibration algorithm is tuned on real-world data. Aggregated sessions across board revisions and firmware versions are the training set for making it better: learning which stability-gate parameters work per board, predicting from the noise signature whether a stick is fixable or mechanically worn, and tuning how many convergence passes are actually needed. The more (anonymous) sessions, the better the algorithm gets for everyone. That is also why using the [hosted version](https://martino-vigiani.github.io/sense-calibrator/) helps: you always run the latest algorithm, and your anonymous sessions feed the next improvement.
 

@@ -2,7 +2,7 @@
 
 // Protocollo DualSense (DS5) via WebHID.
 // Sequenze di calibrazione e NVS derivate da dualshock-tools
-// (https://github.com/dualshock-tools/dualshock-tools.github.io, GPL-3.0).
+// (https://github.com/dualshock-tools/dualshock-tools.github.io, MIT).
 
 export const SONY_VID = 0x054c;
 export const DS5_PID = 0x0ce6;

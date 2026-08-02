@@ -659,11 +659,20 @@ function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS,
 
 // Misura dell'offset residuo (pre/post calibrazione), con lo stesso
 // filtro di stabilità del test drift.
+// Campiona sugli input report HID, non su un timer: un setInterval viene
+// throttlato quando la tab va in background (la verifica restava senza dati
+// e la passata di convergenza si interrompeva), e a 8 ms sotto-campionava i
+// ~250 Hz del controller duplicando campioni identici — il che falsava sia la
+// frazione di stabilità sia la durata reale di DRIFT_WINDOW.
 async function measureOffset(ms = 1500) {
   const samples = [];
-  const id = setInterval(() => samples.push({ ...sticks }), 8);
-  await sleep(ms);
-  clearInterval(id);
+  const onSample = () => samples.push({ ...sticks });
+  stickListeners.add(onSample);
+  try {
+    await sleep(ms);
+  } finally {
+    stickListeners.delete(onSample);
+  }
   if (samples.length < 40) return null;
   const { stable } = extractStableSamples(samples);
   return analyzeDrift(stable.length > 40 ? stable : samples);
@@ -679,6 +688,13 @@ const TELEMETRY_NOTICE_KEY = 'sense-telemetry-notice';
 const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
 
 const telemetryEnabled = () => localStorage.getItem(TELEMETRY_CONSENT_KEY) !== '0';
+const noticeSeen = () => localStorage.getItem(TELEMETRY_NOTICE_KEY) === '1';
+
+// Finché l'avviso di primo avvio non è stato letto, gli eventi restano in coda
+// invece di partire: così l'affermazione "nothing has been sent yet" nel banner
+// è vera, e scegliere l'opt-out scarta anche quanto raccolto nel frattempo.
+let pendingUploads = [];
+const PENDING_MAX = 50;
 
 // Ogni azione significativa produce un evento tipizzato: connect, drift,
 // quick, wizard, range, flash, game. Stessi vincoli di anonimato per tutti.
@@ -708,18 +724,26 @@ function recordCalibSession(entry) {
     localStorage.setItem(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
   } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
 
-  // Upload anonimo: fuoco-e-dimentica, mai bloccante; rispetta l'opt-out.
-  if (telemetryEnabled()) {
-    fetch(TELEMETRY_ENDPOINT, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(entry),
-      keepalive: true,
-      signal: AbortSignal.timeout(4000),
-    })
-      .then(() => log('Anonymous telemetry sent.'))
-      .catch(() => {})
+  if (!telemetryEnabled()) return;
+  if (!noticeSeen()) {
+    if (pendingUploads.length < PENDING_MAX) pendingUploads.push(entry);
+    return;
   }
+  uploadEvent(entry);
+}
+
+// Fuoco-e-dimentica, mai bloccante: un endpoint giù non deve mai far fallire
+// una calibrazione.
+function uploadEvent(entry) {
+  fetch(TELEMETRY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(entry),
+    keepalive: true,
+    signal: AbortSignal.timeout(4000),
+  })
+    .then(() => log('Anonymous telemetry sent.'))
+    .catch(() => {});
 }
 
 // Calibra con campioni gated sulla stabilità, verifica, e ripete finché
@@ -1133,13 +1157,50 @@ for (const box of consentBoxes) {
   box.addEventListener('change', () => setConsent(box.checked));
 }
 
-// Avviso una tantum al primo avvio: la condivisione è attiva di default,
-// l'opt-out è nel footer. Trasparenza prima di qualunque invio.
-if (telemetryEnabled() && !localStorage.getItem(TELEMETRY_NOTICE_KEY)) {
+// Avviso una tantum al primo avvio. Banner persistente, non un toast che
+// scompare: è una scelta da fare, e finché non è fatta niente lascia il browser.
+function resolveNotice(keepSharing) {
   localStorage.setItem(TELEMETRY_NOTICE_KEY, '1');
-  toast('Anonymous usage data is shared by default to improve the calibration algorithm (ML training). '
-    + 'No serial numbers, IDs or IP addresses are collected. Opt out anytime in the footer.', 9000);
+  setConsent(keepSharing);
+  const queued = pendingUploads;
+  pendingUploads = [];
+  if (keepSharing) {
+    for (const entry of queued) uploadEvent(entry);
+  } else {
+    toast('Nothing was sent. You can re-enable sharing anytime in the footer.', 5000);
+  }
+  $('telemetry-notice').classList.add('hidden');
 }
+
+if (telemetryEnabled() && !noticeSeen()) {
+  $('telemetry-notice').classList.remove('hidden');
+  $('btn-notice-ok').addEventListener('click', () => resolveNotice(true));
+  $('btn-notice-optout').addEventListener('click', () => resolveNotice(false));
+}
+
+/* ============================== tastiera ============================== */
+
+// Esc chiude solo ciò che è annullabile senza lasciare il controller in uno
+// stato inconsistente: mai durante una calibrazione (`busy`), mai sul range
+// (una sessione aperta va chiusa con rangeEnd, non abbandonata).
+const ESC_DISMISS = {
+  'modal-quick': 'btn-quick-cancel',
+  'modal-wizard': 'btn-wizard-cancel',
+  'modal-flash': 'btn-flash-cancel',
+  'modal-game': 'btn-game-exit',
+};
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || busy) return;
+  for (const [modalId, btnId] of Object.entries(ESC_DISMISS)) {
+    const modal = $(modalId);
+    if (modal.classList.contains('hidden')) continue;
+    const btn = $(btnId);
+    // il cancel del wizard sparisce a procedura avviata: allora Esc non fa nulla
+    if (btn && !btn.disabled && !btn.classList.contains('hidden')) btn.click();
+    return;
+  }
+});
 
 /* ============================== boot ============================== */
 

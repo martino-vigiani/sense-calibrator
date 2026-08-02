@@ -370,6 +370,24 @@
   </div>
 </div>
 
+<!-- ======================= AVVISO TELEMETRIA (una tantum, persistente) ======================= -->
+<!-- Resta finché l'utente non sceglie: nessun evento parte prima di allora. -->
+<div id="telemetry-notice" class="notice hidden" role="dialog" aria-modal="false" aria-labelledby="notice-title">
+  <div class="notice-body">
+    <h4 id="notice-title">This tool shares anonymous usage data</h4>
+    <p>
+      Calibration results, board model and firmware version are uploaded to improve the
+      calibration algorithm. <b>Never</b> your serial number, any device ID, or your IP address.
+      Sharing is <b>on by default</b> &mdash; nothing has been sent yet, and you can turn it off right here.
+      <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">See exactly what&rsquo;s sent</a>.
+    </p>
+  </div>
+  <div class="notice-actions">
+    <button id="btn-notice-optout" class="btn btn-ghost btn-sm">Don&rsquo;t share</button>
+    <button id="btn-notice-ok" class="btn btn-primary btn-sm">Keep sharing</button>
+  </div>
+</div>
+
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script type="module" src="js/app.js"></script>

@@ -762,6 +762,55 @@ main {
   to { opacity: 0; transform: translateY(10px) scale(0.97); }
 }
 
+/* ---------------- avviso telemetria ---------------- */
+
+/* Sopra i toast: è una scelta da fare, non una notifica che scorre via. */
+.notice {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 110;
+  width: min(560px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.22);
+  padding: 18px 20px 16px;
+  animation: noticeIn 0.36s var(--ease-out);
+}
+.notice.hidden { display: none; }
+.notice h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.notice p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: 0;
+}
+.notice a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+@keyframes noticeIn {
+  from { opacity: 0; transform: translate(-50%, 16px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (max-width: 520px) {
+  .notice-actions { flex-direction: column-reverse; }
+  .notice-actions .btn { width: 100%; }
+}
+
 /* ---------------- footer ---------------- */
 
 .footer {
