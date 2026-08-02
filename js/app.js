@@ -690,12 +690,19 @@ const QUICK_STABLE_SPREAD = 0.035;  // più severo di DRIFT_MOVE_SPREAD
 // QUICK_STABLE_SPREAD né sale oltre QUICK_STABLE_SPREAD_MAX. Così il jitter
 // automatico non blocca la calibrazione, ma l'escursione grande di una mano
 // viene ancora respinta.
-const QUICK_STABLE_SPREAD_MAX = 0.12;
+// Tetto = DRIFT_MOVE_SPREAD: un gate di stabilità più permissivo della soglia
+// con cui l'app stessa dichiara "questo è movimento" sarebbe auto-contraddittorio
+// (a 0.12 bastavano due allargamenti per superarla e far passare una mano).
+const QUICK_STABLE_SPREAD_MAX = DRIFT_MOVE_SPREAD;
 const QUICK_STABLE_MS = 300;
 const QUICK_STABLE_TIMEOUT = 5000;
 // Sotto questo miglioramento tra passate l'offset residuo è al pavimento
 // del rumore: ripetere non serve più.
 const QUICK_CONVERGE_EPS = 0.15;    // punti percentuali
+// Soglia per dichiarare un PEGGIORAMENTO all'utente. Deve stare sopra un passo
+// di quantizzazione (1 LSB = 0.784 punti): sotto, la differenza fra due misure
+// è rumore di misura e avvisare produrrebbe solo falsi allarmi.
+const QUICK_REGRESSION_EPS = 0.8;
 const QUICK_NOISE_WORN = 1.5;       // noise p95 oltre cui il sensore è consumato
 
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
@@ -774,6 +781,14 @@ const noticeSeen = () => localStorage.getItem(TELEMETRY_NOTICE_KEY) === '1';
 let pendingUploads = [];
 const PENDING_MAX = 50;
 
+// Identificativo della SOLA sessione corrente: casuale, generato a ogni
+// caricamento di pagina, mai scritto su disco. Serve a ricollegare gli eventi
+// di una stessa visita (drift → quick → test di precisione), che altrimenti
+// arrivano slegati e rendono impossibile ricostruire un prima/dopo. Non è un
+// identificativo di dispositivo né di utente: ricaricare la pagina ne produce
+// uno nuovo, quindi due sessioni non sono collegabili tra loro.
+const SESSION_ID = (crypto.randomUUID?.() ?? String(Math.random()).slice(2)).slice(0, 8);
+
 // Ogni azione significativa produce un evento tipizzato: connect, drift,
 // quick, wizard, range, flash, game. Stessi vincoli di anonimato per tutti.
 function recordEvent(kind, data = {}) {
@@ -792,10 +807,15 @@ function summarizeResult(r) {
   return {
     off: [f(r.left.offset), f(r.right.offset)],
     noise: [f(r.left.noise), f(r.right.noise)],
+    // Direzione del drift per asse. `off` è hypot(x, y), da cui x e y non sono
+    // ricostruibili: senza questi, l'asimmetria per asse — la firma dell'usura
+    // meccanica di un potenziometro — sarebbe persa per sempre.
+    xy: [[f(r.left.x * 100), f(r.left.y * 100)], [f(r.right.x * 100), f(r.right.y * 100)]],
   };
 }
 
 function recordCalibSession(entry) {
+  entry.sid = SESSION_ID;
   try {
     const arr = JSON.parse(localStorage.getItem(CALIB_STORE_KEY) || '[]');
     arr.push(entry);
@@ -804,10 +824,24 @@ function recordCalibSession(entry) {
 
   if (!telemetryEnabled()) return;
   if (!noticeSeen()) {
-    if (pendingUploads.length < PENDING_MAX) pendingUploads.push(entry);
+    // Copia, non riferimento: l'oggetto sessione viene ancora mutato dopo la
+    // registrazione (il catch vi scrive `aborted`/`err`), e accodare il vivo
+    // farebbe partire al flush una versione diversa da quella registrata.
+    if (pendingUploads.length < PENDING_MAX) pendingUploads.push({ ...entry });
     return;
   }
   uploadEvent(entry);
+}
+
+// Una sessione di calibrazione va registrata una volta sola, sia che finisca
+// bene sia che esploda a metà. Prima veniva registrata solo sul percorso felice:
+// le calibrazioni fallite — la classe più informativa per capire quando
+// l'algoritmo non funziona — non producevano alcun evento.
+const recordedSessions = new WeakSet();
+function recordSessionOnce(session) {
+  if (recordedSessions.has(session)) return;
+  recordedSessions.add(session);
+  recordCalibSession(session);
 }
 
 // Fuoco-e-dimentica, mai bloccante: un endpoint giù non deve mai far fallire
@@ -849,25 +883,51 @@ async function quickCalibrate() {
     msg.innerHTML = 'Waiting for the sticks to settle…';
     // Attesa iniziale col gate largo del test drift: serve solo a lasciar
     // staccare la mano, non a giudicare il jitter proprio dello stick.
-    await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000 });
+    const settled = await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000 });
     const before = await measureOffset(1000);
     session.before = summarizeResult(before);
+    session.settled = settled;
 
-    // Gate adattivo: noise è il p95 (in %) della deviazione dalla mediana,
-    // quindi l'escursione max-min attesa del jitter è ~2×p95.
-    let gateSpread = QUICK_STABLE_SPREAD;
+    // Gate adattivo: `noise` è il p95 (in %) della deviazione dalla mediana.
+    // Il fattore 2.5 è tarato sul max delle escursioni dei quattro assi su una
+    // finestra di ~60 campioni (rapporto reale 2.2 medio, 2.56 al p95): non è
+    // il "2× per asse singolo" che verrebbe da intuire, e abbassarlo a 2 fa
+    // collassare il gate se il controller riporta a 1000 Hz invece di 250.
+    //
+    // La baseline si deriva dal rumore anche quando l'attesa iniziale va in
+    // timeout. Non stabilizzarsi entro DRIFT_MOVE_SPREAD significa "mano sullo
+    // stick" oppure "jitter proprio oltre 0.08", cioè proprio il potenziometro
+    // consumato per cui il gate adattivo esiste: spegnerlo lì lo negherebbe a
+    // chi ne ha più bisogno. Il caso "mano sullo stick" è comunque innocuo,
+    // perché il tetto è DRIFT_MOVE_SPREAD, la soglia oltre cui l'app dichiara
+    // movimento — il gate non può diventare più permissivo di così.
+    let baseGate = QUICK_STABLE_SPREAD;
     if (before) {
       const noise = Math.max(before.left.noise, before.right.noise) / 100;
-      gateSpread = Math.min(QUICK_STABLE_SPREAD_MAX, Math.max(QUICK_STABLE_SPREAD, noise * 2.5));
-      if (gateSpread > QUICK_STABLE_SPREAD)
-        log(`Noisy signal: stability gate widened to ±${(gateSpread * 100).toFixed(1)}%.`);
+      baseGate = Math.min(QUICK_STABLE_SPREAD_MAX, Math.max(QUICK_STABLE_SPREAD, noise * 2.5));
+      if (baseGate > QUICK_STABLE_SPREAD)
+        log(`Noisy signal: stability gate widened to ±${(baseGate * 100).toFixed(1)}%.`);
     }
+    if (!settled) log('Sticks never settled before the baseline measurement.');
+    let gateSpread = baseGate;
+    let gateMax = baseGate;
     let gateOff = false;
+    let gateWidenings = 0;
 
     let worst = null;
     let prevWorst = null;
+    let bestWorst = null;
     let result = null;
     for (let pass = 1; pass <= QUICK_MAX_PASSES; pass++) {
+      // Il gate si restringe verso la baseline a ogni passata: un disturbo
+      // isolato nella passata 1 non deve lasciare tutte le successive con un
+      // gate permissivo. Il decadimento (1.25) è deliberatamente più debole
+      // dell'allargamento (1.6): fossero uguali, ogni passata ripartirebbe
+      // esattamente dal valore che ha già fallito e ri-pagherebbe per intero
+      // un timeout da 5 s per campione.
+      // `gateOff` invece resta: si attiva solo dopo ripetuti fallimenti a gate
+      // massimo, e riaprirlo significherebbe pagare di nuovo quei timeout.
+      gateSpread = Math.max(baseGate, gateSpread / 1.25);
       const base = ((pass - 1) / QUICK_MAX_PASSES) * 100;
       msg.innerHTML = `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
       bar.style.width = (base + 3) + '%';
@@ -883,6 +943,8 @@ async function quickCalibrate() {
             session.unstableEvents += 1;
             if (gateSpread < QUICK_STABLE_SPREAD_MAX) {
               gateSpread = Math.min(QUICK_STABLE_SPREAD_MAX, gateSpread * 1.6);
+              gateMax = Math.max(gateMax, gateSpread);
+              gateWidenings += 1;
               log(`Gate widened to ±${(gateSpread * 100).toFixed(1)}% (signal moving on its own).`);
             } else {
               gateOff = true;
@@ -903,34 +965,82 @@ async function quickCalibrate() {
       msg.innerHTML = `Pass ${pass}: verifying…`;
       result = await measureOffset();
       bar.style.width = (base + 100 / QUICK_MAX_PASSES) + '%';
-      if (!result) break; // niente dati: lascia il giudizio al test drift finale
+      if (!result) {
+        // La calibrazione di QUESTA passata è già stata applicata da calibEnd,
+        // ma non è stata verificata: `worst` conteneva il residuo della passata
+        // precedente, ormai sovrascritta. Tenerlo significherebbe mostrare
+        // (e mandare in telemetria) un numero riferito a una calibrazione che
+        // non è più sul controller.
+        worst = null;
+        session.passes.push(null);
+        session.aborted = 'no-data';
+        log(`Pass ${pass}: not enough samples to verify the result.`);
+        break;
+      }
       worst = Math.max(result.left.offset, result.right.offset);
       session.passes.push(+worst.toFixed(2));
+      if (bestWorst === null || worst < bestWorst) bestWorst = worst;
       log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (worst < DRIFT_OK_MAX) break;
-      if (prevWorst !== null && prevWorst - worst < QUICK_CONVERGE_EPS) {
+
+      const gain = prevWorst === null ? Infinity : prevWorst - worst;
+      prevWorst = worst;
+      if (gain < 0) {
+        // Regressione, non convergenza. Ogni calibEnd è già stato applicato e
+        // il codice non può rileggere la calibrazione dal controller: fermarsi
+        // qui congelerebbe il peggioramento. Con budget residuo si riprova.
+        log(`Pass ${pass} came out worse than the previous one: trying again instead of stopping.`);
+      } else if (gain < QUICK_CONVERGE_EPS && worst <= bestWorst + QUICK_CONVERGE_EPS) {
+        // Convergenza vera. La seconda condizione evita di dichiarare "converso"
+        // un plateau raggiunto DOPO una regressione: senza, la sequenza
+        // 5.0 → 5.4 → 5.35 uscirebbe qui lasciando inutilizzato il budget
+        // residuo, cioè esattamente il recupero che si voleva tentare.
         log('Converged: residual offset at the noise floor, further passes won’t help.');
         break;
       }
-      prevWorst = worst;
       if (pass < QUICK_MAX_PASSES)
         msg.innerHTML = `Residual offset ${worst.toFixed(1)}%, running another pass…`;
     }
 
-    session.after = summarizeResult(result);
+    session.after = worst === null ? null : summarizeResult(result);
+    session.best = bestWorst === null ? null : +bestWorst.toFixed(2);
+    // `gate` è il valore finale, che con gateOff o dopo un decadimento non dice
+    // quanto si è dovuto allargare: `gateMax` è il dato utile per il tuning.
     session.gate = +gateSpread.toFixed(3);
+    session.gateMax = +gateMax.toFixed(3);
+    session.gateBase = +baseGate.toFixed(3);
+    session.gateWidenings = gateWidenings;
     session.gateOff = gateOff;
-    recordCalibSession(session);
+    recordSessionOnce(session);
 
     bar.style.width = '100%';
     await sleep(300);
     closeModal('modal-quick');
     setUnsaved(true);
-    const worn = result && Math.max(result.left.noise, result.right.noise) > QUICK_NOISE_WORN;
-    if (worst === null || worst < DRIFT_OK_MAX) {
+
+    // Il controller monta SEMPRE la calibrazione dell'ultima passata: non si può
+    // tornare alla migliore. Quando l'ultima è peggiore, l'unica cosa onesta è
+    // dirlo, invece di annunciare come risultato un numero che non è il migliore
+    // che il tool aveva ottenuto.
+    // Ordine: prima gli esiti che descrivono lo stato raggiunto (centrato,
+    // limite hardware), poi gli avvisi di peggioramento. Invertirli farebbe
+    // dire "ripeti tenendo fermo il controller" a chi è già centrato, o a chi
+    // ha un sensore consumato in cui ripetere non può funzionare.
+    const beforeWorst = before ? Math.max(before.left.offset, before.right.offset) : null;
+    const lostGround = worst !== null && bestWorst !== null && worst - bestWorst > QUICK_REGRESSION_EPS;
+    const worseThanStart = worst !== null && beforeWorst !== null && worst - beforeWorst > QUICK_REGRESSION_EPS;
+    const worn = result && worst !== null && Math.max(result.left.noise, result.right.noise) > QUICK_NOISE_WORN;
+
+    if (worst === null) {
+      toast('Calibration applied, but the result could not be verified: run the drift test to check it.', 6000);
+    } else if (worst < DRIFT_OK_MAX) {
       toast('Quick calibration complete.');
     } else if (worn) {
       toast(`Calibration complete, residual offset ${worst.toFixed(1)}%. The signal is noisy (worn sensor): this is likely the hardware limit.`, 6000);
+    } else if (worseThanStart) {
+      toast(`The last pass ended worse than the starting point (${worst.toFixed(1)}% against ${beforeWorst.toFixed(1)}%). Repeat the calibration keeping the controller still.`, 7000);
+    } else if (lostGround) {
+      toast(`Calibration complete at ${worst.toFixed(1)}%, but an earlier pass had reached ${bestWorst.toFixed(1)}%. Repeat it to try to get back there.`, 7000);
     } else if (session.unstableEvents > 0) {
       toast(`Calibration complete, residual offset ${worst.toFixed(1)}%. Movement was detected during sampling: repeat on a stable surface.`, 6000);
     } else {
@@ -941,8 +1051,14 @@ async function quickCalibrate() {
     startDriftTest();
   } catch (error) {
     busy = false;
+    // La riparazione di calibBegin può aver committato: in quel caso la RAM del
+    // controller è cambiata anche se la calibrazione non è mai partita.
+    if (error.committed) setUnsaved(true);
+    session.aborted = 'error';
+    session.err = String(error.message || error).slice(0, 120);
+    recordSessionOnce(session);
     closeModal('modal-quick');
-    toast(`Calibration failed: ${error.message}`, 5000);
+    toast(`Calibration failed: ${error.message}. If it keeps failing, restart the controller.`, 6000);
     log(`Quick calibration error: ${error.message}`);
   } finally {
     $('btn-quick-go').disabled = false;
@@ -1000,10 +1116,17 @@ async function wizardNext() {
   btn.disabled = true;
   try {
     if (wizard.step === 0) {
-      // avvio
-      await ds5.calibBegin();
-      busy = true;
+      // avvio. Misura di partenza: il wizard è il percorso per il drift ostinato,
+      // cioè i casi più informativi, e finora non ne usciva alcun numero.
+      // Cancel va nascosto e `busy` alzato PRIMA di qualunque await: durante il
+      // secondo di misura il modale è ancora a schermo, e un Cancel in quella
+      // finestra chiuderebbe il modale lasciando `busy` a true per sempre —
+      // bloccando ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
+      busy = true;
+      btn.textContent = 'Measuring…';
+      wizard.before = summarizeResult(await measureOffset(1000));
+      await ds5.calibBegin();
       wizardShowCorner(0);
       btn.textContent = 'Continue';
     } else if (wizard.step >= 1 && wizard.step <= 3) {
@@ -1016,8 +1139,10 @@ async function wizardNext() {
       btn.textContent = 'Saving…';
       await sleep(400);
       await ds5.calibEnd();
+      const wizAfter = summarizeResult(await measureOffset());
       busy = false;
-      recordEvent('wizard', { done: true });
+      wizard.reported = true;
+      recordEvent('wizard', { done: true, before: wizard.before ?? null, after: wizAfter });
       $('wizard-diagram').classList.add('hidden');
       wizardHideLive();
       $('wizard-msg').innerHTML = 'Center calibration complete. Check the result with the drift test.';
@@ -1032,8 +1157,22 @@ async function wizardNext() {
     wizardSetDots(Math.min(wizard.step, 5));
   } catch (error) {
     busy = false;
+    if (error.committed) setUnsaved(true);
+    // Anche il wizard fallito è un dato: registra dove si è rotto. Il flag
+    // impedisce un secondo evento se a lanciare è stato il codice DOM che segue
+    // l'evento di successo: quella procedura è riuscita, e contarla anche come
+    // fallita sporcherebbe il rapporto successi/fallimenti del dataset.
+    if (wizard && !wizard.reported) {
+      wizard.reported = true;
+      recordEvent('wizard', {
+        done: false,
+        step: wizard.step ?? null,
+        before: wizard.before ?? null,
+        err: String(error.message || error).slice(0, 120),
+      });
+    }
     closeModal('modal-wizard');
-    toast(`Calibration failed: ${error.message}`, 5000);
+    toast(`Calibration failed: ${error.message}. If it keeps failing, restart the controller.`, 6000);
     log(`Wizard error: ${error.message}`);
   } finally {
     btn.disabled = false;

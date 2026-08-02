@@ -65,7 +65,11 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 
 **Drift detection** samples input report `0x01` for 3 seconds, discards the first 60 samples for settling, and classifies each subsequent sample as movement or stable using the spread (max − min) across a 30-sample rolling window on all four axes. Only stable samples feed the drift estimate. The estimate is the per-axis median (outlier-resistant); noise is the 95th-percentile distance from center (flags worn potentiometers). If too few stable samples accumulate, the test retries up to twice before reporting an unstable result.
 
-**Quick calibration** runs up to 4 convergence passes. Each pass opens a calibration session, sends 12 center samples via `0x82`, commits, then re-measures residual offset with the same stability filter. It stops early if the residual falls below threshold; otherwise it passes again. The stability gate is adaptive: it widens to accommodate inherently noisy sticks so a jittery worn stick still calibrates.
+**Quick calibration** runs up to 4 convergence passes. Each pass opens a calibration session, sends 12 center samples via `0x82`, commits, then re-measures residual offset with the same stability filter. It stops early if the residual falls below threshold, or once a pass stops improving on the previous one.
+
+A pass that comes out *worse* is not convergence, so it does not stop the loop: the firmware applies every commit immediately and the tool never reads the calibration back, so stopping there would freeze the regression. The loop keeps the best residual it saw, and if the final pass ends above it — or above where the controller started — it says so instead of reporting the number as a success.
+
+The stability gate is adaptive: it widens to accommodate inherently noisy sticks so a jittery worn stick still calibrates, but never past the threshold the drift test uses to call a signal "movement", and it relaxes back toward its baseline at each pass so one transient does not degrade the rest of the run.
 
 **NVS write** is an explicit unlock → lock cycle via `0x80`/`0x81`. Everything before that lives only in controller RAM; power-off is a free revert.
 
@@ -88,14 +92,18 @@ Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is
 
 **Why collect everything:** the calibration algorithm is tuned on real-world data. Aggregated sessions across board revisions and firmware versions are the training set for making it better: learning which stability-gate parameters work per board, predicting from the noise signature whether a stick is fixable or mechanically worn, and tuning how many convergence passes are actually needed. The more (anonymous) sessions, the better the algorithm gets for everyone. That is also why using the [hosted version](https://martino-vigiani.github.io/sense-calibrator/) helps: you always run the latest algorithm, and your anonymous sessions feed the next improvement.
 
-**What is sent:** every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`) and `fw` (firmware version integer), plus:
+**What is sent:** every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`), `fw` (firmware version integer) and `sid`, plus:
+
+`sid` is a random 8-character value generated fresh **on every page load** and never written to disk. It exists only so the events of a single visit (drift test → calibration → precision test) can be read as one sequence instead of arriving unrelated. It is not a device or user identifier: reloading the page produces a new one, so two visits cannot be linked to each other.
+
+Measurements are reported as `off` (total offset per stick), `noise` (95th-percentile deviation) and `xy` (the per-axis components of the offset — `off` is their hypotenuse, so direction cannot be recovered from `off` alone; potentiometer wear is axis-asymmetric, which is exactly what makes the direction worth recording).
 
 | Event `kind` | Extra fields |
 |---|---|
 | `connect` | Controller color name, firmware build date |
-| `drift` | Measured offsets and noise, worst offset, whether the test was automatic, unstable flag |
-| `quick` | Offsets/noise before and after, residual offset per pass, stability-gate telemetry (`unstableEvents`, `gate`, `gateOff`) |
-| `wizard` | Completion flag |
+| `drift` | Measured offsets, noise and direction, worst offset, whether the test was automatic, unstable flag |
+| `quick` | Measurements before and after, residual offset per pass, best pass, stability-gate telemetry (`unstableEvents`, `gate`, `gateBase`, `gateWidenings`, `gateOff`, `settled`), and on failure `aborted` plus the error text |
+| `wizard` | Completion flag, measurements before and after, and on failure the step it stopped at plus the error text |
 | `range` | Coverage per stick, whether all extremes were reached, duration |
 | `flash` | Success/failure and NVS status (error message text on failure) |
 | `game` | Precision-test scores (center / reach / snap-back per stick, totals) |

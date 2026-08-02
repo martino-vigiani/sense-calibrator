@@ -101,9 +101,30 @@ export class DS5 {
     return { ok: word === expected, word, code };
   }
 
+  // Se una calibrazione precedente si è interrotta a metà (controller scollegato,
+  // comando rifiutato), la sessione resta aperta nel firmware e ogni avvio
+  // successivo fallisce finché il controller non viene riavviato. Non esiste un
+  // opcode di annullamento: l'unico modo di chiudere è committare. Qui si tenta
+  // la chiusura e si riprova UNA volta, invece di scrivere una calibrazione
+  // parziale sul percorso di errore.
+  // `committed` segnala che la riparazione ha scritto in RAM: `calibEnd` è un
+  // commit, quindi anche un avvio fallito può aver cambiato la calibrazione del
+  // controller. Chi chiama deve alzare comunque lo stato "non salvato", o
+  // l'utente crederebbe che non sia successo nulla.
   async calibBegin() {
-    const r = await this.calibCommand([1, 1, 1], 0x83010101);
-    if (!r.ok) throw new Error(`Failed to start center calibration (0x${r.word.toString(16)})`);
+    let r = await this.calibCommand([1, 1, 1], 0x83010101);
+    let committed = false;
+    if (!r.ok) {
+      this.log('Center calibration refused: closing a possibly stale session and retrying.');
+      committed = await this.calibEnd().then(() => true).catch(() => false);
+      r = await this.calibCommand([1, 1, 1], 0x83010101);
+    }
+    if (!r.ok) {
+      const error = new Error(`Failed to start center calibration (0x${r.word.toString(16)})`);
+      error.committed = committed;
+      throw error;
+    }
+    return { committed };
   }
 
   async calibSample() {
