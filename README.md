@@ -37,6 +37,8 @@ Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** 
 
 > Calibration lives in RAM until you click **Write to memory**. Powering the controller off before that reverts everything. Use this as a free safety net to experiment first.
 
+> **No automated tests** — this is a plain static site (vanilla JS, no build step, no dependencies). "Testing" means running it from the steps above with a real DualSense connected over USB.
+
 ---
 
 ## What it does
