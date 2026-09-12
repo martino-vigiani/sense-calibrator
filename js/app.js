@@ -2,6 +2,8 @@
 
 import { DS5, HID_FILTERS } from './ds5.js';
 import { initGame } from './game.js';
+import { initSensitivityFinder } from './sensitivity.js';
+import { initPlaytest } from './playtest.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -449,6 +451,7 @@ function onInputReport(event) {
     ry: n(d.getUint8(3)),
   };
   notifyStickSample();
+  playtest?.feedSample(sticks, performance.now());
 
   if (driftTest) driftSample();
 
@@ -772,8 +775,22 @@ const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
 const TELEMETRY_NOTICE_KEY = 'sense-telemetry-notice';
 const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
 
-const telemetryEnabled = () => localStorage.getItem(TELEMETRY_CONSENT_KEY) !== '0';
-const noticeSeen = () => localStorage.getItem(TELEMETRY_NOTICE_KEY) === '1';
+let storageAvailable = true;
+function storageRead(key, fallback = null) {
+  if (!storageAvailable) return fallback;
+  try { return localStorage.getItem(key) ?? fallback; }
+  catch (_) { storageAvailable = false; return fallback; }
+}
+function storageWrite(key, value) {
+  if (!storageAvailable) return false;
+  try { localStorage.setItem(key, value); return true; }
+  catch (_) { storageAvailable = false; return false; }
+}
+const telemetryEnabled = () => {
+  const value = storageRead(TELEMETRY_CONSENT_KEY);
+  return storageAvailable && value !== '0';
+};
+const noticeSeen = () => storageRead(TELEMETRY_NOTICE_KEY) === '1';
 
 // Finché l'avviso di primo avvio non è stato letto, gli eventi restano in coda
 // invece di partire: così l'affermazione "nothing has been sent yet" nel banner
@@ -817,9 +834,9 @@ function summarizeResult(r) {
 function recordCalibSession(entry) {
   entry.sid = SESSION_ID;
   try {
-    const arr = JSON.parse(localStorage.getItem(CALIB_STORE_KEY) || '[]');
+    const arr = JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
     arr.push(entry);
-    localStorage.setItem(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
+    storageWrite(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
   } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
 
   if (!telemetryEnabled()) return;
@@ -1139,6 +1156,7 @@ async function wizardNext() {
       btn.textContent = 'Saving…';
       await sleep(400);
       await ds5.calibEnd();
+      setUnsaved(true);
       const wizAfter = summarizeResult(await measureOffset());
       busy = false;
       wizard.reported = true;
@@ -1199,13 +1217,14 @@ let rangeSession = null; // { startTs }
 async function openRange() {
   if (!ds5 || busy) return;
   cancelDriftTest();
+  busy = true;
   try {
     await ds5.rangeBegin();
   } catch (error) {
+    busy = false;
     toast(`Failed to start range calibration: ${error.message}`, 5000);
     return;
   }
-  busy = true;
   dialRangeL.resetBins();
   dialRangeR.resetBins();
   rangeSession = {
@@ -1308,6 +1327,14 @@ async function finishRange() {
 const MODAL_CLOSE_MS = 160;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const closeTimers = new Map();
+const modalReturnFocus = new Map();
+
+function updateBackgroundInert() {
+  const hasModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
+    .some(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
+  document.querySelector('main')?.toggleAttribute('inert', hasModal);
+  document.querySelector('footer')?.toggleAttribute('inert', hasModal);
+}
 
 function openModal(id) {
   const el = $(id);
@@ -1315,6 +1342,12 @@ function openModal(id) {
   clearTimeout(closeTimers.get(el));
   closeTimers.delete(el);
   el.classList.remove('closing', 'hidden');
+  modalReturnFocus.set(el, document.activeElement);
+  updateBackgroundInert();
+  requestAnimationFrame(() => {
+    const target = el.querySelector('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    target?.focus({ preventScroll: true });
+  });
 }
 
 function closeModal(id) {
@@ -1325,6 +1358,12 @@ function closeModal(id) {
     closeTimers.delete(el);
     el.classList.remove('closing');
     el.classList.add('hidden');
+    updateBackgroundInert();
+    const previous = modalReturnFocus.get(el);
+    modalReturnFocus.delete(el);
+    const anotherModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
+      .some(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
+    if (!anotherModal) previous?.focus?.({ preventScroll: true });
   }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
 }
 
@@ -1332,12 +1371,15 @@ function closeModal(id) {
 // sottostante cambia sotto i piedi e animare l'uscita mostrerebbe il salto.
 function closeAllModals() {
   game?.close(); // ferma il loop rAF del gioco, non solo la classe .hidden
+  sensitivityFinder?.close();
+  playtest?.close();
   for (const m of document.querySelectorAll('.modal')) {
     clearTimeout(closeTimers.get(m));
     closeTimers.delete(m);
     m.classList.remove('closing');
     m.classList.add('hidden');
   }
+  updateBackgroundInert();
 }
 
 /* ============================== reboot ============================== */
@@ -1388,6 +1430,71 @@ function openGame(bypassGate = false) {
 }
 $('btn-game').addEventListener('click', () => openGame());
 
+// Sensitivity Finder: usa esclusivamente lo stick destro e conserva il report
+// nel browser. Non modifica la calibrazione e non richiede servizi esterni.
+const sensitivityFinder = initSensitivityFinder({
+  getSticks: () => sticks,
+  isAvailable: () => !!ds5 && !busy,
+  getMeasuredRightDrift: () => lastDriftResult
+    ? { ...lastDriftResult.right, unstable: lastDriftResult.unstable === true }
+    : null,
+  showModal: () => openModal('modal-sensitivity'),
+  hideModal: () => closeModal('modal-sensitivity'),
+});
+function openSensitivityFinder(bypassGate = false) {
+  if (!bypassGate && (!ds5 || busy)) return;
+  cancelDriftTest();
+  sensitivityFinder.open(bypassGate);
+}
+
+const playtest = initPlaytest({
+  getSticks: () => sticks,
+  isAvailable: () => !!ds5 && !busy,
+  showModal: () => openModal('modal-playtest'),
+  hideModal: () => closeModal('modal-playtest'),
+  onReport: result => recordEvent('playtest', result),
+});
+function openPlaytest(bypassGate = false) {
+  if (!bypassGate && (!ds5 || busy)) return;
+  cancelDriftTest();
+  playtest.open(bypassGate);
+}
+
+function updateToolSwitch(mode) {
+  for (const button of document.querySelectorAll('[data-tool]')) {
+    const active = button.dataset.tool === mode;
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+}
+
+function switchControllerTool(mode, bypassGate = false) {
+  if (!bypassGate && (!ds5 || busy)) return;
+  if (mode === 'calibration') {
+    sensitivityFinder.close();
+    playtest.close();
+  } else if (mode === 'sensitivity') {
+    playtest.close();
+    openSensitivityFinder(bypassGate);
+  } else if (mode === 'playtest') {
+    sensitivityFinder.close();
+    openPlaytest(bypassGate);
+  } else return;
+  updateToolSwitch(mode);
+}
+
+$('btn-sensitivity').addEventListener('click', () => switchControllerTool('sensitivity'));
+$('btn-playtest').addEventListener('click', () => switchControllerTool('playtest'));
+$('btn-sensitivity-exit').addEventListener('click', () => updateToolSwitch('calibration'));
+$('btn-playtest-exit').addEventListener('click', () => switchControllerTool('calibration', true));
+for (const button of document.querySelectorAll('[data-tool]')) {
+  button.addEventListener('click', () => {
+    const preview = new URLSearchParams(location.search).has('preview');
+    switchControllerTool(button.dataset.tool, preview);
+  });
+}
+
 // avvisa prima di chiudere la pagina con modifiche non salvate
 window.addEventListener('beforeunload', e => {
   if (unsaved || busy) { e.preventDefault(); e.returnValue = ''; }
@@ -1399,7 +1506,7 @@ window.addEventListener('beforeunload', e => {
 // stesso stato in localStorage, cambiarne una aggiorna l'altra.
 const consentBoxes = ['telemetry-consent', 'telemetry-consent-footer'].map($).filter(Boolean);
 function setConsent(on) {
-  localStorage.setItem(TELEMETRY_CONSENT_KEY, on ? '1' : '0');
+  storageWrite(TELEMETRY_CONSENT_KEY, on ? '1' : '0');
   for (const box of consentBoxes) box.checked = on;
 }
 for (const box of consentBoxes) {
@@ -1410,7 +1517,7 @@ for (const box of consentBoxes) {
 // Avviso una tantum al primo avvio. Banner persistente, non un toast che
 // scompare: è una scelta da fare, e finché non è fatta niente lascia il browser.
 function resolveNotice(keepSharing) {
-  localStorage.setItem(TELEMETRY_NOTICE_KEY, '1');
+  storageWrite(TELEMETRY_NOTICE_KEY, '1');
   setConsent(keepSharing);
   const queued = pendingUploads;
   pendingUploads = [];
@@ -1448,9 +1555,23 @@ const ESC_DISMISS = {
   'modal-wizard': 'btn-wizard-cancel',
   'modal-flash': 'btn-flash-cancel',
   'modal-game': 'btn-game-exit',
+  'modal-sensitivity': 'btn-sensitivity-exit',
+  'modal-playtest': 'btn-playtest-exit',
 };
 
 document.addEventListener('keydown', e => {
+  const activeModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
+    .find(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
+  if (e.key === 'Tab' && activeModal) {
+    const focusable = [...activeModal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter(el => !el.classList.contains('hidden'));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    return;
+  }
   if (e.key !== 'Escape' || busy) return;
   for (const [modalId, btnId] of Object.entries(ESC_DISMISS)) {
     const modal = $(modalId);
@@ -1500,8 +1621,14 @@ window.__senseSimulate = (lx, ly, rx, ry) => { sticks = { lx, ly, rx, ry }; noti
 window.__senseExtractStable = extractStableSamples;
 window.__senseWaitForStable = waitForStable;
 // Storico locale delle calibrazioni (telemetria per futura calibrazione ML).
-window.__senseCalibSessions = () => JSON.parse(localStorage.getItem(CALIB_STORE_KEY) || '[]');
+window.__senseCalibSessions = () => JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
 // in coppia con __senseSimulate.
 window.__senseGameOpen = () => openGame(true);
+// Apre il finder senza controller; __senseSimulate alimenta lo stick destro.
+window.__senseSensitivityOpen = () => openSensitivityFinder(true);
+window.__sensePlaytestOpen = () => switchControllerTool('playtest', true);
+// Preview condivisibile senza HID per controllare rapidamente layout e copy.
+if (location.hash === '#sensitivity-demo') openSensitivityFinder(true);
+if (location.hash === '#playtest-demo') switchControllerTool('playtest', true);

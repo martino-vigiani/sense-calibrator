@@ -1,131 +1,113 @@
 # Sense Calibrator
 
-Your PS5 controller drifts. Fix it from your browser for free, in 2 minutes, nothing to install.
+This browser tool tests and recalibrates the sticks of a standard PS5 DualSense from Chrome or Edge.
 
-Sense Calibrator diagnoses analog stick drift and writes a permanent hardware recalibration directly into the DualSense's non-volatile memory, over WebHID. The fix travels with the controller to every platform: PS5, PC, Mac.
+It measures stick drift, corrects center and range over USB, compares the controller before and after calibration, finds a practical FPS sensitivity, and tests movement and aim together.
 
-**▶ Try it now: [martino-vigiani.github.io/sense-calibrator](https://martino-vigiani.github.io/sense-calibrator/)** (Chrome/Edge, DualSense over USB)
+**[Open Sense Calibrator](https://martino-vigiani.github.io/sense-calibrator/)**
 
-![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-DualSense-black) ![license](https://img.shields.io/badge/license-MIT-black)
+You need a desktop computer, Chrome or Edge, a USB data cable and a standard DualSense (`054C:0CE6`). DualSense Edge and DualShock 4 are not supported.
 
-![Sense Calibrator landing](paper/assets/01-landing.png)
+[![GitHub stars](https://img.shields.io/github/stars/martino-vigiani/sense-calibrator?style=flat&label=stars)](https://github.com/martino-vigiani/sense-calibrator/stargazers) ![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-standard%20DualSense-black) ![license](https://img.shields.io/badge/license-MIT-black)
 
-<!-- TODO: demo GIF -->
+![Sense Calibrator interface](paper/assets/social-card.png)
 
-> 📖 **The story behind this tool:** how I fixed my controller's stick drift by building this with Anthropic's Fable 5 model, instead of buying a new one. [**Read ARTICLE.md**](ARTICLE.md), also published as SubraLabs Lab Paper #3: [**subralabs.com/lab/sense-calibrator**](https://subralabs.com/lab/sense-calibrator.html).
+> Calibration can correct a stable center or range offset. It cannot repair a worn or damaged stick module.
 
----
+## How to use it
 
-## Quick start
+1. Connect the DualSense with a USB data cable.
+2. Open the [hosted tool](https://martino-vigiani.github.io/sense-calibrator/) in Chrome or Edge.
+3. Select **Connect DualSense** and approve the browser request.
+4. Leave both sticks untouched while the drift test runs.
+5. Calibrate only if the result shows a correctable offset.
+6. Run the same tests again and compare the result.
+7. Select **Write to memory** only when you want to keep the calibration.
 
-Requirements: **Chrome or Edge** (Safari/Firefox have no WebHID), **USB cable** (Bluetooth is detected and rejected), a standard DualSense (`054C:0CE6`).
+Calibration stays in controller RAM until step 7. Turning the controller off before that discards the temporary calibration.
 
-**Easiest:** open the [hosted version](https://martino-vigiani.github.io/sense-calibrator/), connect the controller over USB, click **Connect controller**.
+## Tools
 
-**Or run it locally:**
+| Goal | Tool | Result | Changes the controller? |
+|---|---|---|---|
+| Check for drift | **Drift test** | Resting offset, noise and a result for each stick | No |
+| Correct center or range | **Calibration** | Quick, guided and full range procedures | Temporary until **Write to memory** |
+| Check the calibration | **Precision test** | Center hold, edge reach and snap back scores | No |
+| Find an FPS starting point | **Sensitivity finder** | Look index, ADS ratio and response curve | No |
+| Test movement and aim | **Gameplay lab** | Tracking, use of both sticks, movement coverage, USB report timing and browser frame pacing | No |
 
-1. Clone or download this repo, then start a local HTTP server (WebHID requires a secure context; `file://` does not work):
+The sensitivity finder recommends a deadzone only after a real drift measurement. Gameplay lab does not measure complete input latency through a console, game or display.
 
-   ```sh
-   python3 -m http.server 8000
-   ```
+## Run it locally
 
-2. Open `http://localhost:8000` in Chrome or Edge.
-3. Connect your DualSense with a **USB cable**.
-4. Click **Connect controller**. The drift test runs automatically.
-5. Calibrate if needed. When satisfied, click **Write to memory** to make the fix permanent.
+Clone or download the repository, then run:
 
-> Calibration lives in RAM until you click **Write to memory**. Powering the controller off before that reverts everything. Use this as a free safety net to experiment first.
+```sh
+python3 -m http.server 8000
+```
 
-> **No automated tests** — this is a plain static site (vanilla JS, no build step, no dependencies). "Testing" means running it from the steps above with a real DualSense connected over USB.
+Open `http://localhost:8000` in Chrome or Edge.
 
----
+WebHID requires a secure context. Opening the page through `file://` does not work. The project is plain HTML, CSS and JavaScript, with no build step or dependencies.
 
-## What it does
+There are no automated hardware tests. A complete check requires a real DualSense connected over USB.
 
-- **Automatic drift test on connect:** measures stick resting offsets, classifies drift (centered / mild / marked), and distinguishes a clean offset from potentiometer wear using signal-noise analysis.
-- **Quick calibration:** re-centers the sticks automatically. Samples are stability-gated (touch or vibration never contaminates the average), the gate adapts to the controller's own noise floor, and passes repeat until the residual offset converges. The final verdict distinguishes a fixable offset from worn hardware that needs physical repair.
-- **Guided four-corner calibration:** for stubborn drift. Push sticks into each corner while live dials show actual vs. target position.
-- **Range calibration:** rotate both sticks to recalibrate full travel. A 36-bin polar coverage map unlocks the save button only once the full perimeter is covered.
-- **Precision test:** three quick calibration checks (center hold, edge reach, snap-back), each measuring a calibration property rather than hand skill. Reproducible 0 to 100 score per stick, so you can prove the fix worked before and after.
-- **Permanent NVS write:** calibration is temporary until you explicitly write it to the controller's non-volatile storage. Once written, the fix applies everywhere.
-- Live stick visualization, HID command log, automatic reconnect.
+## How the calibration works
 
----
+The drift test runs for 3 seconds. It discards the first 60 samples and checks a rolling window of 30 samples across all four axes. Only stable samples are used. Resting position uses the median; noise uses the 95th percentile distance from center. The test retries up to twice when there are too few stable samples.
 
-## How it works
+Quick calibration runs up to 4 passes. Each pass sends 12 center samples through HID report `0x82`, commits the result, and measures the remaining offset again. A worse pass is not reported as success. The tool keeps the best measured result and warns when the final state is worse than the starting state.
 
-*Skimmable for the technically curious.*
+Guided calibration samples four stick corners. Range calibration uses a 36 bin polar map to check full travel. The precision test measures center hold, edge reach and snap back on a scale from 0 to 100. These checks measure calibration, not player skill.
 
-**Protocol layer (`js/ds5.js`)** talks to the controller via WebHID feature reports:
+The sensitivity finder compares right stick tracking at three control speeds. Gameplay lab offers free play and a repeatable 30 second run.
+
+The protocol code is in `js/ds5.js`:
 
 | Report | Purpose |
 |---|---|
-| `0x82` / `0x83` | Send calibration data / read back response |
-| `0x80` / `0x81` | NVS management: unlock → write → lock cycle; also device info, serial, reboot |
-| `0x01` (input) | Raw stick values, sampled at ~250 Hz for drift detection |
+| `0x82` / `0x83` | Send calibration data and read the response |
+| `0x80` / `0x81` | Read device information and manage NVS writing |
+| `0x01` | Read raw stick input at about 250 Hz |
 
-**Drift detection** samples input report `0x01` for 3 seconds, discards the first 60 samples for settling, and classifies each subsequent sample as movement or stable using the spread (max − min) across a 30-sample rolling window on all four axes. Only stable samples feed the drift estimate. The estimate is the per-axis median (outlier-resistant); noise is the 95th-percentile distance from center (flags worn potentiometers). If too few stable samples accumulate, the test retries up to twice before reporting an unstable result.
+For the full technical explanation, read [ARTICLE.md](ARTICLE.md) or the [SubraLabs Lab Paper](https://subralabs.com/lab/sense-calibrator.html).
 
-**Quick calibration** runs up to 4 convergence passes. Each pass opens a calibration session, sends 12 center samples via `0x82`, commits, then re-measures residual offset with the same stability filter. It stops early if the residual falls below threshold, or once a pass stops improving on the previous one.
+## Limits
 
-A pass that comes out *worse* is not convergence, so it does not stop the loop: the firmware applies every commit immediately and the tool never reads the calibration back, so stopping there would freeze the regression. The loop keeps the best residual it saw, and if the final pass ends above it — or above where the controller started — it says so instead of reporting the number as a success.
+- Only the standard DualSense with USB product ID `054C:0CE6` is supported.
+- DualSense Edge and DualShock 4 are not supported.
+- Calibration works only over USB. This tool rejects Bluetooth for calibration.
+- Chrome and Edge are supported. Safari and Firefox do not provide WebHID.
+- Calibration can correct a stable offset. It cannot repair mechanical wear or a damaged potentiometer.
 
-The stability gate is adaptive: it widens to accommodate inherently noisy sticks so a jittery worn stick still calibrates, but never past the threshold the drift test uses to call a signal "movement", and it relaxes back toward its baseline at each pass so one transient does not degrade the rest of the run.
+## Telemetry and privacy
 
-**NVS write** is an explicit unlock → lock cycle via `0x80`/`0x81`. Everything before that lives only in controller RAM; power-off is a free revert.
+The site can send usage events to a server hosted at `subralabs.com`. Sharing is enabled by default, but nothing is uploaded before the first launch notice appears.
 
----
+Select **Keep sharing** to send the events held in memory. Select **Don't share** to discard them and save the preference. You can change the setting later in the footer or quick calibration dialog. No third party analytics service is used.
 
-## Limitations
+Each event contains its type, an ISO 8601 timestamp, board revision, firmware version and `sid`. The `sid` is a random 8 character value created on every page load. It groups events from one visit, is never saved to disk, and changes after a reload.
 
-- Standard DualSense only (`054C:0CE6`). **DualSense Edge and DualShock 4 are not supported.**
-- USB only. **Bluetooth calibration is not supported** (WebHID blocks it by design).
-- Chrome or Edge only. Safari and Firefox have no WebHID.
-- Calibration corrects offset drift (a stable non-zero resting value). It cannot repair mechanical wear. If the potentiometer wiper is physically degraded, you may need a hardware fix eventually.
+Measurements can include stick offset, noise, direction, calibration passes, test scores, USB report timing and browser frame pacing. The payload excludes the controller serial number, device identifiers, browser fingerprints and personal information. The receiving server can still see normal network metadata such as an IP address.
 
----
+A local copy of calibration sessions is stored in `localStorage` under `sense-calib-sessions`, whether or not uploads are enabled.
 
-## Telemetry & privacy
+## Report a controller result
 
-Sense Calibrator uploads anonymous usage data to a self-hosted endpoint. This is **on by default**, with a one-time notice on first launch and a one-click opt-out (same model as Homebrew or VS Code telemetry).
+1. Record the board revision, firmware, operating system, browser and USB connection shown by the tool.
+2. Run the drift test and precision test before calibration.
+3. Calibrate the controller.
+4. Repeat the same tests without changing the setup.
+5. [Open an issue](https://github.com/martino-vigiani/sense-calibrator/issues/new) with the steps and both results.
 
-**Nothing is uploaded before you have seen that notice.** Events recorded while the notice is still on screen are held in memory; choosing *Keep sharing* sends them, choosing *Don't share* discards them and sets the opt-out permanently. After that, the setting lives in the page footer and in the quick-calibration dialog, and can be changed at any time.
+Include failures and regressions. Never include a controller serial number or another device identifier.
 
-**Why collect everything:** the calibration algorithm is tuned on real-world data. Aggregated sessions across board revisions and firmware versions are the training set for making it better: learning which stability-gate parameters work per board, predicting from the noise signature whether a stick is fixable or mechanically worn, and tuning how many convergence passes are actually needed. The more (anonymous) sessions, the better the algorithm gets for everyone. That is also why using the [hosted version](https://martino-vigiani.github.io/sense-calibrator/) helps: you always run the latest algorithm, and your anonymous sessions feed the next improvement.
-
-**What is sent:** every significant action produces one anonymous event. All events carry `kind`, `t` (ISO 8601 timestamp), `board` (e.g. `BDM-030`), `fw` (firmware version integer) and `sid`, plus:
-
-`sid` is a random 8-character value generated fresh **on every page load** and never written to disk. It exists only so the events of a single visit (drift test → calibration → precision test) can be read as one sequence instead of arriving unrelated. It is not a device or user identifier: reloading the page produces a new one, so two visits cannot be linked to each other.
-
-Measurements are reported as `off` (total offset per stick), `noise` (95th-percentile deviation) and `xy` (the per-axis components of the offset — `off` is their hypotenuse, so direction cannot be recovered from `off` alone; potentiometer wear is axis-asymmetric, which is exactly what makes the direction worth recording).
-
-| Event `kind` | Extra fields |
-|---|---|
-| `connect` | Controller color name, firmware build date |
-| `drift` | Measured offsets, noise and direction, worst offset, whether the test was automatic, unstable flag |
-| `quick` | Measurements before and after, residual offset per pass, best pass, stability-gate telemetry (`unstableEvents`, `gate`, `gateBase`, `gateWidenings`, `gateOff`, `settled`), and on failure `aborted` plus the error text |
-| `wizard` | Completion flag, measurements before and after, and on failure the step it stopped at plus the error text |
-| `range` | Coverage per stick, whether all extremes were reached, duration |
-| `flash` | Success/failure and NVS status (error message text on failure) |
-| `game` | Precision-test scores (center / reach / snap-back per stick, totals) |
-
-**What is never collected:** serial number, any device identifier, IP address (not stored server-side), browser fingerprint, or any personal information.
-
-**Where it goes:** a self-hosted server at `subralabs.com`. No third-party analytics services are used.
-
-**Local copy:** calibration sessions are always stored in `localStorage` under the key `sense-calib-sessions`, regardless of whether upload consent is given.
-
-To opt out, uncheck **"Share anonymous usage data"** in the page footer or in the quick-calibration dialog (the two checkboxes are the same setting). The preference persists in `localStorage` and can be changed at any time; nothing is ever sent after opt-out.
-
----
+If the tool helped, [star the repository](https://github.com/martino-vigiani/sense-calibrator). It makes the project easier to find.
 
 ## Disclaimer
 
-Unofficial tool, not affiliated with Sony. The NVS write uses widely tested reverse-engineered commands, but you use it at your own risk.
-
----
+Sense Calibrator is unofficial and is not affiliated with Sony. Use it at your own risk.
 
 ## License
 
-[MIT](LICENSE). The calibration protocol derives from the MIT-licensed [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) project by the_al; its copyright notice is preserved in [`LICENSE`](LICENSE).
+The project is available under the [MIT License](LICENSE). The calibration protocol derives from the MIT licensed [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) project by the_al. Its original license is preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

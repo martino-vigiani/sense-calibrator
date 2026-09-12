@@ -23,6 +23,8 @@ Three ES modules under `js/`, loaded from `index.html`:
 - **`js/ds5.js`** — DualSense HID protocol layer, no DOM. The `DS5` class wraps a WebHID device: calibration commands (feature reports `0x82` send / `0x83` response, checked against expected status words), NVS lock/unlock/status (`0x80`/`0x81`), device info, battery parsing. Protocol sequences derive from the dualshock-tools project. Key invariant: feature report buffers must be padded to the size declared by the HID descriptor (`allocReq`) or the firmware silently discards the command.
 - **`js/app.js`** — all UI and calibration logic: connection/reconnect, input report parsing, automatic drift test, quick calibration (stability-gated sampling with adaptive gate + convergence passes), 4-corner guided wizard, range calibration with coverage bins, NVS write flow, telemetry. Tuning constants (drift thresholds, stability windows, gate spreads) live at the top of the file and of each section.
 - **`js/game.js`** — self-contained precision test with three calibration-diagnostic checks (center hold / edge reach / snap-back), each measuring a calibration property rather than user skill. Talks to app.js only through injected deps (`getSticks`, `isAvailable`, optional `onReport`); never touches HID.
+- **`js/sensitivity.js`** — local sensitivity finder. Compares right-stick tracking across three virtual control speeds, creates a universal FPS aim profile, then optionally maps it to game-specific starting settings. It receives stick state through injected deps, never touches HID, and keeps results in localStorage.
+- **`js/playtest.js`** — fixed-timestep FPS-style controller lab. Separates browser frame pacing from raw HID report timing and scores tracking, movement coverage and simultaneous two-stick use. It receives live stick state and HID sample notifications through injected deps.
 
 Comments in the JS are in Italian; UI strings are English.
 
@@ -45,4 +47,7 @@ Every significant action emits a typed event via `recordEvent(kind, data)` in ap
 Exposed on `window` for console debugging:
 
 - `window.__senseGameOpen()` — open the minigame bypassing the connection gate.
+- `window.__senseSensitivityOpen()` — open the sensitivity finder bypassing the connection gate.
+- `#sensitivity-demo` — open the finder setup directly for visual review without HID.
+- `window.__sensePlaytestOpen()` / `#playtest-demo` — open the gameplay lab without HID for visual review.
 - `window.__senseCalibSessions()` — dump locally stored calibration sessions.

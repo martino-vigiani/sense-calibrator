@@ -1,6 +1,14 @@
+# Third-party notices
+
+The DualSense calibration protocol in this project is derived from
+[dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io),
+licensed under the MIT License.
+
+## dualshock-tools
+
 MIT License
 
-Copyright (c) 2026 Martino Vigiani
+Copyright (c) 2024 the_al
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

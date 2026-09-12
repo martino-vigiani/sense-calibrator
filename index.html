@@ -3,15 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Fix PS5 Stick Drift from Your Browser | Sense Calibrator</title>
-  <meta name="description" content="Fix PS5 DualSense stick drift free in 2 minutes. Diagnose and permanently recalibrate sticks from your browser over USB. No install, no drivers, open source.">
+  <title>PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator</title>
+  <meta name="description" content="Test a standard PS5 DualSense for stick drift, recalibrate it over USB in Chrome or Edge, then run a local aim test for a practical FPS sensitivity.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/">
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sense Calibrator">
+  <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/">
-  <meta property="og:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
-  <meta property="og:description" content="Free tool that diagnoses and permanently recalibrates drifting DualSense sticks over WebHID. Nothing to install.">
-  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/01-landing.png">
+  <meta property="og:title" content="PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator">
+  <meta property="og:description" content="Check both sticks, recalibrate center and range over USB, then use a local aim test to find a practical FPS sensitivity.">
+  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense calibration and controller sensitivity">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator">
+  <meta name="twitter:description" content="Test and recalibrate DualSense sticks over USB, then find a practical FPS sensitivity with a local aim test.">
+  <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png">
+  <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense calibration and controller sensitivity">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
   <script type="application/ld+json">
@@ -19,32 +30,69 @@
     "@context": "https://schema.org",
     "@graph": [
       {
+        "@type": "WebSite",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/#website",
+        "url": "https://martino-vigiani.github.io/sense-calibrator/",
+        "name": "Sense Calibrator",
+        "description": "DualSense stick drift diagnostics, controller calibration and FPS sensitivity testing in the browser.",
+        "inLanguage": "en"
+      },
+      {
         "@type": "WebApplication",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/#application",
         "name": "Sense Calibrator",
         "url": "https://martino-vigiani.github.io/sense-calibrator/",
-        "description": "Free browser tool that diagnoses and permanently recalibrates PS5 DualSense stick drift over WebHID. No install, no drivers.",
+        "description": "Free browser utility for testing a standard PS5 DualSense for stick drift, recalibrating stick center and range over USB, and estimating a practical FPS controller sensitivity with a local aim test.",
+        "image": "https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png",
+        "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" },
         "applicationCategory": "UtilitiesApplication",
-        "operatingSystem": "Any (Chrome or Edge required)",
+        "operatingSystem": ["Windows", "macOS", "Linux", "ChromeOS"],
+        "browserRequirements": "Desktop Chrome or Edge with WebHID; standard DualSense connected by USB.",
+        "isAccessibleForFree": true,
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
-        "license": "https://github.com/martino-vigiani/sense-calibrator/blob/main/LICENSE"
+        "featureList": [
+          "Automatic analog stick drift test",
+          "Quick and guided stick-center calibration",
+          "Analog stick range calibration",
+          "Precision controller test",
+          "Local FPS controller sensitivity finder",
+          "FPS-style movement and aim play test"
+        ],
+        "license": "https://github.com/martino-vigiani/sense-calibrator/blob/main/LICENSE",
+        "isBasedOn": "https://github.com/dualshock-tools/dualshock-tools.github.io",
+        "creator": {
+          "@type": "Organization",
+          "name": "SubraLabs",
+          "url": "https://subralabs.com/"
+        },
+        "sameAs": "https://github.com/martino-vigiani/sense-calibrator"
       },
       {
         "@type": "FAQPage",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/#faq",
+        "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" },
+        "about": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#application" },
+        "inLanguage": "en",
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "What causes PS5 stick drift?",
-            "acceptedAnswer": { "@type": "Answer", "text": "The analog sticks read their position through small potentiometers. With wear, their resting value shifts away from the stored center calibration, so the console sees movement that is not there. In many cases the sensor is fine: the stored calibration is simply wrong, and rewriting it fixes the drift." }
+            "name": "How do I test a DualSense for stick drift?",
+            "acceptedAnswer": { "@type": "Answer", "text": "On a desktop in Chrome or Edge, connect a standard DualSense with a USB data cable and choose Connect DualSense. Leave both sticks untouched while the automatic test samples them. It reports each stick's resting offset and noise; run the precision test before and after calibration to compare the result." }
           },
           {
             "@type": "Question",
-            "name": "Does this permanently fix stick drift?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes, when the drift is a calibration offset. The fix is written into the controller's own memory, so it applies everywhere: PS5, PC, Mac. If the potentiometer is mechanically worn, calibration reduces the drift but cannot repair the hardware. The built-in drift test tells you which case you have." }
+            "name": "What causes PS5 stick drift?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Stick drift appears when a stick's neutral signal is off-center or unstable. Possible causes include a stored calibration offset, worn or dirty potentiometers, and mechanical centering problems. Calibration can correct a stable offset, but it cannot repair physical wear." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can calibration permanently fix stick drift?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It can make a correction persist when the cause is a stable calibration offset and you choose Write to memory. It cannot guarantee a permanent repair or fix worn, dirty or damaged hardware. Compare the drift and precision tests before and after calibration; if the signal stays noisy or off-center, the controller may need service." }
           },
           {
             "@type": "Question",
             "name": "Is it safe for my controller?",
-            "acceptedAnswer": { "@type": "Answer", "text": "The tool uses the same widely tested calibration commands as the open-source dualshock-tools project. Nothing is permanent until you click Write to memory: powering the controller off before that reverts every change. Unofficial tool, use at your own risk." }
+            "acceptedAnswer": { "@type": "Answer", "text": "The drift and precision tests are read-only. Calibration changes controller values, but those changes remain temporary until you choose Write to memory; powering the controller off first discards them. Writing saves the calibration to non-volatile memory. This is an unofficial tool, so review the test result before saving and use it at your own risk." }
           },
           {
             "@type": "Question",
@@ -60,6 +108,11 @@
             "@type": "Question",
             "name": "Is it really free?",
             "acceptedAnswer": { "@type": "Answer", "text": "Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer." }
+          },
+          {
+            "@type": "Question",
+            "name": "How does the sensitivity finder work?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It compares your right-stick tracking at three control speeds and creates a universal FPS aim profile: normalized look index, ADS ratio, response curve and deadzone. Optional presets convert the same profile for Fortnite, Call of Duty or Apex Legends. The adaptive model runs locally in your browser." }
           }
         ]
       }
@@ -86,19 +139,18 @@
 
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
-    <h1>Fix PS5 stick drift.<br>For real.</h1>
-    <p class="lede">Automatic stick-drift diagnostics and hardware recalibration for the DualSense.
-      No install: all from the browser, written straight into the controller's memory.</p>
-
-    <div class="hero-cta">
-      <button id="btn-connect" class="btn btn-primary btn-lg">Connect controller</button>
-      <p class="hint">Chrome or Edge &middot; DualSense connected via <strong>USB cable</strong></p>
+    <h1>Recalibrate your DualSense.<br>Then tune it.</h1>
+    <div class="hero-intro">
+      <p class="lede">A browser utility for PS5 stick drift and controller sensitivity. It works directly over USB, with no install or account.</p>
+      <div class="hero-cta">
+        <button id="btn-connect" class="btn btn-primary btn-lg">Connect DualSense</button>
+        <p class="hint">Desktop Chrome or Edge &middot; USB cable required</p>
+      </div>
     </div>
 
     <!-- Mostrato da app.js quando WebHID non c'è (mobile, Safari, Firefox).
          Non nasconde il resto della pagina: la landing e la FAQ restano leggibili. -->
     <div id="unsupported" class="unsupported hidden">
-      <p class="unsupported-eyebrow">Desktop only</p>
       <h2 id="unsupported-title" class="unsupported-title">Open this page on a computer</h2>
       <p id="unsupported-msg" class="unsupported-msg">Recalibrating a DualSense means talking to it over a USB
         cable, and browsers only allow that on <b>desktop Chrome or Edge</b>. Send yourself the link, open it
@@ -116,21 +168,26 @@
       <li><b>2</b><span>Automatic drift test</span></li>
       <li><b>3</b><span>Calibration</span></li>
       <li><b>4</b><span>Save to memory</span></li>
+      <li><b>5</b><span>Tune sensitivity</span></li>
     </ol>
 
     <section class="faq" aria-label="Stick drift FAQ">
       <h2>Stick drift FAQ</h2>
       <details>
-        <summary>What causes PS5 stick drift?</summary>
-        <p>The analog sticks read their position through small potentiometers. With wear, their resting value shifts away from the stored center calibration, so the console sees movement that is not there. In many cases the sensor is fine: the stored calibration is simply wrong, and rewriting it fixes the drift.</p>
+        <summary>How do I test a DualSense for stick drift?</summary>
+        <p>On a desktop in Chrome or Edge, connect a standard DualSense with a USB data cable and choose Connect DualSense. Leave both sticks untouched while the automatic test samples them. It reports each stick's resting offset and noise; run the precision test before and after calibration to compare the result.</p>
       </details>
       <details>
-        <summary>Does this permanently fix stick drift?</summary>
-        <p>Yes, when the drift is a calibration offset. The fix is written into the controller's own memory, so it applies everywhere: PS5, PC, Mac. If the potentiometer is mechanically worn, calibration reduces the drift but cannot repair the hardware. The built-in drift test tells you which case you have.</p>
+        <summary>What causes PS5 stick drift?</summary>
+        <p>Stick drift appears when a stick's neutral signal is off-center or unstable. Possible causes include a stored calibration offset, worn or dirty potentiometers, and mechanical centering problems. Calibration can correct a stable offset, but it cannot repair physical wear.</p>
+      </details>
+      <details>
+        <summary>Can calibration permanently fix stick drift?</summary>
+        <p>It can make a correction persist when the cause is a stable calibration offset and you choose Write to memory. It cannot guarantee a permanent repair or fix worn, dirty or damaged hardware. Compare the drift and precision tests before and after calibration; if the signal stays noisy or off-center, the controller may need service.</p>
       </details>
       <details>
         <summary>Is it safe for my controller?</summary>
-        <p>The tool uses the same widely tested calibration commands as the open-source dualshock-tools project. Nothing is permanent until you click "Write to memory": powering the controller off before that reverts every change. Unofficial tool, use at your own risk.</p>
+        <p>The drift and precision tests are read-only. Calibration changes controller values, but those changes remain temporary until you choose Write to memory; powering the controller off first discards them. Writing saves the calibration to non-volatile memory. This is an unofficial tool, so review the test result before saving and use it at your own risk.</p>
       </details>
       <details>
         <summary>Why do I need a USB cable and Chrome or Edge?</summary>
@@ -144,11 +201,21 @@
         <summary>Is it really free?</summary>
         <p>Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer.</p>
       </details>
+      <details>
+        <summary>How does the sensitivity finder work?</summary>
+        <p>It compares your right-stick tracking at three control speeds and creates a universal FPS aim profile: normalized look index, ADS ratio, response curve and deadzone. Optional presets convert the same profile for Fortnite, Call of Duty or Apex Legends. The adaptive model runs locally in your browser.</p>
+      </details>
     </section>
   </section>
 
   <!-- ======================= VISTA: DEVICE ======================= -->
   <section id="view-device" class="view hidden">
+
+    <nav class="tool-switch" aria-label="Controller tools">
+      <button type="button" data-tool="calibration" class="active" aria-current="page">Calibrate</button>
+      <button type="button" data-tool="sensitivity">Sensitivity</button>
+      <button type="button" data-tool="playtest">Play test</button>
+    </nav>
 
     <div class="card device-card">
       <div class="device-id">
@@ -223,6 +290,20 @@
         </div>
         <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
+      <div class="action action-sensitivity">
+        <div>
+          <h4>Sensitivity finder</h4>
+          <p>A local tracking test builds a universal aim profile, with optional scales for Fortnite, Warzone and Apex.</p>
+        </div>
+        <button id="btn-sensitivity" class="btn btn-signal">Find my sensitivity</button>
+      </div>
+      <div class="action action-playtest">
+        <div>
+          <h4>Gameplay lab</h4>
+          <p>Move and aim together in an FPS-style arena, then compare tracking, USB report rate and frame pacing.</p>
+        </div>
+        <button id="btn-playtest" class="btn btn-primary">Open play test</button>
+      </div>
     </div>
 
     <div id="banner-unsaved" class="banner hidden">
@@ -245,7 +326,7 @@
   <span>Built by <a href="https://subralabs.com" target="_blank" rel="noopener">SubraLabs</a> &middot; <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">read the technical write-up</a></span>
   <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
   <span>Unofficial tool &middot; use at your own risk.</span>
-  <label class="telemetry-label" title="board model, firmware, calibration results, test scores (never serial numbers, device IDs or IP)">
+  <label class="telemetry-label" title="Payload: board model, firmware, calibration results and test scores; no serial number or device ID">
     <input type="checkbox" id="telemetry-consent-footer">
     <span>Share anonymous usage data to improve the algorithm (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
   </label>
@@ -257,7 +338,7 @@
     <h3 id="quick-title">Quick calibration</h3>
     <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <div class="progress"><i id="quick-bar"></i></div>
-    <label class="telemetry-label" title="board model, firmware, calibration results, test scores (never serial numbers, device IDs or IP)">
+    <label class="telemetry-label" title="Payload: board model, firmware, calibration results and test scores; no serial number or device ID">
       <input type="checkbox" id="telemetry-consent">
       <span>Share anonymous usage data to improve the algorithm</span>
     </label>
@@ -384,6 +465,87 @@
   </div>
 </div>
 
+<!-- ======================= MODALE: SENSITIVITY FINDER ======================= -->
+<div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title">
+  <div class="modal-panel modal-sensitivity">
+    <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
+      <button type="button" data-tool="calibration">Calibrate</button>
+      <button type="button" data-tool="sensitivity" class="active" aria-current="page">Sensitivity</button>
+      <button type="button" data-tool="playtest">Play test</button>
+    </nav>
+    <div class="game-head">
+      <h3 id="sensitivity-title">Find your sensitivity</h3>
+      <button id="btn-sensitivity-exit" class="btn btn-ghost btn-sm">Exit</button>
+    </div>
+
+    <div id="sensitivity-setup">
+      <p>Track the target with the <b>right stick</b>. Three short rounds produce a universal aim profile. The analysis stays in this browser.</p>
+      <div class="sensitivity-games" role="radiogroup" aria-label="Choose an output format">
+        <button type="button" data-sensitivity-game="general" role="radio" aria-checked="true"><b>Any shooter</b><span>Universal profile</span></button>
+        <details class="sensitivity-presets">
+          <summary>Use a game-specific scale <span>Optional</span></summary>
+          <div class="sensitivity-game-options">
+            <button type="button" data-sensitivity-game="fortnite" role="radio" aria-checked="false"><b>Fortnite</b><span>Percent settings</span></button>
+            <button type="button" data-sensitivity-game="warzone" role="radio" aria-checked="false"><b>Warzone</b><span>Stick + ADS</span></button>
+            <button type="button" data-sensitivity-game="apex" role="radio" aria-checked="false"><b>Apex Legends</b><span>Look + response</span></button>
+          </div>
+        </details>
+      </div>
+      <p class="sensitivity-method">Measures tracking error, correction direction and stick effort.</p>
+      <p class="sensitivity-private">About 35 seconds.</p>
+      <div class="modal-actions">
+        <button id="btn-sensitivity-start" class="btn btn-signal">Start aim analysis</button>
+      </div>
+    </div>
+
+    <div id="sensitivity-run" class="hidden">
+      <div class="sensitivity-run-meta">
+        <span id="sensitivity-status">Round 1 of 3</span>
+        <span>Live fit <b id="sensitivity-live-score">—</b></span>
+      </div>
+      <canvas id="sensitivity-canvas" width="760" height="400" aria-label="Aim tracking field with a moving target and your reticle"></canvas>
+      <div id="sensitivity-progress" class="progress sensitivity-progress"><i></i></div>
+      <p class="sensitivity-tip">Use the right stick only. Accuracy matters more than speed.</p>
+    </div>
+
+    <div id="sensitivity-report" class="hidden">
+      <button id="btn-sensitivity-change" class="hidden" type="button"></button>
+      <button id="btn-sensitivity-retry" class="hidden" type="button"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODALE: GAMEPLAY LAB ======================= -->
+<div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title">
+  <div class="modal-panel modal-playtest">
+    <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
+      <button type="button" data-tool="calibration">Calibrate</button>
+      <button type="button" data-tool="sensitivity">Sensitivity</button>
+      <button type="button" data-tool="playtest" class="active" aria-current="page">Play test</button>
+    </nav>
+    <div class="game-head playtest-head">
+      <div>
+        <p class="eyebrow">FPS controller lab</p>
+        <h3 id="playtest-title">Move and aim, together.</h3>
+      </div>
+      <button id="btn-playtest-exit" class="btn btn-ghost btn-sm">Exit</button>
+    </div>
+    <div class="playtest-live" aria-live="polite">
+      <span id="playtest-status">Free play is live. Start a run when you are comfortable.</span>
+      <b id="playtest-timer">FREE</b>
+    </div>
+    <canvas id="playtest-canvas" width="960" height="520" aria-label="FPS-style arena: left stick moves the square, right stick moves the reticle toward the green target"></canvas>
+    <div id="playtest-progress" class="progress playtest-progress"><i></i></div>
+    <p class="playtest-instruction">Left stick moves the square. Right stick controls the reticle. Keep the reticle on the green target while changing direction.</p>
+    <p id="playtest-pause-note" class="playtest-warning hidden">Backgrounding the tab changes browser timing, so that run was discarded.</p>
+    <div id="playtest-report" class="hidden"></div>
+    <div class="modal-actions playtest-actions">
+      <p>Free play never records a score.</p>
+      <button id="btn-playtest-start" class="btn btn-signal">Start 30s run</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= AVVISO TELEMETRIA (una tantum, persistente) ======================= -->
 <!-- Resta finché l'utente non sceglie: nessun evento parte prima di allora. -->
 <div id="telemetry-notice" class="notice hidden" role="dialog" aria-modal="false" aria-labelledby="notice-title">
@@ -391,7 +553,7 @@
     <h4 id="notice-title">This tool shares anonymous usage data</h4>
     <p>
       Calibration results, board model and firmware version are uploaded to improve the
-      calibration algorithm. <b>Never</b> your serial number, any device ID, or your IP address.
+      calibration algorithm. The payload excludes your serial number and device ID; like any web request, the server can receive network metadata such as an IP address.
       Sharing is <b>on by default</b> &mdash; nothing has been sent yet, and you can turn it off right here.
       <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">See exactly what&rsquo;s sent</a>.
     </p>
