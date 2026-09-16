@@ -1,6 +1,6 @@
 # SEO and GitHub growth
 
-Updated: 2026-09-12
+Updated: 2026-09-16
 Site: https://martino-vigiani.github.io/sense-calibrator/
 Repository: https://github.com/martino-vigiani/sense-calibrator
 
@@ -14,10 +14,9 @@ Keep one clear workflow:
 2. Separate a stable offset from mechanical wear.
 3. Calibrate only what software can correct.
 4. Repeat the same test.
-5. Tune sensitivity.
-6. Test movement and aim together.
 
 Keep the scope to the standard DualSense instead of becoming a generic controller tester.
+Sensitivity Finder and Gameplay Lab remain preview-only until they have product and hardware validation.
 
 ## Starting point
 
@@ -36,7 +35,11 @@ These numbers were captured on 2026-09-12. GitHub Traffic covers the previous 14
 
 A clone does not prove that the tool worked. A visitor to star rate would also be invalid here because the traffic window and lifetime star total cover different periods.
 
-The homepage is indexed. Search Console appears to be connected through two verification files, but ownership and current performance data still need to be checked in Search Console.
+The homepage is indexed and the Search Console property is verified at owner level.
+
+Search Console for 2026-08-17 through 2026-09-13 reports 95 clicks, 1,122 impressions, 8.47% CTR and average position 21.21. The preceding 28 days had 18 clicks and 174 impressions. From 2026-09-01 through 2026-09-13, average position improved to 6.88 with 10.80% CTR.
+
+Google's last recorded crawl was 2026-08-07, before the 2026-09-12 release. These numbers therefore validate the stick-drift page, not the experimental sensitivity copy. Preserve that search intent until a fresh crawl and enough post-crawl data exist.
 
 ## Search queries to watch
 
@@ -45,11 +48,9 @@ The homepage is indexed. Search Console appears to be connected through two veri
 | `ps5 stick drift test`, `dualsense drift test online` | Check whether a stick moves at rest |
 | `dualsense calibration online`, `ps5 controller calibration browser` | Recalibrate a standard DualSense |
 | `can calibration fix dualsense drift`, `calibration vs repair` | Decide between calibration and repair |
-| `controller sensitivity finder`, `fps controller sensitivity test` | Find a starting sensitivity |
-| `controller polling rate test`, `controller latency test` | Check controller timing |
 | `sense calibrator` | Return to the product |
 
-Use “USB report timing” and “browser frame pacing” for Gameplay lab. It does not measure complete input latency.
+Do not target sensitivity, polling-rate or latency queries while those tools remain preview-only. Gameplay Lab measures USB report timing and browser frame pacing, not complete input latency.
 
 Wait to target replacement stick or Hall effect queries until that hardware has been tested.
 
@@ -57,11 +58,11 @@ Wait to target replacement stick or Hall effect queries until that hardware has 
 
 Description:
 
-> Test and recalibrate a standard PS5 DualSense in the browser, then tune controller sensitivity. WebHID, USB, no install.
+> Test and recalibrate stick drift on a standard PS5 DualSense from the browser. WebHID, USB, no install.
 
 Topics:
 
-`dualsense`, `ps5`, `stick-drift`, `controller-calibration`, `controller-testing`, `gamepad`, `webhid`, `javascript`, `fps`
+`dualsense`, `ps5`, `stick-drift`, `controller-calibration`, `controller-testing`, `gamepad`, `webhid`, `javascript`
 
 Remove `claude` and `fable-5`. Keep the current homepage URL and Issues enabled.
 
@@ -70,25 +71,23 @@ The project MIT license belongs in `LICENSE`. The original dualshock-tools licen
 ## Publish checklist
 
 1. Test the complete flow with a real DualSense.
-2. Publish the site, README, metadata, FAQ and social image together.
-3. Set `paper/assets/social-card.png` as the GitHub social preview.
-4. Update the repository description and topics.
-5. Confirm that GitHub detects the MIT license.
-6. Confirm the Search Console property.
+2. Confirm preview-only tools do not appear in the default UI, metadata, FAQ or README.
+3. Publish the site, README, metadata, FAQ and social image together.
+4. Set `paper/assets/social-card-v2.png` as the GitHub social preview.
+5. Update the repository description and topics.
+6. Confirm that GitHub detects the MIT license.
 7. Submit `https://martino-vigiani.github.io/sense-calibrator/sitemap.xml`.
 8. Inspect the homepage in Search Console and request indexing once.
 
 ## Search Console
 
-1. Open Google Search Console.
-2. Select `https://martino-vigiani.github.io/sense-calibrator/`.
-3. Confirm that ownership is active.
-4. Submit `https://martino-vigiani.github.io/sense-calibrator/sitemap.xml`.
-5. Inspect the canonical homepage after deployment.
-6. Request indexing once.
-7. Open Performance and compare the last 28 days with the previous period.
-8. Export queries, pages, devices and countries.
-9. Keep raw exports outside the public repository.
+1. Select `https://martino-vigiani.github.io/sense-calibrator/`.
+2. Confirm the deployed page before requesting a crawl.
+3. Submit `https://martino-vigiani.github.io/sense-calibrator/sitemap.xml` after deployment. The submission from 2026-07-30 was still pending on 2026-09-16.
+4. Inspect the canonical homepage and request indexing once.
+5. Compare the first complete 28-day period after the crawl with the preceding period.
+6. Export queries, pages, devices and countries.
+7. Keep raw exports outside the public repository.
 
 The repository already contains two HTML verification files. Identify the active token before removing or adding one.
 

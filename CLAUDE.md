@@ -23,8 +23,10 @@ Three ES modules under `js/`, loaded from `index.html`:
 - **`js/ds5.js`** — DualSense HID protocol layer, no DOM. The `DS5` class wraps a WebHID device: calibration commands (feature reports `0x82` send / `0x83` response, checked against expected status words), NVS lock/unlock/status (`0x80`/`0x81`), device info, battery parsing. Protocol sequences derive from the dualshock-tools project. Key invariant: feature report buffers must be padded to the size declared by the HID descriptor (`allocReq`) or the firmware silently discards the command.
 - **`js/app.js`** — all UI and calibration logic: connection/reconnect, input report parsing, automatic drift test, quick calibration (stability-gated sampling with adaptive gate + convergence passes), 4-corner guided wizard, range calibration with coverage bins, NVS write flow, telemetry. Tuning constants (drift thresholds, stability windows, gate spreads) live at the top of the file and of each section.
 - **`js/game.js`** — self-contained precision test with three calibration-diagnostic checks (center hold / edge reach / snap-back), each measuring a calibration property rather than user skill. Talks to app.js only through injected deps (`getSticks`, `isAvailable`, optional `onReport`); never touches HID.
-- **`js/sensitivity.js`** — local sensitivity finder. Compares right-stick tracking across three virtual control speeds, creates a universal FPS aim profile, then optionally maps it to game-specific starting settings. It receives stick state through injected deps, never touches HID, and keeps results in localStorage.
-- **`js/playtest.js`** — fixed-timestep FPS-style controller lab. Separates browser frame pacing from raw HID report timing and scores tracking, movement coverage and simultaneous two-stick use. It receives live stick state and HID sample notifications through injected deps.
+- **`js/sensitivity.js`** — experimental local sensitivity finder. Compares right-stick tracking across three virtual control speeds, creates a universal FPS aim profile, then optionally maps it to game-specific starting settings. It receives stick state through injected deps, never touches HID, and keeps results in localStorage.
+- **`js/playtest.js`** — experimental fixed-timestep FPS-style controller lab. Separates browser frame pacing from raw HID report timing and scores tracking, movement coverage and simultaneous two-stick use. It receives live stick state and HID sample notifications through injected deps.
+
+Sensitivity Finder and Gameplay Lab are excluded from the public product and search metadata. They are available only on localhost with `?preview=1` while they are developed and tested. Do not promote or expose them in the hosted page without an explicit release decision.
 
 Comments in the JS are in Italian; UI strings are English.
 
@@ -40,14 +42,15 @@ Comments in the JS are in Italian; UI strings are English.
 
 ## Telemetry
 
-Every significant action emits a typed event via `recordEvent(kind, data)` in app.js — kinds: `connect`, `drift`, `quick`, `wizard`, `range`, `flash`, `game`. Ogni evento porta `sid`, un valore casuale per caricamento di pagina mai persistito: collega gli eventi di una singola visita, non due visite tra loro — non trasformarlo in qualcosa di stabile. `summarizeResult` include `xy` (componenti per asse): `off` è la loro ipotenusa, quindi senza `xy` la direzione del drift è perduta. Le sessioni fallite vanno registrate quanto quelle riuscite (`recordSessionOnce` nel `catch`): sono la classe più informativa per capire quando l'algoritmo non tiene. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200). Network upload to `https://subralabs.com/api/calib/v1/sessions` is **on by default (opt-out)**: `telemetryEnabled()` is true unless `sense-telemetry-consent` is explicitly `'0'`. A persistent first-launch banner (`#telemetry-notice`, flag `sense-telemetry-notice`) discloses it, and two synced checkboxes (footer + quick-calibration dialog) control the opt-out afterwards. Until that banner is resolved, `recordCalibSession` queues events in `pendingUploads` instead of sending them — `resolveNotice(true)` flushes the queue, `resolveNotice(false)` discards it. Keep that ordering: the banner claims nothing has been sent yet, and that claim must stay true. Payload is anonymous — see README table; never add device identifiers to it. The data feeds ML-driven tuning of the calibration algorithm, so keep events rich but always identifier-free. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
+Every significant action emits a typed local event via `recordEvent(kind, data)` in app.js. Ogni evento porta `sid`, un valore casuale per caricamento di pagina mai persistito: collega gli eventi di una singola visita, non due visite tra loro. `summarizeResult` include `xy` (componenti per asse): `off` è la loro ipotenusa, quindi senza `xy` la direzione del drift è perduta. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200).
+
+The network contract is deliberately narrower. `js/telemetry.js` maps only complete `quick` sessions to the strict nine-field v1 API schema and strips `kind`, `sid`, `xy` and every unsupported field. All other events stay local. Do not widen the v1 payload or allow unknown properties. Richer network events require a versioned endpoint, matching OpenAPI and privacy documentation, and contract tests. The first-launch banner still holds events until the person chooses **Keep sharing**; choosing **Don't share** discards the queue. `scripts/pull-telemetry.sh` rsyncs collected sessions from the VPS into `data/telemetry/` (gitignored).
 
 ## Dev hooks
 
 Exposed on `window` for console debugging:
 
 - `window.__senseGameOpen()` — open the minigame bypassing the connection gate.
-- `window.__senseSensitivityOpen()` — open the sensitivity finder bypassing the connection gate.
-- `#sensitivity-demo` — open the finder setup directly for visual review without HID.
-- `window.__sensePlaytestOpen()` / `#playtest-demo` — open the gameplay lab without HID for visual review.
+- With `?preview=1`, `window.__senseSensitivityOpen()` and `#sensitivity-demo` open the sensitivity finder without HID.
+- With `?preview=1`, `window.__sensePlaytestOpen()` and `#playtest-demo` open the gameplay lab without HID.
 - `window.__senseCalibSessions()` — dump locally stored calibration sessions.

@@ -1,113 +1,102 @@
 # Sense Calibrator
 
-This browser tool tests and recalibrates the sticks of a standard PS5 DualSense from Chrome or Edge.
-
-It measures stick drift, corrects center and range over USB, compares the controller before and after calibration, finds a practical FPS sensitivity, and tests movement and aim together.
+Test and recalibrate stick drift on a standard PS5 DualSense, directly from desktop Chrome or Edge.
 
 **[Open Sense Calibrator](https://martino-vigiani.github.io/sense-calibrator/)**
 
-You need a desktop computer, Chrome or Edge, a USB data cable and a standard DualSense (`054C:0CE6`). DualSense Edge and DualShock 4 are not supported.
+You need a desktop computer, a USB data cable and a standard DualSense (`054C:0CE6`). DualSense Edge and DualShock 4 are not supported.
 
-[![GitHub stars](https://img.shields.io/github/stars/martino-vigiani/sense-calibrator?style=flat&label=stars)](https://github.com/martino-vigiani/sense-calibrator/stargazers) ![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![controller](https://img.shields.io/badge/controller-standard%20DualSense-black) ![license](https://img.shields.io/badge/license-MIT-black)
+[![GitHub stars](https://img.shields.io/github/stars/martino-vigiani/sense-calibrator?style=flat&label=stars)](https://github.com/martino-vigiani/sense-calibrator/stargazers) ![browser](https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-black) ![license](https://img.shields.io/badge/license-MIT-black)
 
-![Sense Calibrator interface](paper/assets/social-card.png)
+![Sense Calibrator interface](paper/assets/social-card-v2.png)
 
-> Calibration can correct a stable center or range offset. It cannot repair a worn or damaged stick module.
+> Calibration can correct a stored center or range offset. It cannot repair a worn, dirty or damaged stick module.
 
-## How to use it
+## Use it
 
-1. Connect the DualSense with a USB data cable.
+1. Connect the controller to your computer with a USB data cable.
 2. Open the [hosted tool](https://martino-vigiani.github.io/sense-calibrator/) in Chrome or Edge.
 3. Select **Connect DualSense** and approve the browser request.
-4. Leave both sticks untouched while the drift test runs.
+4. Put the controller on a stable surface and leave both sticks untouched while the drift test runs.
 5. Calibrate only if the result shows a correctable offset.
-6. Run the same tests again and compare the result.
+6. Run the drift and precision tests again to compare the result.
 7. Select **Write to memory** only when you want to keep the calibration.
 
-Calibration stays in controller RAM until step 7. Turning the controller off before that discards the temporary calibration.
+Calibration is applied to controller RAM first. If you turn the controller off before **Write to memory**, the temporary calibration is discarded.
 
-## Tools
+## What it does
 
-| Goal | Tool | Result | Changes the controller? |
-|---|---|---|---|
-| Check for drift | **Drift test** | Resting offset, noise and a result for each stick | No |
-| Correct center or range | **Calibration** | Quick, guided and full range procedures | Temporary until **Write to memory** |
-| Check the calibration | **Precision test** | Center hold, edge reach and snap back scores | No |
-| Find an FPS starting point | **Sensitivity finder** | Look index, ADS ratio and response curve | No |
-| Test movement and aim | **Gameplay lab** | Tracking, use of both sticks, movement coverage, USB report timing and browser frame pacing | No |
+| Tool | What it tells you | Changes the controller? |
+|---|---|---|
+| **Drift test** | Resting offset and signal noise for each stick | No |
+| **Quick calibration** | Automatically corrects a stable center offset | Temporary until saved |
+| **Guided calibration** | Recalibrates the center with a four-corner procedure | Temporary until saved |
+| **Range calibration** | Recalibrates the full travel of both sticks | Temporary until saved |
+| **Precision test** | Compares center hold, edge reach and snap back before and after | No |
 
-The sensitivity finder recommends a deadzone only after a real drift measurement. Gameplay lab does not measure complete input latency through a console, game or display.
+The public tool stays focused on testing and calibration. Sensitivity Finder and Gameplay Lab are experimental and remain hidden behind the local preview mode while they are developed and tested.
+
+## Why calibration can help
+
+A DualSense stores calibration values that describe where each stick rests and how far it can travel. Those values can become inaccurate even when the stick module still produces a stable signal.
+
+Sense Calibrator measures the untouched sticks first. A stable offset can often be corrected by writing a new center or range calibration. A noisy or unstable signal usually points to dirt, wear or mechanical damage, which software cannot repair.
+
+The app applies calibration temporarily, runs the same measurements again and lets you decide whether to save it. For the protocol details, read [ARTICLE.md](ARTICLE.md) or the [SubraLabs technical write-up](https://subralabs.com/lab/sense-calibrator.html).
+
+## Limits and safety
+
+- Only the standard DualSense with USB product ID `054C:0CE6` is supported.
+- Calibration works only over USB. Bluetooth is rejected for calibration.
+- Chrome and Edge are supported because they provide WebHID. Safari and Firefox do not.
+- Calibration can correct stored center and range values. It cannot repair physical wear.
+- This is an unofficial tool and is not affiliated with Sony.
+
+Do not disconnect the controller during calibration. Review the before and after result before writing anything to controller memory.
+
+## Telemetry & privacy
+
+The tool has no account, ads or third-party analytics.
+
+Calibration events are kept in your browser under `sense-calib-sessions`, with a limit of 200 entries. This local history is stored whether network sharing is enabled or not.
+
+Nothing is uploaded until you choose **Keep sharing** in the first-launch notice. The current server contract accepts only a complete Quick calibration: timestamp, board revision, firmware version, before and after offset and noise, pass measurements, and stability settings. Other events stay in the browser.
+
+The upload excludes the controller serial number, device identifiers and the local session ID. Like any web request, the server can receive network metadata such as an IP address for routing and rate limiting, but it is not stored in the telemetry record. Select **Don't share** to discard queued uploads and save that preference.
 
 ## Run it locally
 
-Clone or download the repository, then run:
+Clone or download the repository, then start a local server:
 
 ```sh
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000` in Chrome or Edge.
+Open `http://localhost:8000` in Chrome or Edge. Opening `index.html` through `file://` does not work because WebHID requires a secure context.
 
-WebHID requires a secure context. Opening the page through `file://` does not work. The project is plain HTML, CSS and JavaScript, with no build step or dependencies.
+There is no build step and there are no runtime dependencies. Run the automated checks with:
 
-There are no automated hardware tests. A complete check requires a real DualSense connected over USB.
+```sh
+npm test
+```
 
-## How the calibration works
+The automated suite checks the telemetry contract and keeps experimental tools out of the public search surface. It does not prove controller behavior. Calibration changes still require a real DualSense connected over USB.
 
-The drift test runs for 3 seconds. It discards the first 60 samples and checks a rolling window of 30 samples across all four axes. Only stable samples are used. Resting position uses the median; noise uses the 95th percentile distance from center. The test retries up to twice when there are too few stable samples.
+For local work on the experimental tools, add `?preview=1` to the URL.
 
-Quick calibration runs up to 4 passes. Each pass sends 12 center samples through HID report `0x82`, commits the result, and measures the remaining offset again. A worse pass is not reported as success. The tool keeps the best measured result and warns when the final state is worse than the starting state.
+## Contribute
 
-Guided calibration samples four stick corners. Range calibration uses a 36 bin polar map to check full travel. The precision test measures center hold, edge reach and snap back on a scale from 0 to 100. These checks measure calibration, not player skill.
+Useful contributions include:
 
-The sensitivity finder compares right stick tracking at three control speeds. Gameplay lab offers free play and a repeatable 30 second run.
+- controller results with measurements before and after calibration;
+- reproducible bug reports;
+- tests for WebHID and calibration failure paths;
+- accessibility, documentation and browser compatibility fixes.
 
-The protocol code is in `js/ds5.js`:
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). Never include a controller serial number or another device identifier in an issue, screenshot or test fixture.
 
-| Report | Purpose |
-|---|---|
-| `0x82` / `0x83` | Send calibration data and read the response |
-| `0x80` / `0x81` | Read device information and manage NVS writing |
-| `0x01` | Read raw stick input at about 250 Hz |
+## License and credits
 
-For the full technical explanation, read [ARTICLE.md](ARTICLE.md) or the [SubraLabs Lab Paper](https://subralabs.com/lab/sense-calibrator.html).
+Sense Calibrator is available under the [MIT License](LICENSE).
 
-## Limits
-
-- Only the standard DualSense with USB product ID `054C:0CE6` is supported.
-- DualSense Edge and DualShock 4 are not supported.
-- Calibration works only over USB. This tool rejects Bluetooth for calibration.
-- Chrome and Edge are supported. Safari and Firefox do not provide WebHID.
-- Calibration can correct a stable offset. It cannot repair mechanical wear or a damaged potentiometer.
-
-## Telemetry and privacy
-
-The site can send usage events to a server hosted at `subralabs.com`. Sharing is enabled by default, but nothing is uploaded before the first launch notice appears.
-
-Select **Keep sharing** to send the events held in memory. Select **Don't share** to discard them and save the preference. You can change the setting later in the footer or quick calibration dialog. No third party analytics service is used.
-
-Each event contains its type, an ISO 8601 timestamp, board revision, firmware version and `sid`. The `sid` is a random 8 character value created on every page load. It groups events from one visit, is never saved to disk, and changes after a reload.
-
-Measurements can include stick offset, noise, direction, calibration passes, test scores, USB report timing and browser frame pacing. The payload excludes the controller serial number, device identifiers, browser fingerprints and personal information. The receiving server can still see normal network metadata such as an IP address.
-
-A local copy of calibration sessions is stored in `localStorage` under `sense-calib-sessions`, whether or not uploads are enabled.
-
-## Report a controller result
-
-1. Record the board revision, firmware, operating system, browser and USB connection shown by the tool.
-2. Run the drift test and precision test before calibration.
-3. Calibrate the controller.
-4. Repeat the same tests without changing the setup.
-5. [Open an issue](https://github.com/martino-vigiani/sense-calibrator/issues/new) with the steps and both results.
-
-Include failures and regressions. Never include a controller serial number or another device identifier.
-
-If the tool helped, [star the repository](https://github.com/martino-vigiani/sense-calibrator). It makes the project easier to find.
-
-## Disclaimer
-
-Sense Calibrator is unofficial and is not affiliated with Sony. Use it at your own risk.
-
-## License
-
-The project is available under the [MIT License](LICENSE). The calibration protocol derives from the MIT licensed [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) project by the_al. Its original license is preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The calibration protocol derives from the MIT licensed [dualshock-tools](https://github.com/dualshock-tools/dualshock-tools.github.io) project by the_al. Its original license is preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

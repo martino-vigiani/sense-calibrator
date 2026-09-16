@@ -2,7 +2,24 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
-## Unreleased — 2026-08-02
+## Unreleased — 2026-09-16
+
+### Public scope
+
+- The public site is focused on DualSense drift testing and calibration again. Sensitivity Finder and Gameplay Lab are available only through local preview mode while they are still being developed.
+- Search metadata, structured data, the main page and the sitemap now describe the stable public workflow consistently.
+- The social preview now uses the same stick drift and calibration message as the page.
+
+### Data quality
+
+- Network telemetry now sends only complete Quick calibration records that match the strict server contract. Richer events stay in local browser history until a versioned server contract exists.
+- Failed requests are no longer reported as successful uploads. Incomplete or unverified results stay local instead of becoming misleading data.
+- Contract tests cover accepted uploads, rejected events and network failures.
+
+### Repository
+
+- The README now explains setup, use, limits, privacy, contribution and licensing in direct language.
+- Contributor guidance, structured issue forms, a pull request template and an automated test workflow were added.
 
 ### Calibration
 

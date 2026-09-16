@@ -4,11 +4,23 @@ import { DS5, HID_FILTERS } from './ds5.js';
 import { initGame } from './game.js';
 import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
+import { uploadCalibrationEvent } from './telemetry.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const LOCAL_PREVIEW_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const EXPERIMENTAL_PREVIEW = LOCAL_PREVIEW_HOSTS.has(location.hostname)
+  && new URLSearchParams(location.search).has('preview');
+
+// Sensitivity Finder e Gameplay Lab restano disponibili per sviluppo con
+// `?preview=1`, ma non fanno parte del prodotto pubblico finché non sono pronti.
+if (EXPERIMENTAL_PREVIEW) {
+  for (const element of document.querySelectorAll('[data-experimental]')) {
+    element.hidden = false;
+  }
+}
 
 // Soglie verdetto drift (% di deflessione massima a riposo)
 const DRIFT_OK_MAX = 1.2;
@@ -773,7 +785,6 @@ async function measureOffset(ms = 1500) {
 const CALIB_STORE_KEY      = 'sense-calib-sessions';
 const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
 const TELEMETRY_NOTICE_KEY = 'sense-telemetry-notice';
-const TELEMETRY_ENDPOINT   = 'https://subralabs.com/api/calib/v1/sessions';
 
 let storageAvailable = true;
 function storageRead(key, fallback = null) {
@@ -806,8 +817,9 @@ const PENDING_MAX = 50;
 // uno nuovo, quindi due sessioni non sono collegabili tra loro.
 const SESSION_ID = (crypto.randomUUID?.() ?? String(Math.random()).slice(2)).slice(0, 8);
 
-// Ogni azione significativa produce un evento tipizzato: connect, drift,
-// quick, wizard, range, flash, game. Stessi vincoli di anonimato per tutti.
+// Ogni azione significativa produce un evento locale tipizzato. Il server v1
+// riceve solo sessioni quick complete e compatibili con il suo schema stretto;
+// gli altri eventi restano nel browser.
 function recordEvent(kind, data = {}) {
   recordCalibSession({
     kind,
@@ -862,17 +874,11 @@ function recordSessionOnce(session) {
 }
 
 // Fuoco-e-dimentica, mai bloccante: un endpoint giù non deve mai far fallire
-// una calibrazione.
+// una calibrazione. Un 4xx/5xx non viene più registrato come invio riuscito.
 function uploadEvent(entry) {
-  fetch(TELEMETRY_ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(entry),
-    keepalive: true,
-    signal: AbortSignal.timeout(4000),
-  })
-    .then(() => log('Anonymous telemetry sent.'))
-    .catch(() => {});
+  uploadCalibrationEvent(entry)
+    .then(sent => { if (sent) log('Anonymous calibration telemetry sent.'); })
+    .catch(error => log(`Anonymous telemetry not sent: ${error.message}`));
 }
 
 // Calibra con campioni gated sulla stabilità, verifica, e ripete finché
@@ -1470,6 +1476,7 @@ function updateToolSwitch(mode) {
 }
 
 function switchControllerTool(mode, bypassGate = false) {
+  if (mode !== 'calibration' && !EXPERIMENTAL_PREVIEW) return;
   if (!bypassGate && (!ds5 || busy)) return;
   if (mode === 'calibration') {
     sensitivityFinder.close();
@@ -1490,8 +1497,7 @@ $('btn-sensitivity-exit').addEventListener('click', () => updateToolSwitch('cali
 $('btn-playtest-exit').addEventListener('click', () => switchControllerTool('calibration', true));
 for (const button of document.querySelectorAll('[data-tool]')) {
   button.addEventListener('click', () => {
-    const preview = new URLSearchParams(location.search).has('preview');
-    switchControllerTool(button.dataset.tool, preview);
+    switchControllerTool(button.dataset.tool, EXPERIMENTAL_PREVIEW);
   });
 }
 
@@ -1543,6 +1549,7 @@ if (navigator.hid && telemetryEnabled() && !noticeSeen()) {
   $('telemetry-notice').classList.remove('hidden');
   $('btn-notice-ok').addEventListener('click', () => resolveNotice(true));
   $('btn-notice-optout').addEventListener('click', () => resolveNotice(false));
+  requestAnimationFrame(() => $('btn-notice-optout').focus());
 }
 
 /* ============================== tastiera ============================== */
@@ -1626,9 +1633,11 @@ window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
 // in coppia con __senseSimulate.
 window.__senseGameOpen = () => openGame(true);
-// Apre il finder senza controller; __senseSimulate alimenta lo stick destro.
-window.__senseSensitivityOpen = () => openSensitivityFinder(true);
-window.__sensePlaytestOpen = () => switchControllerTool('playtest', true);
-// Preview condivisibile senza HID per controllare rapidamente layout e copy.
-if (location.hash === '#sensitivity-demo') openSensitivityFinder(true);
-if (location.hash === '#playtest-demo') switchControllerTool('playtest', true);
+if (EXPERIMENTAL_PREVIEW) {
+  // Preview condivisibile senza HID per controllare gli esperimenti in sviluppo.
+  // __senseSimulate alimenta gli stick senza un controller collegato.
+  window.__senseSensitivityOpen = () => openSensitivityFinder(true);
+  window.__sensePlaytestOpen = () => switchControllerTool('playtest', true);
+  if (location.hash === '#sensitivity-demo') openSensitivityFinder(true);
+  if (location.hash === '#playtest-demo') switchControllerTool('playtest', true);
+}

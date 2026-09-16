@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator</title>
-  <meta name="description" content="Test a standard PS5 DualSense for stick drift, recalibrate it over USB in Chrome or Edge, then run a local aim test for a practical FPS sensitivity.">
+  <title>Fix PS5 Stick Drift from Your Browser | Sense Calibrator</title>
+  <meta name="description" content="Test and recalibrate a standard PS5 DualSense for stick drift from desktop Chrome or Edge over USB. Free, open source and no install.">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Sense Calibrator">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/">
-  <meta property="og:title" content="PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator">
-  <meta property="og:description" content="Check both sticks, recalibrate center and range over USB, then use a local aim test to find a practical FPS sensitivity.">
-  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png">
+  <meta property="og:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
+  <meta property="og:description" content="Test a standard DualSense, recalibrate correctable stick drift over USB, and compare the result before and after. No install.">
+  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense calibration and controller sensitivity">
+  <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="PS5 Stick Drift Test &amp; Sensitivity Finder | Sense Calibrator">
-  <meta name="twitter:description" content="Test and recalibrate DualSense sticks over USB, then find a practical FPS sensitivity with a local aim test.">
-  <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png">
-  <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense calibration and controller sensitivity">
+  <meta name="twitter:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
+  <meta name="twitter:description" content="Test a standard DualSense, recalibrate correctable stick drift over USB, and compare the result before and after. No install.">
+  <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
+  <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
   <script type="application/ld+json">
@@ -34,7 +34,7 @@
         "@id": "https://martino-vigiani.github.io/sense-calibrator/#website",
         "url": "https://martino-vigiani.github.io/sense-calibrator/",
         "name": "Sense Calibrator",
-        "description": "DualSense stick drift diagnostics, controller calibration and FPS sensitivity testing in the browser.",
+        "description": "DualSense stick drift diagnostics and controller calibration in the browser.",
         "inLanguage": "en"
       },
       {
@@ -42,8 +42,8 @@
         "@id": "https://martino-vigiani.github.io/sense-calibrator/#application",
         "name": "Sense Calibrator",
         "url": "https://martino-vigiani.github.io/sense-calibrator/",
-        "description": "Free browser utility for testing a standard PS5 DualSense for stick drift, recalibrating stick center and range over USB, and estimating a practical FPS controller sensitivity with a local aim test.",
-        "image": "https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card.png",
+        "description": "Free browser utility for testing a standard PS5 DualSense for stick drift and recalibrating stick center and range over USB.",
+        "image": "https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png",
         "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" },
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": ["Windows", "macOS", "Linux", "ChromeOS"],
@@ -54,9 +54,7 @@
           "Automatic analog stick drift test",
           "Quick and guided stick-center calibration",
           "Analog stick range calibration",
-          "Precision controller test",
-          "Local FPS controller sensitivity finder",
-          "FPS-style movement and aim play test"
+          "Precision controller test"
         ],
         "license": "https://github.com/martino-vigiani/sense-calibrator/blob/main/LICENSE",
         "isBasedOn": "https://github.com/dualshock-tools/dualshock-tools.github.io",
@@ -107,12 +105,7 @@
           {
             "@type": "Question",
             "name": "Is it really free?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer." }
-          },
-          {
-            "@type": "Question",
-            "name": "How does the sensitivity finder work?",
-            "acceptedAnswer": { "@type": "Answer", "text": "It compares your right-stick tracking at three control speeds and creates a universal FPS aim profile: normalized look index, ADS ratio, response curve and deadzone. Optional presets convert the same profile for Fortnite, Call of Duty or Apex Legends. The adaptive model runs locally in your browser." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Free and open source under the MIT License, with no account or ads. Sharing is enabled by default, but nothing is uploaded until you answer the first-launch notice. You can turn it off there or in the footer." }
           }
         ]
       }
@@ -139,9 +132,9 @@
 
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
-    <h1>Recalibrate your DualSense.<br>Then tune it.</h1>
+    <h1>Fix PS5 stick drift.<br>From your browser.</h1>
     <div class="hero-intro">
-      <p class="lede">A browser utility for PS5 stick drift and controller sensitivity. It works directly over USB, with no install or account.</p>
+      <p class="lede">Test a standard DualSense, recalibrate a correctable center or range offset, and compare the result before you save it.</p>
       <div class="hero-cta">
         <button id="btn-connect" class="btn btn-primary btn-lg">Connect DualSense</button>
         <p class="hint">Desktop Chrome or Edge &middot; USB cable required</p>
@@ -168,7 +161,6 @@
       <li><b>2</b><span>Automatic drift test</span></li>
       <li><b>3</b><span>Calibration</span></li>
       <li><b>4</b><span>Save to memory</span></li>
-      <li><b>5</b><span>Tune sensitivity</span></li>
     </ol>
 
     <section class="faq" aria-label="Stick drift FAQ">
@@ -199,11 +191,7 @@
       </details>
       <details>
         <summary>Is it really free?</summary>
-        <p>Yes. Free and open source (MIT license), no account, no ads. Anonymous usage data is shared by default to improve the calibration algorithm; you can opt out with one click in the footer.</p>
-      </details>
-      <details>
-        <summary>How does the sensitivity finder work?</summary>
-        <p>It compares your right-stick tracking at three control speeds and creates a universal FPS aim profile: normalized look index, ADS ratio, response curve and deadzone. Optional presets convert the same profile for Fortnite, Call of Duty or Apex Legends. The adaptive model runs locally in your browser.</p>
+        <p>Yes. Free and open source under the MIT License, with no account or ads. Sharing is enabled by default, but nothing is uploaded until you answer the first-launch notice. You can turn it off there or in the footer.</p>
       </details>
     </section>
   </section>
@@ -213,8 +201,8 @@
 
     <nav class="tool-switch" aria-label="Controller tools">
       <button type="button" data-tool="calibration" class="active" aria-current="page">Calibrate</button>
-      <button type="button" data-tool="sensitivity">Sensitivity</button>
-      <button type="button" data-tool="playtest">Play test</button>
+      <button type="button" data-tool="sensitivity" data-experimental hidden>Sensitivity</button>
+      <button type="button" data-tool="playtest" data-experimental hidden>Play test</button>
     </nav>
 
     <div class="card device-card">
@@ -234,7 +222,7 @@
         <h3>Drift test</h3>
         <button id="btn-retest" class="btn btn-secondary btn-sm">Run again</button>
       </div>
-      <p id="drift-status" class="drift-status">Waiting&hellip;</p>
+      <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden"><i></i></div>
     </div>
 
@@ -290,14 +278,14 @@
         </div>
         <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
-      <div class="action action-sensitivity">
+      <div class="action action-sensitivity" data-experimental hidden>
         <div>
           <h4>Sensitivity finder</h4>
           <p>A local tracking test builds a universal aim profile, with optional scales for Fortnite, Warzone and Apex.</p>
         </div>
         <button id="btn-sensitivity" class="btn btn-signal">Find my sensitivity</button>
       </div>
-      <div class="action action-playtest">
+      <div class="action action-playtest" data-experimental hidden>
         <div>
           <h4>Gameplay lab</h4>
           <p>Move and aim together in an FPS-style arena, then compare tracking, USB report rate and frame pacing.</p>
@@ -326,9 +314,9 @@
   <span>Built by <a href="https://subralabs.com" target="_blank" rel="noopener">SubraLabs</a> &middot; <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">read the technical write-up</a></span>
   <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
   <span>Unofficial tool &middot; use at your own risk.</span>
-  <label class="telemetry-label" title="Payload: board model, firmware, calibration results and test scores; no serial number or device ID">
+  <label class="telemetry-label" title="Payload: complete Quick calibration only; no serial number, device ID or local session ID">
     <input type="checkbox" id="telemetry-consent-footer">
-    <span>Share anonymous usage data to improve the algorithm (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
+    <span>Share complete Quick calibration results (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
   </label>
 </footer>
 
@@ -338,9 +326,9 @@
     <h3 id="quick-title">Quick calibration</h3>
     <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <div class="progress"><i id="quick-bar"></i></div>
-    <label class="telemetry-label" title="Payload: board model, firmware, calibration results and test scores; no serial number or device ID">
+    <label class="telemetry-label" title="Payload: complete Quick calibration only; no serial number, device ID or local session ID">
       <input type="checkbox" id="telemetry-consent">
-      <span>Share anonymous usage data to improve the algorithm</span>
+      <span>Share this complete Quick calibration result</span>
     </label>
     <div class="modal-actions">
       <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>
@@ -466,7 +454,7 @@
 </div>
 
 <!-- ======================= MODALE: SENSITIVITY FINDER ======================= -->
-<div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title">
+<div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title" data-experimental hidden>
   <div class="modal-panel modal-sensitivity">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
@@ -516,7 +504,7 @@
 </div>
 
 <!-- ======================= MODALE: GAMEPLAY LAB ======================= -->
-<div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title">
+<div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title" data-experimental hidden>
   <div class="modal-panel modal-playtest">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
@@ -550,11 +538,11 @@
 <!-- Resta finché l'utente non sceglie: nessun evento parte prima di allora. -->
 <div id="telemetry-notice" class="notice hidden" role="dialog" aria-modal="false" aria-labelledby="notice-title">
   <div class="notice-body">
-    <h4 id="notice-title">This tool shares anonymous usage data</h4>
+    <h4 id="notice-title">Help improve Quick calibration</h4>
     <p>
-      Calibration results, board model and firmware version are uploaded to improve the
-      calibration algorithm. The payload excludes your serial number and device ID; like any web request, the server can receive network metadata such as an IP address.
-      Sharing is <b>on by default</b> &mdash; nothing has been sent yet, and you can turn it off right here.
+      Only a complete Quick calibration can be uploaded: board revision, firmware, before and after measurements, pass results and stability settings. Other events stay in this browser.
+      The upload excludes your serial number, device ID and local session ID. Like any web request, the server can receive network metadata such as an IP address.
+      Sharing is <b>on by default</b>, but nothing has been sent yet. You can turn it off here.
       <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">See exactly what&rsquo;s sent</a>.
     </p>
   </div>
