@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>How to Calibrate a DualSense Controller | Sense Calibrator</title>
+  <meta name="description" content="Learn when DualSense calibration can correct stick drift, how Quick and Guided calibration differ, and how to keep a calibration saved in controller memory.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Sense Calibrator">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/">
+  <meta property="og:title" content="How to Calibrate a DualSense Controller | Sense Calibrator">
+  <meta property="og:description" content="Learn when DualSense calibration can correct stick drift, how Quick and Guided calibration differ, and how to keep a calibration saved in controller memory.">
+  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How to Calibrate a DualSense Controller | Sense Calibrator">
+  <meta name="twitter:description" content="Learn when DualSense calibration can correct stick drift, how Quick and Guided calibration differ, and how to keep a calibration saved in controller memory.">
+  <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
+  <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../../css/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/#page",
+        "url": "https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/",
+        "name": "How to Calibrate a DualSense Controller | Sense Calibrator",
+        "description": "Learn when DualSense calibration can correct stick drift, how Quick and Guided calibration differ, and how to keep a calibration saved in controller memory.",
+        "inLanguage": "en",
+        "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/#breadcrumb",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Sense Calibrator",
+            "item": "https://martino-vigiani.github.io/sense-calibrator/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Calibrate a DualSense controller",
+            "item": "https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/"
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="../../">SENSE<span>CALIBRATOR</span></a>
+  <div class="topbar-status">
+    <a class="gh-chip" href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener" aria-label="View source on GitHub">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+      <span class="gh-label">GitHub</span>
+    </a>
+    <a class="btn btn-primary btn-sm" href="../../">Open the tool</a>
+  </div>
+</header>
+
+<main class="guide-main">
+  <nav class="guide-breadcrumb" aria-label="Breadcrumb">
+    <ol>
+      <li><a href="../../">Sense Calibrator</a></li>
+      <li aria-current="page">Calibrate a DualSense controller</li>
+    </ol>
+  </nav>
+
+  <article class="guide">
+    <header class="guide-hero">
+      <h1>How to calibrate a DualSense controller</h1>
+      <p class="guide-lede">Calibrating a DualSense controller means writing new center and range values to it. That can correct a stable offset, and it cannot repair worn, dirty or damaged hardware.</p>
+      <p class="guide-cta"><a class="btn btn-primary" href="../../">Start calibration</a> <span class="hint">Desktop Chrome or Edge &middot; USB data cable &middot; standard DualSense</span></p>
+    </header>
+
+    <div class="guide-body">
+
+      <h2>When calibration can help</h2>
+      <p>Every DualSense stores calibration values that describe where each stick rests at center and how far it travels toward the edge. The controller applies those values to the raw sensor signal before it reports a stick position. When the sensor still produces a clean, stable signal but the resting position no longer matches the stored center, the controller reports a constant offset and the game pulls in that direction.</p>
+      <p>That is the case calibration is built for. A diagnostic test separates a stable offset from a wandering signal: if the resting reading repeats with the same value and direction, writing a new center can correct it. A module that was replaced or repaired is a different case. Its travel may no longer match the stored range, and a range calibration gives the controller an accurate description of the new travel. You can start with the <a href="../ps5-controller-stick-drift-test/">PS5 controller stick drift test</a> to see which case you have.</p>
+
+      <h2>A stable offset, or physical wear</h2>
+      <p>A stable offset repeats with the same value and direction and does not wander while the stick is untouched. A worn or dirty module behaves differently: the reported position keeps moving, so the signal is noisy and unstable even at rest.</p>
+      <p>Calibration can shift a stable offset. It cannot clean a wiper, rebuild a worn track or fix damage. If the signal is noisy, calibrating around it only biases a failing sensor, because you are teaching the controller to treat a moving average as center. Check that the resting signal holds still before you calibrate. If it does not, the honest answer is service, not software.</p>
+
+      <h2>Quick calibration versus Guided calibration</h2>
+      <p>Sense Calibrator offers two center procedures and a separate range procedure. They differ in how much control you have and how the center is derived.</p>
+      <h3>Quick calibration</h3>
+      <p>Quick calibration is automatic. It samples the untouched sticks, writes a new center, then re-measures the residual and runs another pass if the offset is still above its target. It converges toward a good center instead of trusting a single attempt. Before it sends anything, both sticks must stay close to center for a short hold, within 15% of center for 300 ms, and that preflight check is repeated. If it fails, nothing is written: release the sticks and retry.</p>
+      <h3>Guided calibration</h3>
+      <p>Guided calibration is a four-corner procedure you complete by hand. The tool samples each corner in turn and derives the center from those points. It takes longer than Quick, and it is more accurate on marked drift. Once started it cannot be cancelled, so keep the controller connected and resting on a stable surface for the whole procedure.</p>
+      <h3>Range calibration</h3>
+      <p>Range calibration is separate and covers maximum travel. It asks you to rotate both sticks around the full edge while the tool samples the perimeter, which is useful after a module has been replaced or repaired.</p>
+
+      <h2>Rest the controller on a stable surface</h2>
+      <p>Every measurement is stability-gated. A hand on the stick, a hand holding the controller or a cable tug all read as movement. When the signal moves, the tool waits, widens its gate or refuses to send the calibration. Resting the controller flat and keeping your hands off it is what makes each reading trustworthy, for the drift test and for every calibration pass.</p>
+
+      <h2>Temporary until you write it to memory</h2>
+      <p>Everything the tool does first lives in the controller's RAM and takes effect immediately, so you can test it right away. It is discarded when the controller powers off. The calibration becomes permanent only when you choose <b>Write to memory</b>, which writes the values to the controller's non-volatile memory. A banner in the tool reminds you while a calibration is unsaved.</p>
+      <p class="guide-note"><b>Safety net.</b> Until you write to memory, powering the controller off restores the previous calibration. If a result looks wrong, turn the controller off instead of saving it.</p>
+
+      <h2>Compare before and after</h2>
+      <p>Run the drift test before calibrating and again afterward, and use the precision test for a second signal. If the numbers improve, save. If they do not, do not write anything: power-cycle the controller or recalibrate. The tool shows the before and after measurements, so the decision is based on readings rather than feel. The <a href="../ps5-controller-stick-drift-test/">PS5 controller stick drift test</a> explains how to read the resting offset and noise before you change anything.</p>
+
+      <h2>What calibration cannot do</h2>
+      <p>Calibration can correct stored center and range values. It cannot guarantee a permanent repair, it cannot fix worn, dirty or damaged hardware, and a controller whose signal keeps degrading will eventually need service. Sense Calibrator is an unofficial project and is not affiliated with Sony, so use it at your own risk and review the result before saving. The source code lives in the <a href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener">repository on GitHub</a>, and the protocol behind it is described in the <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">SubraLabs technical write-up</a>.</p>
+
+      <h2>Compatibility</h2>
+      <p>Only the standard PS5 DualSense, USB product ID 054C:0CE6, is supported. The DualSense Edge and the DualShock 4 use different systems and are not supported. Calibration needs desktop Chrome or Edge and a USB data cable, and the tool rejects Bluetooth for calibration.</p>
+      <p class="guide-note"><b>Before you start.</b> Use a USB data cable rather than a charge-only cable, and open the tool on a desktop in Chrome or Edge. Safari and Firefox do not provide WebHID, so calibration cannot run there.</p>
+
+      <h2>Start with your own controller</h2>
+      <p>The drift test is read-only, so you can measure both sticks before deciding to change anything. To calibrate a DualSense controller, connect it over USB, run the test, and let the measurements make the decision.</p>
+      <p><a class="btn btn-primary" href="../../">Start calibration in Sense Calibrator</a></p>
+
+      <aside class="guide-next">
+        <b>Start here</b>
+        <a href="../ps5-controller-stick-drift-test/">PS5 controller stick drift test</a>
+        <span>Confirm whether the stick has a stable offset, a noisy signal or a clean center.</span>
+      </aside>
+
+    </div>
+  </article>
+</main>
+
+<footer class="footer">
+  <span>Built by <a href="https://subralabs.com" target="_blank" rel="noopener">SubraLabs</a> &middot; <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">read the technical write-up</a></span>
+  <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
+  <span>Unofficial tool &middot; use at your own risk.</span>
+</footer>
+
+</body>
+</html>

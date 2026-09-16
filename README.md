@@ -38,6 +38,11 @@ Before Quick calibration sends any command, both sticks must stay within 15% of 
 
 The public tool stays focused on testing and calibration. Sensitivity Finder and Gameplay Lab are experimental and remain hidden behind the local preview mode while they are developed and tested.
 
+## Guides
+
+- [PS5 controller stick drift test](https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/): how the automatic test measures a resting DualSense, and how to read a stable offset versus a noisy signal.
+- [How to calibrate a DualSense controller](https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/): when calibration can help, Quick versus Guided calibration, and how to keep a calibration saved.
+
 ## Why calibration can help
 
 A DualSense stores calibration values that describe where each stick rests and how far it can travel. Those values can become inaccurate even when the stick module still produces a stable signal.

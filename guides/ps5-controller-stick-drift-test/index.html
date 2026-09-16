@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PS5 Controller Stick Drift Test | Sense Calibrator</title>
+  <meta name="description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Sense Calibrator">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/">
+  <meta property="og:title" content="PS5 Controller Stick Drift Test | Sense Calibrator">
+  <meta property="og:description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="PS5 Controller Stick Drift Test | Sense Calibrator">
+  <meta name="twitter:description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
+  <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../../css/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/#page",
+        "url": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/",
+        "name": "PS5 Controller Stick Drift Test | Sense Calibrator",
+        "description": "Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.",
+        "inLanguage": "en",
+        "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/#breadcrumb",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Sense Calibrator",
+            "item": "https://martino-vigiani.github.io/sense-calibrator/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "PS5 controller stick drift test",
+            "item": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/"
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="../../">SENSE<span>CALIBRATOR</span></a>
+  <div class="topbar-status">
+    <a class="gh-chip" href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener" aria-label="View source on GitHub">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+      <span class="gh-label">GitHub</span>
+    </a>
+    <a class="btn btn-primary btn-sm" href="../../">Open the tool</a>
+  </div>
+</header>
+
+<main class="guide-main">
+  <nav class="guide-breadcrumb" aria-label="Breadcrumb">
+    <ol>
+      <li><a href="../../">Sense Calibrator</a></li>
+      <li aria-current="page">PS5 controller stick drift test</li>
+    </ol>
+  </nav>
+
+  <article class="guide">
+    <header class="guide-hero">
+      <h1>PS5 controller stick drift test</h1>
+      <p class="guide-lede">The PS5 controller stick drift test reads the resting signal of both sticks and tells you whether either one sits off center or wanders while untouched. It is read-only: no calibration or memory command is sent.</p>
+      <p class="guide-cta"><a class="btn btn-primary" href="../../">Open Sense Calibrator</a> <span class="hint">Desktop Chrome or Edge &middot; USB data cable &middot; standard DualSense</span></p>
+    </header>
+
+    <div class="guide-body">
+
+      <h2>What stick drift is</h2>
+      <p>Stick drift is what happens when a stick reports a non-zero signal while nothing is touching it. The controller keeps sending values that are not neutral, and the game reads phantom movement: the camera creeps, the character walks slowly, a menu selection slides on its own.</p>
+      <p>Two shapes matter when you test:</p>
+      <ul>
+        <li><b>A stable offset.</b> The resting position is consistently wrong. Samples settle around the same non-neutral coordinates, and the same offset reappears from one test to the next.</li>
+        <li><b>An unstable or noisy signal.</b> The value wanders even while the stick is at rest, so no single resting position explains it.</li>
+      </ul>
+      <p>The two can feel similar in a game, but they point to different causes. That is why the test reports an offset figure and a noise figure separately instead of a single pass or fail.</p>
+
+      <h2>What you need</h2>
+      <ul>
+        <li><b>A desktop computer.</b> Windows, macOS, Linux or ChromeOS. Phones are not supported.</li>
+        <li><b>The standard PS5 DualSense.</b> Only the standard controller is supported.</li>
+        <li><b>A USB data cable.</b> Some cables only carry power. If the controller never appears in the browser prompt, try another cable before anything else.</li>
+        <li><b>Desktop Chrome or Edge.</b> The browser talks to the controller through WebHID, which Chromium browsers provide and Safari and Firefox do not.</li>
+      </ul>
+      <p>The calibration side of the tool rejects Bluetooth, so USB is required for the full workflow. If the controller is paired wirelessly, plug it in with the cable and connect again.</p>
+
+      <h2>How to connect</h2>
+      <ol>
+        <li>Plug the DualSense into the computer with the USB data cable.</li>
+        <li>Open Sense Calibrator in Chrome or Edge.</li>
+        <li>Select <b>Connect DualSense</b>.</li>
+        <li>Approve the browser prompt and pick the controller from the list.</li>
+        <li>Confirm that the status chip shows the controller as connected.</li>
+        <li>Put the controller on a stable surface, away from anything that can tap or vibrate it.</li>
+      </ol>
+
+      <h2>How the automatic test measures drift</h2>
+      <p>The run is automatic. After a short settling period, the test samples the stick's input reports for about three seconds, at roughly the rate the controller sends them.</p>
+      <p>Only steady samples count. For each sample, the tool checks how far the signal moved across a short window of recent reports. A sample with a small spread is kept; a sample that moved is discarded as movement, because a hand brushing the stick, a cable tug or a vibrating table is movement, not drift. If too few steady samples remain, the test discards the attempt and starts over.</p>
+      <p>From the samples that remain, it reports two numbers per stick:</p>
+      <ul>
+        <li><b>Resting offset:</b> the median stick position, as a percentage of the full range.</li>
+        <li><b>Noise:</b> how far individual samples scatter around that median.</li>
+      </ul>
+      <p>Stability classification is what keeps the result honest, because the test cannot see your hand. It can only see the signal, and a value that is merely moving is not drift. The measurement logic is open source and documented: read the implementation in the <a href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener">GitHub repository</a> and the protocol notes in the <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">SubraLabs technical write-up</a>.</p>
+
+      <h2>How to read the result</h2>
+      <p>Each stick gets a label from its offset: Centered under about 1.2% of range, Mild drift up to about 3.5%, and Marked drift above that. Noise is judged separately, and anything above about 1.5% is flagged as a sign of a worn or dirty signal.</p>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Reading</th>
+            <th scope="col">What the numbers show</th>
+            <th scope="col">What it points to</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Centered</th>
+            <td>Offset under about 1.2%, with low noise and a thin, steady cloud of samples.</td>
+            <td>A quiet resting signal. There is nothing to correct.</td>
+          </tr>
+          <tr>
+            <th scope="row">Stable offset</th>
+            <td>Offset above the centered band, but the same position repeats closely on a second test.</td>
+            <td>A stored calibration offset, which calibration may correct.</td>
+          </tr>
+          <tr>
+            <th scope="row">Noisy signal</th>
+            <td>Noise above about 1.5%; the position wanders around the median instead of settling.</td>
+            <td>The sensor itself, often wear or dirt. Software is unlikely to help.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Read both numbers together, not just the offset. A large offset with a quiet signal is a better candidate for calibration than a small offset that will not hold still. Re-run the test before acting on it: one noisy run on a wobbling surface can look worse than the stick really is.</p>
+
+      <h2>Why the test is read-only</h2>
+      <p>The PS5 controller stick drift test only reads input reports. It sends no calibration command and no memory command, so nothing on the controller changes while it runs. There is also nothing to save or undo afterwards.</p>
+      <p class="guide-note"><b>Read-only by design.</b> Calibration is a separate, explicit step that you choose later, and it stays temporary until you write it to the controller's memory.</p>
+
+      <h2>Why a test cannot diagnose every mechanical problem</h2>
+      <p>The test measures the electrical signal at rest. It does not inspect the mechanism, so several faults stay invisible to it:</p>
+      <ul>
+        <li>Worn or dirty potentiometer tracks</li>
+        <li>Dirt or debris inside the module</li>
+        <li>A cracked housing</li>
+        <li>A bent shaft</li>
+        <li>Intermittent faults that only appear under heat, pressure or rumble</li>
+      </ul>
+      <p>A quiet signal at rest is a good sign, but it is not proof that the stick module is healthy. If a stick misbehaves in a game while the test reads clean, the conditions that trigger the fault may simply not be present at rest.</p>
+
+      <h2>What to do after the result</h2>
+      <ul>
+        <li><b>Centered and quiet:</b> there is nothing to fix. Test again later if something starts to feel off.</li>
+        <li><b>A stable offset:</b> the guide on how to <a href="../calibrate-dualsense-controller/">calibrate a DualSense controller</a> explains whether calibration fits and how to keep the result saved.</li>
+        <li><b>A noisy signal:</b> calibration is unlikely to help. Cleaning, repair or module replacement may be the realistic path.</li>
+      </ul>
+      <p>Whatever the result, run the test a second time to confirm it, and compare the numbers again after any change you make.</p>
+
+      <h2>Run the PS5 controller stick drift test</h2>
+      <p>Connect the controller over USB on a desktop in Chrome or Edge, leave both sticks alone, and read the resting offset and noise in a few seconds.</p>
+      <p><a class="btn btn-primary" href="../../">Open Sense Calibrator</a></p>
+
+      <aside class="guide-next"><b>Next step</b><a href="../calibrate-dualsense-controller/">How to calibrate a DualSense controller</a><span>When calibration can correct the offset and how to keep it saved.</span></aside>
+
+    </div>
+  </article>
+</main>
+
+<footer class="footer">
+  <span>Built by <a href="https://subralabs.com" target="_blank" rel="noopener">SubraLabs</a> &middot; <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">read the technical write-up</a></span>
+  <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
+  <span>Unofficial tool &middot; use at your own risk.</span>
+</footer>
+
+</body>
+</html>
