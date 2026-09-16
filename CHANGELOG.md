@@ -15,6 +15,7 @@ Notable changes to Sense Calibrator. Dates are ISO 8601.
 - Network telemetry now sends only complete Quick calibration records that match the strict server contract. Richer events stay in local browser history until a versioned server contract exists.
 - Failed requests are no longer reported as successful uploads. Incomplete or unverified results stay local instead of becoming misleading data.
 - Contract tests cover accepted uploads, rejected events and network failures.
+- A private daily VPS report now summarizes valid sessions, board cohorts, meaningful improvement, the public 1.2% threshold and suspicious high-deflection readings. It never exposes individual records or adds a public endpoint.
 
 ### Repository
 

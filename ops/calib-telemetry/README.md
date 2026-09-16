@@ -50,9 +50,9 @@ directory, flushes it, and renames it over the previous report. A failed write
 or rename leaves the previous report intact and removes the temporary file.
 The command refuses to use the input path as the output path.
 
-## Proposed VPS layout (not deployed)
+## VPS deployment
 
-Keep the report private and outside every nginx document root:
+The report is deployed privately, outside every nginx document root:
 
 ```text
 /home/martino/sense-calibrator-ops/quality-report.mjs
@@ -70,11 +70,12 @@ the `martino` user crontab for short periodic jobs. This report is a finite batc
 job, so the existing user-cron convention is the smaller operational surface;
 it does not need a second PM2 process or a public endpoint.
 
-After review and a manual one-shot check, the proposed daily entry is:
+The active daily entry runs at 04:10 UTC:
 
 ```cron
 10 4 * * * umask 077 && /usr/bin/node /home/martino/sense-calibrator-ops/quality-report-cli.mjs --input /var/lib/calib-telemetry/sessions.jsonl --output /var/lib/calib-telemetry/private/quality-latest.json --since 2026-09-16T11:20:32Z --summary >> /var/lib/calib-telemetry/private/quality-history.log 2>&1
 ```
 
-Deployment, the first report write and the cron edit are deliberately not
-performed by this change.
+The first report was generated and checked on 2026-09-16. Both report files
+use mode `0600`; the source JSONL remained byte-for-byte unchanged. The
+collector stays under PM2 and was not restarted or modified for this job.
