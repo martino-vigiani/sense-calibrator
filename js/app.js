@@ -5,6 +5,7 @@ import { initGame } from './game.js';
 import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
+import { createQuickCenterHold, sticksWithinQuickCenter } from './quick-center-guard.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -719,15 +720,26 @@ const QUICK_CONVERGE_EPS = 0.15;    // punti percentuali
 // è rumore di misura e avvisare produrrebbe solo falsi allarmi.
 const QUICK_REGRESSION_EPS = 0.8;
 const QUICK_NOISE_WORN = 1.5;       // noise p95 oltre cui il sensore è consumato
+let quickPreflightBlocked = false;
+
+function cancelQuickCalibration() {
+  if (busy) return;
+  closeModal('modal-quick');
+  if (quickPreflightBlocked) {
+    quickPreflightBlocked = false;
+    startDriftTest();
+  }
+}
 
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
 // Ritorna false se il segnale non si stabilizza entro `timeoutMs`.
 // Guidato dagli input report HID, non da un timer: il gating resta preciso
 // anche con i timer della pagina throttlati.
-function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT } = {}) {
+function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT, requireCentered = false } = {}) {
   return new Promise(resolve => {
     const start = performance.now();
     const win = [];
+    const centerHold = requireCentered ? createQuickCenterHold() : null;
     const done = ok => {
       stickListeners.delete(onSample);
       clearTimeout(guard);
@@ -735,6 +747,7 @@ function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS,
     };
     const onSample = () => {
       const now = performance.now();
+      const centered = centerHold ? centerHold(sticks, now) : true;
       win.push({ ...sticks, t: now });
       while (win.length && win[0].t < now - holdMs) win.shift();
       if (win.length >= 10 && now - win[0].t >= holdMs * 0.8) {
@@ -747,7 +760,7 @@ function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS,
           }
           maxSpread = Math.max(maxSpread, max - min);
         }
-        if (maxSpread <= spread) return done(true);
+        if (centered && maxSpread <= spread) return done(true);
       }
       if (now - start >= timeoutMs) done(false);
     };
@@ -764,16 +777,20 @@ function waitForStable({ spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS,
 // e la passata di convergenza si interrompeva), e a 8 ms sotto-campionava i
 // ~250 Hz del controller duplicando campioni identici — il che falsava sia la
 // frazione di stabilità sia la durata reale di DRIFT_WINDOW.
-async function measureOffset(ms = 1500) {
+async function measureOffset(ms = 1500, { requireCentered = false } = {}) {
   const samples = [];
-  const onSample = () => samples.push({ ...sticks });
+  let stayedCentered = true;
+  const onSample = () => {
+    if (requireCentered && !sticksWithinQuickCenter(sticks)) stayedCentered = false;
+    samples.push({ ...sticks });
+  };
   stickListeners.add(onSample);
   try {
     await sleep(ms);
   } finally {
     stickListeners.delete(onSample);
   }
-  if (samples.length < 40) return null;
+  if (samples.length < 40 || !stayedCentered) return null;
   const { stable } = extractStableSamples(samples);
   return analyzeDrift(stable.length > 40 ? stable : samples);
 }
@@ -886,12 +903,15 @@ function uploadEvent(entry) {
 // (miglioramento sotto epsilon = pavimento del rumore).
 async function quickCalibrate() {
   if (!ds5 || busy) return;
+  const controller = ds5;
   cancelDriftTest();
   busy = true;
   const bar = $('quick-bar');
+  quickPreflightBlocked = false;
   const msg = $('quick-msg');
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
+  let blockedMessage = null;
   const session = {
     kind: 'quick',
     t: new Date().toISOString(),
@@ -902,14 +922,32 @@ async function quickCalibrate() {
     after: null,
     unstableEvents: 0,
   };
+  const blockStart = () => {
+    quickPreflightBlocked = true;
+    session.aborted = 'preflight';
+    recordSessionOnce(session);
+    blockedMessage = 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
+    log('Quick calibration not started: centered, stable stick readings are required.');
+  };
   try {
-    msg.innerHTML = 'Waiting for the sticks to settle…';
+    msg.innerHTML = 'Release both sticks. Waiting for centered, stable readings…';
     // Attesa iniziale col gate largo del test drift: serve solo a lasciar
     // staccare la mano, non a giudicare il jitter proprio dello stick.
-    const settled = await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000 });
-    const before = await measureOffset(1000);
+    const settled = await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000, requireCentered: true });
+    if (!settled || ds5 !== controller) {
+      blockStart();
+      return;
+    }
+    const before = await measureOffset(1000, { requireCentered: true });
     session.before = summarizeResult(before);
     session.settled = settled;
+    // La baseline non può includere uno stick inclinato. Ricontrolla inoltre
+    // una finestra fresca prima di qualsiasi comando: la mano può tornare
+    // sullo stick durante la misura, o gli input report possono fermarsi.
+    if (!before || !await waitForStable({ spread: DRIFT_MOVE_SPREAD, timeoutMs: 3000, requireCentered: true }) || ds5 !== controller) {
+      blockStart();
+      return;
+    }
 
     // Gate adattivo: `noise` è il p95 (in %) della deviazione dalla mediana.
     // Il fattore 2.5 è tarato sul max delle escursioni dei quattro assi su una
@@ -917,13 +955,9 @@ async function quickCalibrate() {
     // il "2× per asse singolo" che verrebbe da intuire, e abbassarlo a 2 fa
     // collassare il gate se il controller riporta a 1000 Hz invece di 250.
     //
-    // La baseline si deriva dal rumore anche quando l'attesa iniziale va in
-    // timeout. Non stabilizzarsi entro DRIFT_MOVE_SPREAD significa "mano sullo
-    // stick" oppure "jitter proprio oltre 0.08", cioè proprio il potenziometro
-    // consumato per cui il gate adattivo esiste: spegnerlo lì lo negherebbe a
-    // chi ne ha più bisogno. Il caso "mano sullo stick" è comunque innocuo,
-    // perché il tetto è DRIFT_MOVE_SPREAD, la soglia oltre cui l'app dichiara
-    // movimento — il gate non può diventare più permissivo di così.
+    // L'avvio richiede ora una baseline vicina al centro e un gate riuscito.
+    // Questo gate adattivo gestisce il rumore durante le passate successive;
+    // non può aggirare la protezione assoluta prima del primo calibBegin.
     let baseGate = QUICK_STABLE_SPREAD;
     if (before) {
       const noise = Math.max(before.left.noise, before.right.noise) / 100;
@@ -931,7 +965,6 @@ async function quickCalibrate() {
       if (baseGate > QUICK_STABLE_SPREAD)
         log(`Noisy signal: stability gate widened to ±${(baseGate * 100).toFixed(1)}%.`);
     }
-    if (!settled) log('Sticks never settled before the baseline measurement.');
     let gateSpread = baseGate;
     let gateMax = baseGate;
     let gateOff = false;
@@ -1084,10 +1117,11 @@ async function quickCalibrate() {
     toast(`Calibration failed: ${error.message}. If it keeps failing, restart the controller.`, 6000);
     log(`Quick calibration error: ${error.message}`);
   } finally {
+    busy = false;
     $('btn-quick-go').disabled = false;
     $('btn-quick-cancel').disabled = false;
     bar.style.width = '0%';
-    msg.innerHTML = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
+    msg.innerHTML = blockedMessage || 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
   }
 }
 
@@ -1407,7 +1441,7 @@ $('btn-reboot').addEventListener('click', rebootController);
 $('btn-retest').addEventListener('click', () => startDriftTest());
 
 $('btn-quick').addEventListener('click', () => { if (!busy && ds5) openModal('modal-quick'); });
-$('btn-quick-cancel').addEventListener('click', () => closeModal('modal-quick'));
+$('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
 $('btn-quick-go').addEventListener('click', quickCalibrate);
 
 $('btn-wizard').addEventListener('click', openWizard);

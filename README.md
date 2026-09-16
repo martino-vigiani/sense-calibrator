@@ -24,6 +24,8 @@ You need a desktop computer, a USB data cable and a standard DualSense (`054C:0C
 
 Calibration is applied to controller RAM first. If you turn the controller off before **Write to memory**, the temporary calibration is discarded.
 
+Before Quick calibration sends any command, both sticks must stay within 15% of center through two short checks and the baseline measurement. If that safety check fails, nothing is written; release the sticks and retry, or use Guided calibration for a severe resting offset.
+
 ## What it does
 
 | Tool | What it tells you | Changes the controller? |
