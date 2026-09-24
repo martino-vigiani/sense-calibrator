@@ -24,7 +24,7 @@ Run the automated checks before opening a pull request:
 npm test
 ```
 
-These checks cover the public search surface and the telemetry contract. They do not replace a test with a real controller.
+These checks cover the public search surface, the telemetry contract, and the calibration code and page lifecycle against a simulated controller. They do not replace a test with a real controller.
 
 ## Make a focused change
 
