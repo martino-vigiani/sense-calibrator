@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
   <title>Fix PS5 Stick Drift from Your Browser | Sense Calibrator</title>
   <meta name="description" content="Test and recalibrate a standard PS5 DualSense for stick drift from desktop Chrome or Edge over USB. Free, open source and no install.">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
@@ -254,7 +255,7 @@
         <button id="btn-retest" class="btn btn-secondary btn-sm">Run again</button>
       </div>
       <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
-      <div id="drift-progress" class="progress hidden"><i></i></div>
+      <div id="drift-progress" class="progress hidden" aria-hidden="true"><i></i></div>
     </div>
 
     <!-- Esito persistente dell'ultima calibrazione (js/ui/outcome.js): resta
@@ -263,24 +264,32 @@
 
     <div class="grid-sticks">
       <div class="card stick-card">
-        <h3>Left stick</h3>
-        <canvas id="dial-l" width="240" height="240" aria-label="Left stick position"></canvas>
+        <div class="stick-head">
+          <h3>Left stick</h3>
+          <button id="btn-zoom-l" class="btn btn-ghost btn-sm dial-zoom" type="button" aria-pressed="false" aria-controls="dial-l">Zoom ×10</button>
+        </div>
+        <canvas id="dial-l" role="img" width="240" height="240" aria-label="Left stick position"></canvas>
         <div class="readout">
           <span>LX <b id="ro-lx">+0.000</b></span>
           <span>LY <b id="ro-ly">+0.000</b></span>
           <span>offset <b id="ro-lo">0.0%</b></span>
         </div>
         <div id="verdict-l" class="verdict hidden"></div>
+        <p id="verdict-l-detail" class="verdict-detail mono"></p>
       </div>
       <div class="card stick-card">
-        <h3>Right stick</h3>
-        <canvas id="dial-r" width="240" height="240" aria-label="Right stick position"></canvas>
+        <div class="stick-head">
+          <h3>Right stick</h3>
+          <button id="btn-zoom-r" class="btn btn-ghost btn-sm dial-zoom" type="button" aria-pressed="false" aria-controls="dial-r">Zoom ×10</button>
+        </div>
+        <canvas id="dial-r" role="img" width="240" height="240" aria-label="Right stick position"></canvas>
         <div class="readout">
           <span>RX <b id="ro-rx">+0.000</b></span>
           <span>RY <b id="ro-ry">+0.000</b></span>
           <span>offset <b id="ro-ro">0.0%</b></span>
         </div>
         <div id="verdict-r" class="verdict hidden"></div>
+        <p id="verdict-r-detail" class="verdict-detail mono"></p>
       </div>
     </div>
 
@@ -358,30 +367,31 @@
 
 <!-- ======================= MODALE: OVERLAY CALIBRAZIONE RAPIDA ======================= -->
 <div id="modal-quick" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quick-title">
-  <div class="modal-panel modal-narrow">
+  <div class="modal-panel modal-narrow" tabindex="-1">
     <h3 id="quick-title">Quick calibration</h3>
-    <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
+    <p id="quick-msg" role="status">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
     <p id="quick-handsoff" class="handsoff" data-level="unknown">Waiting for the controller…</p>
     <p id="quick-battery" class="hint battery-hint hidden"></p>
-    <div class="progress"><i id="quick-bar"></i></div>
+    <div class="progress" role="progressbar" aria-label="Calibration progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="quick-bar"></i></div>
     <label class="telemetry-label" title="Payload: complete Quick calibration only; no serial number, device ID or local session ID">
       <input type="checkbox" id="telemetry-consent">
       <span>Share this complete Quick calibration result</span>
     </label>
     <div class="modal-actions">
       <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="btn-quick-go" class="btn btn-primary">Calibrate now</button>
+      <button id="btn-quick-go" class="btn btn-primary" data-autofocus>Calibrate now</button>
     </div>
   </div>
 </div>
 
 <!-- ======================= MODALE: WIZARD CENTRO ======================= -->
 <div id="modal-wizard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
-  <div class="modal-panel">
+  <div class="modal-panel" tabindex="-1">
     <h3 id="wizard-title">Guided center calibration</h3>
     <div class="wizard-dots" id="wizard-dots" aria-hidden="true">
       <i></i><i></i><i></i><i></i><i></i><i></i>
     </div>
+    <p id="wizard-step" class="sr-only">Not started</p>
     <div class="wizard-body">
       <svg id="wizard-diagram" class="wizard-diagram hidden" viewBox="0 0 120 120" aria-hidden="true">
         <rect x="8" y="8" width="104" height="104" rx="18" fill="none" stroke="currentColor" stroke-width="2" opacity="0.25"/>
@@ -389,47 +399,47 @@
         <line id="wizard-line" x1="60" y1="60" x2="26" y2="26" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
         <circle id="wizard-target" cx="26" cy="26" r="9" fill="currentColor"/>
       </svg>
-      <p id="wizard-msg">This procedure re-centers the sticks by sampling their resting position after each movement.
+      <p id="wizard-msg" role="status">This procedure re-centers the sticks by sampling their resting position after each movement.
         Once started it <b>cannot be cancelled</b>: don't close the page and don't disconnect the controller.</p>
     </div>
     <p id="wizard-handsoff" class="handsoff" data-level="unknown">Waiting for the controller…</p>
     <p id="wizard-battery" class="hint battery-hint hidden"></p>
     <div id="wizard-live" class="wizard-live hidden">
       <figure>
-        <canvas id="dial-wiz-l" width="110" height="110" aria-label="Live left stick position"></canvas>
+        <canvas id="dial-wiz-l" role="img" width="110" height="110" aria-label="Live left stick position"></canvas>
         <figcaption>Left</figcaption>
       </figure>
       <figure>
-        <canvas id="dial-wiz-r" width="110" height="110" aria-label="Live right stick position"></canvas>
+        <canvas id="dial-wiz-r" role="img" width="110" height="110" aria-label="Live right stick position"></canvas>
         <figcaption>Right</figcaption>
       </figure>
     </div>
     <div class="modal-actions">
       <button id="btn-wizard-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="btn-wizard-next" class="btn btn-primary">Start</button>
+      <button id="btn-wizard-next" class="btn btn-primary" data-autofocus>Start</button>
     </div>
   </div>
 </div>
 
 <!-- ======================= MODALE: RANGE ======================= -->
 <div id="modal-range" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="range-title">
-  <div class="modal-panel">
+  <div class="modal-panel" tabindex="-1">
     <h3 id="range-title">Range calibration</h3>
     <p id="range-msg">The controller is sampling. <b>Slowly rotate both sticks while pressing them all the way
       against the edge</b>, at least 2 turns one way and 2 the other. Keep working the areas where the trace
       stays short.</p>
     <div class="range-dials">
-      <canvas id="dial-range-l" width="200" height="200" aria-label="Left stick coverage"></canvas>
-      <canvas id="dial-range-r" width="200" height="200" aria-label="Right stick coverage"></canvas>
+      <canvas id="dial-range-l" role="img" width="200" height="200" aria-label="Left stick coverage"></canvas>
+      <canvas id="dial-range-r" role="img" width="200" height="200" aria-label="Right stick coverage"></canvas>
     </div>
     <div class="range-minmax mono" id="range-minmax">
       <span>LX</span><span>LY</span><span>RX</span><span>RY</span>
     </div>
     <div class="range-meta">
-      <span id="range-hint" class="range-hint">Extremes not reached yet</span>
+      <span id="range-hint" class="range-hint" role="status">Extremes not reached yet</span>
       <span id="range-pct">Coverage 0%</span>
     </div>
-    <div class="progress"><i id="range-bar"></i></div>
+    <div class="progress" role="progressbar" aria-label="Range coverage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="range-bar"></i></div>
     <p class="hint">If you close without rotating the sticks the calibration will be incomplete and will have to be repeated.</p>
     <div class="modal-actions">
       <button id="btn-range-done" class="btn btn-primary" disabled>Done</button>
@@ -439,7 +449,7 @@
 
 <!-- ======================= MODALE: FLASH ======================= -->
 <div id="modal-flash" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="flash-title">
-  <div class="modal-panel modal-narrow">
+  <div class="modal-panel modal-narrow" tabindex="-1">
     <h3 id="flash-title">Write to the controller's memory?</h3>
     <p>The current calibration will be saved <b>permanently</b> in the DualSense's memory and will stay
       active on PS5, PC and everywhere else.</p>
@@ -460,27 +470,28 @@
 </div>
 
 <!-- ======================= MODALE: TEST DI PRECISIONE (GIOCO) ======================= -->
-<div id="modal-game" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="game-phase">
-  <div class="modal-panel modal-wide">
+<div id="modal-game" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="game-dialog-title">
+  <div class="modal-panel modal-wide" tabindex="-1">
+    <h2 id="game-dialog-title" class="sr-only">Precision test</h2>
     <div class="game-head">
       <h3 id="game-phase">Precision test</h3>
       <button id="btn-game-exit" class="btn btn-ghost btn-sm">Exit</button>
     </div>
-    <p id="game-instr" class="game-instr">Three trials, about a minute. Press Start when you're ready.</p>
+    <p id="game-instr" class="game-instr" role="status">Three quick checks, about 40 seconds. Press Start when you’re ready.</p>
 
     <div id="game-dials" class="game-dials">
       <figure>
-        <canvas id="game-dial-l" width="220" height="220" aria-label="Left stick game dial"></canvas>
+        <canvas id="game-dial-l" role="img" width="220" height="220" aria-label="Left stick game dial"></canvas>
         <figcaption>Left</figcaption>
       </figure>
       <div id="game-countdown" class="game-countdown hidden" aria-hidden="true"></div>
       <figure>
-        <canvas id="game-dial-r" width="220" height="220" aria-label="Right stick game dial"></canvas>
+        <canvas id="game-dial-r" role="img" width="220" height="220" aria-label="Right stick game dial"></canvas>
         <figcaption>Right</figcaption>
       </figure>
     </div>
 
-    <div id="game-progress" class="progress hidden"><i></i></div>
+    <div id="game-progress" class="progress hidden" role="progressbar" aria-label="Test progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
 
     <div id="game-intro" class="game-intro">
       <ol class="game-trials">
@@ -489,7 +500,7 @@
         <li><b>Snap-back:</b> flick each stick to the edge and let it go, three times per stick.</li>
       </ol>
       <div class="modal-actions">
-        <button id="btn-game-start" class="btn btn-primary">Start</button>
+        <button id="btn-game-start" class="btn btn-primary" data-autofocus>Start</button>
       </div>
     </div>
 
@@ -502,7 +513,7 @@
 
 <!-- ======================= MODALE: SENSITIVITY FINDER ======================= -->
 <div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title" data-experimental hidden>
-  <div class="modal-panel modal-sensitivity">
+  <div class="modal-panel modal-sensitivity" tabindex="-1">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
       <button type="button" data-tool="sensitivity" class="active" aria-current="page">Sensitivity</button>
@@ -552,7 +563,7 @@
 
 <!-- ======================= MODALE: GAMEPLAY LAB ======================= -->
 <div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title" data-experimental hidden>
-  <div class="modal-panel modal-playtest">
+  <div class="modal-panel modal-playtest" tabindex="-1">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
       <button type="button" data-tool="sensitivity">Sensitivity</button>
@@ -600,6 +611,9 @@
 </div>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
+<!-- Gli errori hanno una regione a sé con role="alert": il toast visibile
+     resta uno solo, qui va solo il testo per gli screen reader. -->
+<div id="alerts" class="sr-only" role="alert"></div>
 
 <script type="module" src="js/app.js"></script>
 </body>

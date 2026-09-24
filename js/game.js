@@ -462,6 +462,9 @@ export function initGame(deps) {
     hideCountdown();
     elReport.classList.remove('hidden');
     elReportActions.classList.remove('hidden');
+    // Il fuoco era su Start, ora nascosto: va sul punteggio, che lo screen
+    // reader legge per primo; Tab prosegue verso "Run test again".
+    elReport.querySelector('.game-overall')?.focus({ preventScroll: true });
   }
 
   function renderReport(res, prev) {
@@ -479,7 +482,7 @@ export function initGame(deps) {
     }
 
     elReport.innerHTML = `
-      <div class="game-overall">
+      <div class="game-overall" tabindex="-1">
         <span class="game-overall-num">${res.overall}</span>
         <span class="game-overall-cap">out of 100</span>
       </div>

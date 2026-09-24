@@ -1,0 +1,81 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadApp, makeDevice } from './helpers/app-harness.mjs';
+import { VClock } from '../ops/sim/vclock.mjs';
+
+// WS6 sull'app reale nell'harness DOM-stub. Il DOM finto non calcola layout né
+// risolve selettori dentro un elemento: la trappola del fuoco vera (Tab ×20 su
+// ogni modale, bottoni coperti dall'avviso) è verificata in Chromium headless
+// da ops/ui-check/a11y-check.mjs. Qui si fissano il cablaggio e i ripieghi.
+
+async function connected() {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { seed: 5, drift: [[2.4, -0.3], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(8000);
+  return h;
+}
+
+test('the ×10 zoom toggles per dial, with pressed state and label', async () => {
+  const h = await connected();
+  await h.click('btn-zoom-l');
+  assert.equal(h.$('btn-zoom-l').getAttribute('aria-pressed'), 'true');
+  assert.match(h.$('dial-l').getAttribute('aria-label'), /zoomed ×10/);
+  assert.equal(h.eval('dialL.zoom'), 10);
+  assert.equal(h.eval('dialR.zoom ?? 1'), 1, 'the other dial is untouched');
+  await h.advance(200); // il loop rAF disegna la vista zoomata senza errori
+  await h.click('btn-zoom-l');
+  assert.equal(h.$('btn-zoom-l').getAttribute('aria-pressed'), 'false');
+  assert.equal(h.$('dial-l').getAttribute('aria-label'), 'Left stick position');
+  assert.equal(h.eval('dialL.zoom'), 1);
+});
+
+test('the drift verdict detail is written as visible text', async () => {
+  const h = await connected();
+  assert.ok(h.peek().lastDriftResult, 'the automatic drift test should have finished');
+  for (const side of ['l', 'r']) {
+    assert.match(h.$(`verdict-${side}-detail`).textContent, /^x [+−]\d+\.\d% · y [+−]\d+\.\d% · noise \d+\.\d%$/);
+    assert.equal(h.$(`verdict-${side}`).title, undefined);
+  }
+});
+
+test('error toasts also go to the alert region, once, and are cleared with the toast', async () => {
+  const h = await connected();
+  h.eval(`toast('Error while saving: boom', 1000, { alert: true })`);
+  assert.equal(h.$('alerts').textContent, 'Error while saving: boom');
+  const shown = h.doc.appended.at(-1);
+  assert.equal(shown.textContent, 'Error while saving: boom');
+  assert.equal(shown.getAttribute('aria-hidden'), 'true', 'the visible toast must not be read twice');
+  h.eval(`toast('Saved.', 1000)`);
+  assert.equal(h.doc.appended.at(-1).getAttribute('aria-hidden'), null);
+  assert.equal(h.$('alerts').textContent, 'Error while saving: boom', 'a polite toast does not touch the alert region');
+  await h.advance(1100);
+  assert.equal(h.$('alerts').textContent, '');
+});
+
+test('Tab never leaves an open modal, even with nothing focusable inside', async () => {
+  const h = await connected();
+  h.eval(`openModal('modal-range')`);
+  await h.advance(50);
+  const panel = h.$('modal-range').querySelector('.modal-panel');
+  assert.equal(h.doc.activeElement, panel, 'with Done disabled the panel takes the focus');
+  h.doc.activeElement = h.doc.body; // fuoco perso (bottone disabilitato)
+  let prevented = false;
+  for (const fn of h.doc.listeners.get('keydown') ?? []) fn({ key: 'Tab', shiftKey: false, preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(h.doc.activeElement, panel);
+  h.eval(`closeModal('modal-range')`);
+});
+
+test('the wizard step is mirrored as text for the aria-hidden dots', async () => {
+  const h = await connected();
+  // Il DOM finto non ha figli per #wizard-dots: se ne montano sei e si
+  // richiama la sincronizzazione che l'osservatore esegue nel browser.
+  h.$('wizard-dots').children = Array.from({ length: 6 }, () => h.doc.createElement('i'));
+  h.eval('wizardSetDots(0); syncWizardStep()');
+  assert.equal(h.$('wizard-step').textContent, 'Not started');
+  h.eval('wizardSetDots(3); syncWizardStep()');
+  assert.equal(h.$('wizard-step').textContent, 'Step 3 of 5');
+  h.eval('wizardSetDots(5); syncWizardStep()');
+  assert.equal(h.$('wizard-step').textContent, 'Step 5 of 5');
+});
