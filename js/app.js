@@ -670,12 +670,24 @@ function setUnsaved(v) {
 }
 
 async function doFlash() {
-  closeModal('modal-flash');
-  if (!ds5) return;
+  // Guardia e disattivazione sincrone, prima di qualunque await: un doppio
+  // click arriva mentre il primo flash è ancora in volo e, senza questo,
+  // lancerebbe un secondo ciclo unlock → lock sulla NVS. Il bottone torna
+  // attivo solo alla prossima apertura del modale, non nel finally: durante
+  // l'animazione di chiusura sarebbe di nuovo cliccabile.
+  if (!ds5 || busy) return;
+  $('btn-flash-go').disabled = true;
   busy = true;
+  closeModal('modal-flash');
   try {
     await ds5.flash();
     const nv = await refreshNv();
+    // Parola di stato grezza della NVS dopo il flash (verifica hardware H1):
+    // l'insieme degli stati "riuscito" non è ancora misurato, quindi qui si
+    // registra soltanto, senza decidere nulla sull'esito.
+    const raw = typeof nv?.raw === 'number' ? `0x${nv.raw.toString(16).padStart(8, '0')}` : 'n/a';
+    console.info('[flash] NVS status after flash:', nv?.status ?? null, raw);
+    log(`NVS status after flash: ${nv?.status ?? 'n/a'} (raw ${raw}).`);
     recordEvent('flash', { ok: true, nv: nv?.status ?? null });
     setUnsaved(false);
     if (nv?.status === 'pending_reboot') {
@@ -912,6 +924,9 @@ async function quickCalibrate() {
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
   let blockedMessage = null;
+  // Vero dal primo calibEnd riuscito: da lì la RAM del controller contiene una
+  // calibrazione nuova, e un errore in una passata successiva non la annulla.
+  let committedAny = false;
   const session = {
     kind: 'quick',
     t: new Date().toISOString(),
@@ -1017,6 +1032,7 @@ async function quickCalibrate() {
       }
       await sleep(150);
       await ds5.calibEnd();
+      committedAny = true;
 
       msg.innerHTML = `Pass ${pass}: verifying…`;
       result = await measureOffset();
@@ -1107,9 +1123,10 @@ async function quickCalibrate() {
     startDriftTest();
   } catch (error) {
     busy = false;
-    // La riparazione di calibBegin può aver committato: in quel caso la RAM del
-    // controller è cambiata anche se la calibrazione non è mai partita.
-    if (error.committed) setUnsaved(true);
+    // La RAM del controller è cambiata se una passata precedente ha già chiuso
+    // con calibEnd (un errore alla passata 2 non la annulla), oppure se la
+    // riparazione di calibBegin ha committato prima che la calibrazione partisse.
+    if (committedAny || error.committed) setUnsaved(true);
     session.aborted = 'error';
     session.err = String(error.message || error).slice(0, 120);
     recordSessionOnce(session);
@@ -1455,7 +1472,10 @@ $('btn-wizard-next').addEventListener('click', wizardNext);
 $('btn-range').addEventListener('click', openRange);
 $('btn-range-done').addEventListener('click', finishRange);
 
-$('btn-flash').addEventListener('click', () => openModal('modal-flash'));
+$('btn-flash').addEventListener('click', () => {
+  $('btn-flash-go').disabled = false; // disattivato da doFlash al click precedente
+  openModal('modal-flash');
+});
 $('btn-flash-cancel').addEventListener('click', () => closeModal('modal-flash'));
 $('btn-flash-go').addEventListener('click', doFlash);
 
