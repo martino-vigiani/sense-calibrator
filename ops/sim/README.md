@@ -28,6 +28,8 @@ input reports use while a calibration session is open).
 | `fit.mjs` | Grid fit of the firmware/noise model with a minimal emulator that uses the real stop rule |
 | `fits.json` | Top-3 fitted parameter sets (`best`, `alt1`, `alt2`) |
 | `variants.mjs` | Named `params` overrides; `baseline` must stay empty |
+| `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
+| `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
 | `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them |
 | `legacy/load-app.mjs` | The pre-refactor harness: extracts the monolithic `quickCalibrate` from `git show 40a08ed:js/app.js` |
 
@@ -53,6 +55,12 @@ node ops/sim/run.mjs --n 714 --scenario hold --workers 4 --out out-hold.json
 node ops/sim/run.mjs --n 1785 --fit alt1 --seed 2 --out out-alt1-s2.json
 
 node ops/sim/score.mjs --baseline out-baseline.json out-noplateau.json
+
+# WS1 safety gates: run the same scenario on the old code (a `git archive` of
+# the base commit with this ops/sim copied over) and on this tree, then
+node ops/sim/run.mjs --n 714 --scenario rim-hold --workers 4 --out ws1-rim-hold.json
+node ops/sim/safety-gates.mjs --baseline base-rim-hold.json ws1-rim-hold.json \
+  --reference-baseline base-normal.json --reference ws1-normal.json
 
 # real data, no model
 node ops/sim/replay-sequences.mjs [--params '{"convergeEps":0}'] [--details]

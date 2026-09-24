@@ -49,7 +49,10 @@ export class FakeDualSense {
     for (const h of this.touches) {
       if (h.stick !== si || t < h.t0 || t > h.t0 + h.dur + h.tail) continue;
       const a = t <= h.t0 + h.dur ? 1 : Math.exp(-(t - h.t0 - h.dur) / (h.tail / 4));
-      v += a * h.amp[ax];
+      // `at(t, ax)`: spostamento variabile nel tempo (scenari "moving"/"noisy"
+      // di ops/sim/scenarios). Usa il proprio generatore, non this.r: gli
+      // scenari non devono spostare la sequenza casuale del modello.
+      v += a * (h.at ? h.at(t, ax) : h.amp[ax]);
     }
     return v;
   }

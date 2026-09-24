@@ -6,7 +6,7 @@
 // Tutti i risultati sono "model-verified": dicono cosa fa il codice contro un
 // modello di controller tarato sulla telemetria, non cosa fa un DualSense vero.
 //
-//   node ops/sim/run.mjs --n 1785 --seed 1 [--variant baseline] [--scenario normal|hold]
+//   node ops/sim/run.mjs --n 1785 --seed 1 [--variant baseline] [--scenario normal|hold|<ops/sim/scenarios/*.mjs>]
 //        [--population real|synthetic] [--impl module|legacy] [--fit best] [--workers 4]
 //        [--params '{"maxPasses":4}'] [--out out.json]
 import fs from 'node:fs';
@@ -75,11 +75,11 @@ async function makeImpl(impl) {
   }
   if (impl === 'module') {
     const { makeSimInstance } = await import('./harness.mjs');
-    return (clock, dev, tpl, params) => {
-      const inst = makeSimInstance(clock, dev, { board: tpl.board, fw: 0 }, params);
+    return (clock, dev, tpl, params, hook = {}) => {
+      const inst = makeSimInstance(clock, dev, { board: tpl.board, fw: 0 }, params, { isCurrent: hook.isCurrent, source: hook.source, runOpts: hook.runOpts });
       return async () => {
         const res = await inst.run();
-        return { s: res.session, outcome: res.outcome };
+        return { s: res.session, outcome: res.outcome, committed: res.committed, probe: inst.probe };
       };
     };
   }
@@ -93,10 +93,29 @@ async function resolveParams(variant, params) {
   return { ...base, ...params };
 }
 
+// Scenari aggiuntivi in ops/sim/scenarios/<nome>.mjs (default export):
+//   base        scenario incorporato su cui si appoggia ('normal' | 'hold')
+//   templates(tpls, { population }) → sottoinsieme di template (opzionale)
+//   apply(spec, r2, tpl)            disturbi aggiunti alla sessione
+//   setup({ clock, dev, spec, r2, pop, seed, i }) → { isCurrent, source,
+//               runOpts, report() } per gli scenari che toccano il ciclo di
+//               vita (replug)
+// `r2` è un generatore separato: lo scenario non sposta la sequenza casuale
+// della sessione base, quindi le sessioni restano appaiate con la baseline.
+export const BUILTIN_SCENARIOS = ['normal', 'hold'];
+export async function loadScenario(name) {
+  if (BUILTIN_SCENARIOS.includes(name)) return { base: name };
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`bad scenario name ${name}`);
+  const mod = await import(new URL(`./scenarios/${name}.mjs`, import.meta.url));
+  return { base: 'normal', ...mod.default };
+}
+
 // Una sessione per indice: seed del generatore e del device dipendono solo da
 // (seed, i), quindi le sessioni sono indipendenti e parallelizzabili.
 export async function runRange({ from, to, seed = 1, impl = 'module', population = 'real', scenario = 'normal', variant = 'baseline', params = {}, fit = 'best' }) {
-  const tpls = loadTemplates(population);
+  const scen = await loadScenario(scenario);
+  const tpls = scen.templates ? scen.templates(loadTemplates(population), { population }) : loadTemplates(population);
+  if (!tpls.length) throw new Error(`scenario ${scenario}: no templates`);
   const fitPar = fitParams(fit);
   const pop = { ...POP, fw: { ...POP.fw, sf: fitPar.sf } };
   const create = await makeImpl(impl);
@@ -106,23 +125,32 @@ export async function runRange({ from, to, seed = 1, impl = 'module', population
     const tplIndex = i % tpls.length;
     const tpl = tpls[tplIndex];
     const r = rng(seed * 100003 + i);
-    const spec = makeSession(tpl, r, pop, { scenario, fit: fitPar });
+    const spec = makeSession(tpl, r, pop, { scenario: scen.base, fit: fitPar });
+    const r2 = rng(seed * 15485863 + i + 17);
+    scen.apply?.(spec, r2, tpl);
     const clock = new VClock();
     const dev = new FakeDualSense({ clock, seed: seed * 7919 + i + 1, sticks: spec.sticks, fw: pop.fw, timing: pop.timing, hand: { schedule: spec.schedule } });
-    const run = create(clock, dev, tpl, resolved);
-    let s, outcome;
+    const hook = scen.setup?.({ clock, dev, spec, r2, pop, seed, i }) ?? {};
+    const run = create(clock, dev, tpl, resolved, hook);
+    let s, outcome, committed = null, probe = null;
     try {
-      ({ s, outcome } = await clock.run(run()));
+      ({ s, outcome, committed = null, probe = null } = await clock.run(run()));
     } catch (e) {
       s = { passes: [], after: null, aborted: 'sim-' + e.message };
       outcome = 'sim-error';
     }
     dev.close();
+    const extra = hook.report?.() ?? {};
     // verità: residuo continuo per asse (LSB) dopo l'ultima calibEnd
     const trueRes = dev.sticks.map(st => [0, 1].map(a => st.rest[a] - st.center[a]));
     const trueQuant = dev.calibEnds ? Math.max(...trueRes.map(([x, y]) => Math.hypot(Math.floor(Math.abs(x)) + 0.5, Math.floor(Math.abs(y)) + 0.5) * LSB)) : null;
     const { t, ...session } = s ?? {};
-    out.push({ i, tpl: tplIndex, s: session, outcome, dur: clock.now(), calibEnds: dev.calibEnds, trueQuant, counts: { ...dev.counts } });
+    const rec = { i, tpl: tplIndex, s: session, outcome, dur: clock.now(), calibEnds: dev.calibEnds, trueQuant, counts: { ...dev.counts } };
+    // Campi di sicurezza (WS1): fuori dal golden di equivalenza (goldenRecord).
+    if (committed !== null) rec.committed = committed;
+    if (probe) rec.probe = { ...probe };
+    if (Object.keys(extra).length) rec.extra = extra;
+    out.push(rec);
   }
   return out;
 }
