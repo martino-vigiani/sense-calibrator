@@ -1,183 +1,136 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
+import { runQuick } from '../js/calib/quick.js';
+import { loadApp, makeDevice } from './helpers/app-harness.mjs';
+import { VClock } from '../ops/sim/vclock.mjs';
 
 const source = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');
 
-// Come in quick-preflight.test.js: si esegue il codice reale di app.js in una
-// VM con dipendenze finte, senza browser né controller fisico.
-function section(start, end) {
-  const from = source.indexOf(start);
-  const to = source.indexOf(end, from);
-  assert.ok(from >= 0 && to > from, `missing app section: ${start}`);
-  return source.slice(from, to);
-}
-
-const quickSource = section('async function quickCalibrate()', '/* ============================== wizard guidato');
-const flashSource = section('async function doFlash()', '/* ============================== calibrazione rapida');
-
-function elementStore() {
-  const elements = new Map();
-  return {
-    elements,
-    $: id => {
-      if (!elements.has(id)) elements.set(id, { disabled: false, innerHTML: '', style: {} });
-      return elements.get(id);
-    },
-  };
-}
+// L'algoritmo gira nel vero runQuick con dipendenze finte; il comportamento
+// della pagina (banner unsaved, flash) nell'app reale dentro l'harness DOM-stub.
 
 // Offset alto e costante: la passata 1 non raggiunge la soglia, quindi il ciclo
 // arriva davvero alla passata 2 (dove, senza errori, dichiarerebbe convergenza).
 const drifting = { left: { offset: 5, noise: 0.2, x: 0.05, y: 0 }, right: { offset: 0.6, noise: 0.2, x: 0.006, y: 0 } };
 
 function quickHarness({ failBeginAt = Infinity, failEndAt = Infinity, committedError = false } = {}) {
-  const { $ } = elementStore();
   const calls = { begin: 0, end: 0, sample: 0 };
-  const sessions = [];
   const fail = message => {
     const error = new Error(message);
     if (committedError) error.committed = true;
     throw error;
   };
-  const context = vm.createContext({
-    busy: false,
-    quickPreflightBlocked: false,
-    deviceInfo: null,
-    unsaved: false,
-    $,
-    ds5: {
-      calibBegin: async () => { if (++calls.begin >= failBeginAt) fail('begin failed'); },
-      calibSample: async () => { calls.sample += 1; },
-      calibEnd: async () => { if (++calls.end >= failEndAt) fail('end failed'); },
-    },
-    cancelDriftTest: () => {},
-    startDriftTest: () => {},
-    closeModal: () => {},
-    setUnsaved: value => { context.unsaved = value; },
-    recordSessionOnce: session => sessions.push(structuredClone(session)),
-    summarizeResult: value => value && { off: [value.left.offset, value.right.offset] },
-    waitForStable: async () => true,
-    measureOffset: async () => drifting,
-    sleep: async () => {},
-    toast: () => {},
-    log: () => {},
-    QUICK_MAX_PASSES: 4,
-    QUICK_SAMPLES_PER_PASS: 12,
-    QUICK_STABLE_SPREAD: 0.035,
-    QUICK_STABLE_SPREAD_MAX: 0.08,
-    DRIFT_MOVE_SPREAD: 0.08,
-    DRIFT_OK_MAX: 1.2,
-    QUICK_CONVERGE_EPS: 0.15,
-    QUICK_REGRESSION_EPS: 0.8,
-    QUICK_NOISE_WORN: 1.5,
+  const controller = {
+    calibBegin: async () => { if (++calls.begin >= failBeginAt) fail('begin failed'); },
+    calibSample: async () => { calls.sample += 1; },
+    calibEnd: async () => { if (++calls.end >= failEndAt) fail('end failed'); },
+  };
+  const run = () => runQuick({
+    controller,
+    clock: { sleep: async () => {} },
+    sampler: { waitForStable: async () => true, measureOffset: async () => drifting },
   });
-  vm.runInContext(quickSource, context);
-  return { context, calls, sessions };
+  return { run, calls };
 }
 
-test('repro A: a failure in pass 2 keeps unsaved=true, because pass 1 is already applied', async () => {
-  const { context, calls, sessions } = quickHarness({ failBeginAt: 2 });
-  await context.quickCalibrate();
+test('repro A: a failure in pass 2 reports committed, because pass 1 is already applied', async () => {
+  const { run, calls } = quickHarness({ failBeginAt: 2 });
+  const { session, outcome, committed } = await run();
 
   assert.equal(calls.end, 1, 'pass 1 committed exactly once before the failure');
   assert.equal(calls.begin, 2);
-  assert.equal(context.unsaved, true);
-  assert.equal(context.busy, false);
-  assert.equal(sessions.at(-1).aborted, 'error');
+  assert.equal(committed, true);
+  assert.equal(outcome, 'error');
+  assert.equal(session.aborted, 'error');
 });
 
-test('a failure in a later calibEnd also keeps unsaved=true', async () => {
-  const { context, calls } = quickHarness({ failEndAt: 2 });
-  await context.quickCalibrate();
+test('a failure in a later calibEnd also reports committed', async () => {
+  const { run, calls } = quickHarness({ failEndAt: 2 });
+  const { committed } = await run();
 
   assert.equal(calls.end, 2);
-  assert.equal(context.unsaved, true);
+  assert.equal(committed, true);
 });
 
-test('a failure before the first calibEnd leaves unsaved untouched unless the repair committed', async () => {
+test('a failure before the first calibEnd is not committed unless the repair committed', async () => {
   for (const scenario of [{ failBeginAt: 1 }, { failEndAt: 1 }]) {
-    const { context } = quickHarness(scenario);
-    await context.quickCalibrate();
-    assert.equal(context.unsaved, false, JSON.stringify(scenario));
+    const { committed } = await quickHarness(scenario).run();
+    assert.equal(committed, false, JSON.stringify(scenario));
   }
-  const { context } = quickHarness({ failBeginAt: 1, committedError: true });
-  await context.quickCalibrate();
-  assert.equal(context.unsaved, true, 'error.committed still marks the RAM as changed');
+  const { committed } = await quickHarness({ failBeginAt: 1, committedError: true }).run();
+  assert.equal(committed, true, 'error.committed still marks the RAM as changed');
 });
 
-function flashHarness({ connected = true, busy = false } = {}) {
-  const { $ } = elementStore();
-  const calls = { flash: 0, nv: 0, closed: [] };
-  const logs = [];
-  const info = [];
-  let release;
-  const pending = new Promise(resolve => { release = resolve; });
-  const context = vm.createContext({
-    busy,
-    unsaved: true,
-    $,
-    ds5: connected ? {
-      // Il flash resta in volo finché il test non lo rilascia: è la finestra
-      // in cui arriva il secondo click.
-      flash: async () => { calls.flash += 1; await pending; },
-    } : null,
-    refreshNv: async () => { calls.nv += 1; return { status: 'locked', raw: 0x03030201 }; },
-    closeModal: id => calls.closed.push(id),
-    recordEvent: () => {},
-    setUnsaved: value => { context.unsaved = value; },
-    toast: () => {},
-    log: message => logs.push(message),
-    console: { info: (...args) => info.push(args) },
-  });
-  vm.runInContext(flashSource, context);
-  // Il browser non consegna click a un bottone disabilitato.
-  const click = () => ($('btn-flash-go').disabled ? undefined : context.doFlash());
-  return { context, calls, logs, info, click, release, $ };
+async function connectedApp(deviceOptions = {}) {
+  const clock = new VClock();
+  const dev = makeDevice(clock, deviceOptions);
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  return { h, dev };
 }
 
-test('double-clicking Write runs exactly one flash()', async () => {
-  const h = flashHarness();
-  const first = h.click();
-  const second = h.click();
-  assert.equal(h.$('btn-flash-go').disabled, true, 'disabled synchronously, before any await');
-  h.release();
-  await Promise.all([first, second]);
+test('in the page, a failure in pass 2 leaves the unsaved banner up', async () => {
+  // Il primo campione della passata 2 fallisce: la passata 1 è già in RAM.
+  // Stick sinistro a ~5% e firmware che non centra mai: la passata 1 non basta.
+  const failSecondPass = ({ op, counts }) => (op === 'sample' && counts.end === 1 ? new Error('device closed') : null);
+  const { h, dev } = await connectedApp({ faults: [failSecondPass], drift: [[6.2, 0.3], [0.2, 0.1]], sf: 0 });
+  // Bias persistente: il centro catturato resta a 5 LSB dal riposo.
+  dev.sticks[0].bias = { axis: 0, B: 5 };
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
 
-  assert.equal(h.calls.flash, 1);
-  assert.equal(h.context.unsaved, false);
-  assert.equal(h.context.busy, false);
+  assert.equal(dev.counts.end, 1);
+  assert.equal(h.peek().unsaved, true);
+  assert.equal(h.visible('banner-unsaved'), true);
+  assert.equal(h.peek().busy, false);
+  const quick = h.sessions().filter(s => s.kind === 'quick').at(-1);
+  assert.equal(quick.aborted, 'error');
+  assert.ok(h.toasts().some(t => t.startsWith('Calibration failed: ')));
+});
+
+test('double-clicking Write runs exactly one flash()', async () => {
+  const { h, dev } = await connectedApp();
+  h.ctx.setUnsaved(true);
+  await h.click('btn-flash');
+  const first = h.click('btn-flash-go');
+  const second = h.click('btn-flash-go');
+  assert.equal(h.$('btn-flash-go').disabled, true, 'disabled synchronously, before any await');
+  await h.run(Promise.all([first, second]));
+
+  const unlocks = dev.commandLog.filter(c => c.id === 0x80 && c.bytes[0] === 3 && c.bytes[1] === 2);
+  assert.equal(unlocks.length, 1);
+  assert.equal(h.peek().unsaved, false);
+  assert.equal(h.peek().busy, false);
 });
 
 test('a second doFlash call while the first is in flight is ignored by the busy guard', async () => {
-  const h = flashHarness();
-  const first = h.context.doFlash();
-  const second = h.context.doFlash();
-  h.release();
-  await Promise.all([first, second]);
-
-  assert.equal(h.calls.flash, 1);
-  assert.deepEqual(h.calls.closed, ['modal-flash']);
+  const { h, dev } = await connectedApp();
+  await h.run(Promise.all([h.ctx.doFlash(), h.ctx.doFlash()]));
+  assert.equal(dev.commandLog.filter(c => c.id === 0x80 && c.bytes[1] === 2).length, 1);
+  assert.equal(h.peek().busy, false);
 });
 
 test('doFlash does nothing while another operation is busy or without a controller', async () => {
-  for (const options of [{ busy: true }, { connected: false }]) {
-    const h = flashHarness(options);
-    h.release();
-    await h.context.doFlash();
-    assert.equal(h.calls.flash, 0, JSON.stringify(options));
-    assert.equal(h.$('btn-flash-go').disabled, false, 'no state change on the ignored call');
-  }
+  const { h, dev } = await connectedApp();
+  h.eval('ops.beginOp()');
+  await h.run(h.ctx.doFlash());
+  assert.equal(h.$('btn-flash-go').disabled, false, 'no state change on the ignored call');
+  h.eval('ops.reset()');
+  await h.run(h.ctx.disconnect());
+  await h.run(h.ctx.doFlash());
+  assert.equal(dev.commandLog.filter(c => c.id === 0x80 && c.bytes[1] === 2).length, 0);
+  assert.equal(h.$('btn-flash-go').disabled, false);
 });
 
 test('the raw NVS status word is logged after flash without gating the outcome', async () => {
-  const h = flashHarness();
-  h.release();
-  await h.click();
+  const { h } = await connectedApp();
+  await h.click('btn-flash');
+  await h.run(h.click('btn-flash-go'));
 
-  assert.ok(h.logs.some(line => /NVS status after flash: locked \(raw 0x03030201\)/.test(line)), h.logs.join('\n'));
-  assert.deepEqual(h.info[0].slice(1), ['locked', '0x03030201']);
+  assert.match(h.$('log').textContent, /NVS status after flash: locked \(raw 0x03030201\)/);
+  const info = h.consoleCalls.find(call => call[1] === '[flash] NVS status after flash:');
+  assert.deepEqual(info.slice(2), ['locked', '0x03030201']);
 });
 
 test('reopening the Write modal re-enables the confirm button', () => {

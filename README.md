@@ -87,7 +87,7 @@ There is no build step and there are no runtime dependencies. Run the automated 
 npm test
 ```
 
-The automated suite checks the telemetry contract and keeps experimental tools out of the public search surface. It does not prove controller behavior. Calibration changes still require a real DualSense connected over USB.
+The automated suite checks the telemetry contract, keeps experimental tools out of the public search surface, and runs the calibration code and the page lifecycle against a simulated controller (`ops/sim/`). A simulated controller is a model, not proof of controller behavior: calibration changes still require a real DualSense connected over USB.
 
 For local work on the experimental tools, add `?preview=1` to the URL.
 
