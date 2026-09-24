@@ -42,12 +42,17 @@ export const STICK_LSB = 1 / 127.5;
 // cosa riportino gli input report a sessione aperta (H0, non ancora misurato).
 // La sola stabilità non basta: una mano ferma sul bordo ha spread 0.
 //
+// `nearRadius`: come `near` + `tol`, ma radiale per stick (distanza euclidea
+// del centro della finestra da `near`, stick sinistro e destro separati). Lo
+// usa l'uscita esplicita del wizard (wizard-gate.js), dove il limite è largo e
+// un limite per asse lascerebbe passare in diagonale √2 volte tanto.
+//
 // `maxRadius`: il centro della finestra, per stick, deve stare entro questo
 // raggio. Non è un confronto tra frame: è un limite di plausibilità assoluto,
 // largo abbastanza (vedi QUICK_DEFAULTS.refRadius) da contenere qualunque
 // posizione di riposo in qualunque frame, e serve solo a non prendere come
 // riferimento in sessione un pollice premuto sul bordo.
-export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT, requireCentered = false, near = null, tol = 4 * STICK_LSB, maxRadius = null, isCancelled = null } = {}) {
+export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT, requireCentered = false, near = null, tol = 4 * STICK_LSB, nearRadius = null, maxRadius = null, isCancelled = null } = {}) {
   return new Promise(resolve => {
     const start = source.now();
     const win = [];
@@ -79,9 +84,12 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
           center[a] = sum / win.length;
         }
         const nearRef = !near || ['lx', 'ly', 'rx', 'ry'].every(a => Math.abs(center[a] - near[a]) <= tol);
+        const withinRadius = !near || nearRadius === null
+          || (Math.hypot(center.lx - near.lx, center.ly - near.ly) <= nearRadius
+            && Math.hypot(center.rx - near.rx, center.ry - near.ry) <= nearRadius);
         const plausible = maxRadius === null
           || (Math.hypot(center.lx, center.ly) <= maxRadius && Math.hypot(center.rx, center.ry) <= maxRadius);
-        if (centered && nearRef && plausible && maxSpread <= spread) return done({ center });
+        if (centered && nearRef && withinRadius && plausible && maxSpread <= spread) return done({ center });
       }
       if (now - start >= timeoutMs) done(false);
     };

@@ -1238,22 +1238,20 @@ function wizardTimeout(w, why) {
 }
 
 // Punto di riposo di riferimento, preso a sessione aperta (stesso frame dei
-// campioni). Con l'uscita esplicita attiva non serve: il controllo di
-// posizione è spento.
+// campioni). Serve anche con l'uscita esplicita: è il centro del raggio largo
+// dell'uscita, che non toglie mai il controllo di posizione.
 async function wizardCaptureRef(w, ensure, isCancelled) {
   const btn = $('btn-wizard-next');
-  if (!w.escaped) {
-    btn.textContent = 'Waiting…';
-    $('wizard-msg').innerHTML = 'Keep your hands off the sticks: measuring where they rest…';
-    const ref = await captureRestReference(stickSource, pageClock, { isCancelled });
-    ensure();
-    if (!ref) {
-      btn.textContent = 'Continue';
-      wizardTimeout(w, 'The sticks did not come to rest.');
-      return;
-    }
-    w.ref = ref;
+  btn.textContent = 'Waiting…';
+  $('wizard-msg').innerHTML = 'Keep your hands off the sticks: measuring where they rest…';
+  const ref = await captureRestReference(stickSource, pageClock, { escaped: w.escaped, isCancelled });
+  ensure();
+  if (!ref) {
+    btn.textContent = 'Continue';
+    wizardTimeout(w, 'The sticks did not come to rest.');
+    return;
   }
+  w.ref = ref;
   w.phase = 'corner';
   w.corner = 0;
   w.step = 1;
@@ -1340,7 +1338,7 @@ function wizardResultHtml(cmp, escaped) {
     tail = '<b>This is worse than before.</b> Don’t write it to memory'
       + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s) to discard it.' : '.');
   } else tail = 'Check the result with the drift test.';
-  const escapedNote = escaped ? '<br>The rest check was off for some samples: the result may be less precise.' : '';
+  const escapedNote = escaped ? '<br>The rest check was looser for some samples: the result may be less precise.' : '';
   return `Center calibration complete.<br>${rows}<br>${tail}${escapedNote}`;
 }
 
@@ -1437,19 +1435,21 @@ async function wizardNext() {
 }
 
 // Uscita esplicita per uno stick che non torna mai allo stesso punto: dopo
-// `escapeAfter` timeout, con conferma, registrata in locale. Spegne il solo
-// controllo di posizione; la finestra stabile resta obbligatoria.
+// `escapeAfter` timeout, con conferma, registrata in locale. Allarga il
+// controllo di posizione a un raggio fisso (WIZARD_DEFAULTS.escapeLsb) attorno
+// al riferimento, senza toglierlo: un pollice fermo sull'angolo o sul bordo
+// resta fuori. La finestra stabile resta obbligatoria.
 function wizardEscape() {
   const w = wizard;
   if (!w || w.escaped || w.running || w.timeouts < WIZARD_DEFAULTS.escapeAfter) return;
-  const go = confirm('Continue without checking that the sticks return to where they started? Use this only if your '
-    + 'stick never settles at the same point. Each sample still waits for the sticks to be still, but the result may '
-    + 'be less precise.');
+  const go = confirm('Continue with a looser check of where the sticks rest? Use this only if your stick never '
+    + 'settles at exactly the same point. Each sample still waits for the sticks to be still and close to where they '
+    + 'rested, so keep your hands off them, but the result may be less precise.');
   if (!go) return;
   w.escaped = true;
   $('btn-wizard-escape').classList.add('hidden');
-  log('Guided calibration: rest-point check turned off at the user’s request (stick does not rest still).');
-  const note = 'Rest check off. <b>Let go of both sticks</b>, then press <b>Continue</b>.';
+  log('Guided calibration: rest-point check loosened at the user’s request (stick does not rest still).');
+  const note = 'Rest check loosened. <b>Let go of both sticks</b>, then press <b>Continue</b>.';
   if (w.phase === 'corner') wizardShowCorner(w.corner, note);
   else $('wizard-msg').innerHTML = note;
 }
@@ -1536,9 +1536,13 @@ function rangeLockMessage(reason) {
   return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration.${off}`;
 }
 
-function setRangeWriteLock(reason) {
+// `key`: il controller a cui il blocco appartiene. finishRange passa la chiave
+// letta PRIMA del rangeEnd: se il controller si stacca mentre il rangeEnd è in
+// volo, teardown ha già azzerato deviceKey, ma il blocco va registrato lo
+// stesso e deve seguire quel controller al ricollegamento.
+function setRangeWriteLock(reason, key = deviceKey) {
   rangeWriteLock = reason;
-  rangeWriteLockKey = reason ? deviceKey : null;
+  rangeWriteLockKey = reason ? key : null;
   const btn = $('btn-flash');
   btn.disabled = !!reason;
   btn.title = reason ? rangeLockMessage(reason) : '';
@@ -1685,23 +1689,38 @@ async function finishRange() {
     ms: Math.round(performance.now() - session.startTs),
   };
   rangeSession = null;
+  // Chiave del controller presa prima di ogni await: se si stacca durante il
+  // rangeEnd, teardown azzera deviceKey, ma il blocco va comunque registrato
+  // per QUESTO controller (è proprio il caso per cui esiste: un rangeEnd
+  // incompleto o dall'esito ignoto seguito da un ricollegamento).
+  const key = deviceKey;
+  // Il blocco si registra anche se il controller non c'è più; se nel frattempo
+  // se n'è collegato un altro, gli si applica la stessa regola del
+  // ricollegamento (decade solo con un seriale noto e diverso).
+  const lockFor = reason => {
+    setRangeWriteLock(reason, key);
+    if (ds5 && ds5 !== controller) reapplyRangeWriteLock(deviceKey);
+  };
   try {
     const { alreadyClosed } = await controller.rangeEnd();
-    // Scollegato durante il rangeEnd: il teardown ha già chiuso tutto.
-    if (ds5 !== controller) return;
-    recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
+    const gone = ds5 !== controller;
     // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla,
     // ma il range in RAM è ignoto.
     if (alreadyClosed) {
-      setRangeWriteLock('closed');
+      lockFor('closed');
+      // Scollegato durante il rangeEnd: teardown ha già chiuso la UI.
+      if (gone) return;
+      recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
       closeModal('modal-range');
       toast('The range session had already closed: nothing was changed. Repeat the range calibration.', 6000);
       log('Range calibration already closed (code 3): nothing committed. Writing to memory disabled.');
       return;
     }
-    setUnsaved(true);
     if (finishAnyway) {
-      setRangeWriteLock('incomplete');
+      lockFor('incomplete');
+      if (gone) return;
+      recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
+      setUnsaved(true);
       closeModal('modal-range');
       toast(`Range applied incomplete. ${rangeLockMessage('incomplete')}`, 8000);
       log('Range calibration finished incomplete: writing to memory disabled.');
@@ -1709,18 +1728,24 @@ async function finishRange() {
       startDriftTest();
       return;
     }
+    // Range completo ma controller già staccato: il blocco (se c'era) resta,
+    // per prudenza; lo toglie solo un range completo visto a controller
+    // collegato.
+    if (gone) return;
+    recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
+    setUnsaved(true);
     // Un range completo sostituisce in RAM quello incompleto: il blocco decade.
     setRangeWriteLock(null);
     log('Range calibration complete.');
     ops.endOp(op);
     startRangeCheck();
   } catch (error) {
-    if (ds5 !== controller) return;
-    // Un rangeEnd partito (o scaduto) può aver committato.
-    if (error.committed) {
-      setUnsaved(true);
-      setRangeWriteLock('error');
-    }
+    const gone = ds5 !== controller;
+    // Un rangeEnd partito (o scaduto) può aver committato. Staccato durante
+    // il rangeEnd, l'esito è ignoto comunque: blocco anche senza `committed`.
+    if (error.committed || gone) lockFor('error');
+    if (gone) return;
+    if (error.committed) setUnsaved(true);
     closeModal('modal-range');
     toast(`Range calibration error: ${error.message}`, 5000);
     log(`Range error: ${error.message}`);

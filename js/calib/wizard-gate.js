@@ -17,8 +17,16 @@
 //      di riferimento;
 //   3. su timeout non si campiona MAI. Nessun rilassamento automatico: dopo
 //      `escapeAfter` timeout la pagina offre un'uscita esplicita (con
-//      conferma, registrata in locale) che toglie il controllo di posizione
-//      e porta il gate di spread a DRIFT_MOVE_SPREAD, senza superarlo.
+//      conferma, registrata in locale) che allarga il controllo di posizione
+//      a un raggio fisso di `escapeLsb` dal riferimento (per stick) e porta
+//      il gate di spread a DRIFT_MOVE_SPREAD, senza superarlo.
+//
+// L'uscita serve a uno stick che striscia (qualche decina di LSB dopo ogni
+// angolo), non a togliere ogni protezione: senza limite di posizione un
+// pollice fermo sull'angolo veniva campionato e portava lo stick oltre il 15%.
+// Il raggio dell'uscita contiene lo strisciamento osservato (~20 LSB) e resta
+// ben sotto un angolo o un pollice appoggiato (oltre ~19% della corsa); non
+// cresce con i timeout e non si allarga da solo.
 //
 // Frame del riferimento: il punto di riposo è la prima finestra stabile presa
 // DOPO calibBegin, come in Quick (WS1). Il piano indicava `wizard.before.xy`,
@@ -36,6 +44,10 @@ export const WIZARD_DEFAULTS = Object.freeze({
   spread: QUICK_STABLE_SPREAD,
   // Uscita esplicita: gate largo quanto la soglia del "movimento", mai oltre.
   escapeSpread: DRIFT_MOVE_SPREAD,
+  // Uscita esplicita: raggio fisso (LSB, per stick) dal riferimento in
+  // sessione. 24 LSB ≈ 18.8% della corsa: largo per uno stick che striscia
+  // (~20 LSB), stretto per un pollice sull'angolo o sul bordo.
+  escapeLsb: 24,
   holdMs: 300,
   timeoutMs: 5000,
   tolLsb: 4,
@@ -105,26 +117,31 @@ export function createCornerTracker(corner) {
 }
 
 // Opzioni di waitForStable per un campione. Con l'uscita esplicita (escaped)
-// cade il controllo di posizione e il gate sale a escapeSpread, ma serve
-// comunque una finestra stabile: mai un campione su timeout.
+// il controllo di posizione non cade: diventa un raggio fisso di escapeLsb dal
+// riferimento (mai meno della tolleranza normale), e il gate sale a
+// escapeSpread. Serve comunque una finestra stabile: mai un campione su timeout.
 export function sampleGateOptions({ ref, tol, escaped = false, params = {}, isCancelled = null } = {}) {
   const p = wizardParams(params);
+  const escapeRadius = Math.max(p.escapeLsb * STICK_LSB, tol ?? 0);
   return {
     spread: escaped ? p.escapeSpread : p.spread,
     holdMs: p.holdMs,
     timeoutMs: p.timeoutMs,
-    near: escaped ? null : ref,
-    tol,
+    near: ref,
+    tol: escaped ? escapeRadius : tol,
+    nearRadius: escaped ? escapeRadius : null,
     isCancelled,
   };
 }
 
 // Attesa del riferimento in sessione (subito dopo calibBegin): finestra
 // stabile con entrambi gli stick entro refRadius. Ritorna il centro o null.
-export async function captureRestReference(source, clock, { params = {}, isCancelled = null } = {}) {
+// Con l'uscita esplicita il gate di spread è escapeSpread, ma il riferimento
+// serve comunque: è il centro del raggio dell'uscita.
+export async function captureRestReference(source, clock, { escaped = false, params = {}, isCancelled = null } = {}) {
   const p = wizardParams(params);
   const stable = await waitForStable(source, clock, {
-    spread: p.spread, holdMs: p.holdMs, timeoutMs: p.timeoutMs, maxRadius: p.refRadius, isCancelled,
+    spread: escaped ? p.escapeSpread : p.spread, holdMs: p.holdMs, timeoutMs: p.timeoutMs, maxRadius: p.refRadius, isCancelled,
   });
   return stable && typeof stable === 'object' ? stable.center : null;
 }
@@ -135,8 +152,11 @@ export async function captureRestReference(source, clock, { params = {}, isCance
 //                                      l'angolo non è stato raggiunto: nessuna attesa
 //   → { ok: false, reason: 'timeout' } stick non fermi o lontani dal riposo
 //   → { ok: false, reason: 'cancelled' }
+// Senza riferimento non si campiona mai (nemmeno con l'uscita): il controllo
+// di posizione non ha un centro.
 export async function gateWizardSample(source, clock, { tracker, ref, tol, escaped = false, params = {}, isCancelled = null } = {}) {
   const p = wizardParams(params);
+  if (!ref) return { ok: false, reason: 'timeout' };
   if (tracker) {
     const missing = tracker.missing(p.cornerDot);
     if (missing.length) return { ok: false, reason: 'corner', missing };

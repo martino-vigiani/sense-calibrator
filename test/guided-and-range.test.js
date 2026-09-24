@@ -149,7 +149,7 @@ test('a creeping stick finishes only through the confirmed escape', async () => 
   const ev = h.sessions().filter(s => s.kind === 'wizard').at(-1);
   assert.equal(ev.escaped, true);
   assert.ok(ev.timeouts >= 2);
-  assert.match(h.$('wizard-msg').innerHTML, /rest check was off/);
+  assert.match(h.$('wizard-msg').innerHTML, /rest check was looser/);
 });
 
 test('a calibBegin repair that committed keeps unsaved raised when a later step fails', async () => {
@@ -410,4 +410,127 @@ test('no copy presents a reconnect as a way to re-enable Write', async () => {
   for (const text of [lockCopy, confirmCopy]) {
     assert.doesNotMatch(text, /reconnect|unplug|replug/i);
   }
+});
+
+// Stacco mentre il rangeEnd di "Finish anyway" è in volo: il blocco va
+// registrato per quel controller anche se teardown è già passato (deviceKey
+// azzerato), e il ricollegamento dello stesso controller non riabilita Write.
+//   late    → il rangeEnd risponde dopo il teardown (riuscito, range incompleto)
+//   stall   → nessuna risposta: timeout HID (1 s), error.committed
+//   unplug  → cavo staccato dopo l'invio: il receive fallisce, error.committed
+async function finishAnywayThenUnplug({ serial = null, backSerial = serial, mode }) {
+  const { h, clock, A } = await setup();
+  let dev = A;
+  if (serial) {
+    A.unplug();
+    h.hid.fire('disconnect', A);
+    dev = withSerial(makeDevice(clock, { seed: 31 }), serial);
+    h.hid.fire('connect', dev);
+    await h.advance(2000);
+    assert.equal(h.peek().ds5.device, dev);
+  }
+  await h.run(h.click('btn-range'));
+  const end = rotate(h, dev, { turns: 1 });
+  await h.advance(end - h.clock.now() + 15_500);
+  assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
+  assert.equal(h.peek().rangeWriteLock, null);
+
+  const isRangeEnd = (id, buf) => id === 0x82 && buf[2] === 2 && buf[0] === 2;
+  const unplugNow = () => { dev.unplug(); h.hid.fire('disconnect', dev); };
+  const send = dev.sendFeatureReport.bind(dev);
+  const recv = dev.receiveFeatureReport.bind(dev);
+  let rangeEndSent = false;
+  dev.sendFeatureReport = (id, buf) => {
+    if (!isRangeEnd(id, buf)) return send(id, buf);
+    rangeEndSent = true;
+    if (mode === 'stall') { dev.counts.range += 1; return new Promise(() => {}); }
+    const p = send(id, buf);
+    return mode === 'unplug' ? p.then(() => unplugNow()) : p;
+  };
+  if (mode === 'late') {
+    dev.receiveFeatureReport = id => {
+      const p = recv(id);
+      return rangeEndSent ? new Promise(r => clock.setTimeout(() => r(p), 500)) : p;
+    };
+  }
+  h.confirmAnswer = true;
+  const done = h.click('btn-range-done');
+  await h.advance(100);
+  assert.ok(rangeEndSent, 'rangeEnd went out');
+  if (mode !== 'unplug') {
+    assert.ok(h.peek().ds5, 'rangeEnd still in flight');
+    // late: il cavo resta (il receive risponde comunque); stall: staccato
+    if (mode === 'stall') dev.unplug();
+    h.hid.fire('disconnect', dev);
+  }
+  assert.equal(h.peek().ds5, null, 'teardown ran while rangeEnd was pending');
+  await h.run(done);
+  await h.advance(1500);
+
+  const back = makeDevice(clock, { seed: 32 });
+  if (backSerial) withSerial(back, backSerial);
+  h.hid.fire('connect', back);
+  await h.advance(2000);
+  assert.equal(h.peek().ds5.device, back);
+  return { h, back };
+}
+
+for (const { mode, reason } of [
+  { mode: 'late', reason: 'incomplete' },
+  { mode: 'stall', reason: 'error' },
+  { mode: 'unplug', reason: 'error' },
+]) {
+  for (const serial of ['E8475C3A1B2F', null]) {
+    test(`Finish anyway, unplug while rangeEnd is in flight (${mode}, ${serial ? 'same serial' : 'no serial'}): the replugged controller cannot write`, async () => {
+      const { h, back } = await finishAnywayThenUnplug({ serial, mode });
+      assert.equal(h.peek().rangeWriteLock, reason);
+      assert.equal(h.$('btn-flash').disabled, true);
+      assert.ok(h.toasts().some(t => /may still have the incomplete range calibration/.test(t)));
+      const nvs = back.counts.nvs;
+      await h.run(h.ctx.doFlash());
+      assert.equal(back.counts.nvs, nvs, 'no NVS command after the replug');
+    });
+  }
+}
+
+test('the lock set after an unplug is keyed to the unplugged controller: a different known one does not inherit it', async () => {
+  // la chiave è quella letta prima del rangeEnd, non il deviceKey (già
+  // azzerato da teardown) né quella del controller che si collega dopo
+  const { h } = await finishAnywayThenUnplug({ serial: 'E8475C3A1B2F', backSerial: 'A1B2C3D4E5F6', mode: 'late' });
+  assert.equal(h.peek().rangeWriteLock, null);
+  assert.equal(h.$('btn-flash').disabled, false);
+});
+
+// Riproduzione della revisione: uscita confermata, pollice fermo sull'angolo
+// al Continue → nessun campione; lasciato lo stick → campione. Lo stick
+// pulito resta pulito.
+test('with the escape confirmed, a thumb held still at the corner is never sampled', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  await moveToCorner(h, A, CORNERS[0]);
+  // pollice sinistro fermo sull'angolo (lx≈-0.66, ly≈-0.67)
+  const thumb = touch(A, { stick: 0, t0: h.clock.now(), dur: 600_000, amp: [-84, -85] });
+  await h.advance(100);
+  await h.run(h.click('btn-wizard-next'));
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.peek().wizard.timeouts, 2);
+  assert.equal(h.visible('btn-wizard-escape'), true);
+  let asked = '';
+  h.window.confirm = msg => { asked = msg; return true; };
+  await h.click('btn-wizard-escape');
+  assert.equal(h.peek().wizard.escaped, true);
+  assert.match(asked, /still waits for the sticks to be still and close to where they rested/);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 0, 'no sample with a thumb held at the corner, escape or not');
+  release(h, thumb);
+  await h.advance(300);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 1);
+  for (const c of CORNERS.slice(1)) {
+    await moveToCorner(h, A, c);
+    await h.run(h.click('btn-wizard-next'));
+  }
+  assert.deepEqual([A.counts.sample, A.counts.end], [4, 1]);
+  const cmp = h.peek().lastWizardComparison;
+  assert.ok(cmp.measured && cmp.afterWorst < 2, `after ${cmp.afterWorst}%`);
 });

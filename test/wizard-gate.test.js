@@ -112,7 +112,8 @@ test('a creeping stick passes only through the explicit escape', async () => {
 test('the escape keeps a stable window mandatory and the gate at most DRIFT_MOVE_SPREAD', async () => {
   const opts = sampleGateOptions({ ref: REST, tol: 0.03, escaped: true });
   assert.equal(opts.spread, DRIFT_MOVE_SPREAD);
-  assert.equal(opts.near, null);
+  assert.equal(opts.near, REST, 'the escape keeps the position check');
+  assert.equal(opts.nearRadius, WIZARD_DEFAULTS.escapeLsb * STICK_LSB);
   assert.equal(sampleGateOptions({ ref: REST, tol: 0.03 }).spread, WIZARD_DEFAULTS.spread);
   assert.ok(WIZARD_DEFAULTS.spread <= DRIFT_MOVE_SPREAD && WIZARD_DEFAULTS.escapeSpread <= DRIFT_MOVE_SPREAD);
   // una mano che muove lo stick (±6%, 5 Hz) non viene campionata nemmeno con l'uscita
@@ -120,6 +121,51 @@ test('the escape keeps a stable window mandatory and the gate at most DRIFT_MOVE
   const source = scriptedSource(at);
   const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 0.03, escaped: true }));
   assert.equal(r.reason, 'timeout');
+});
+
+test('the escape keeps a fixed position bound: a thumb held still at a corner or at ~20% is never sampled', async () => {
+  // 24 LSB ≈ 18.8%: largo per uno stick che striscia, stretto per una mano ferma
+  assert.ok(WIZARD_DEFAULTS.escapeLsb >= 20 && WIZARD_DEFAULTS.escapeLsb * STICK_LSB < 0.2);
+  const held = [
+    { ...REST, lx: -0.66, ly: -0.67 }, // pollice fermo sull'angolo
+    { ...REST, rx: REST.rx + 0.2 }, // pollice al 20% su un asse
+    // diagonale: 18 LSB per asse (25 LSB radiali) passerebbe un limite per asse
+    { ...REST, lx: REST.lx + 18 * STICK_LSB, ly: REST.ly + 18 * STICK_LSB },
+  ];
+  for (const pos of held) {
+    const at = () => pos;
+    const source = scriptedSource(at);
+    const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB, escaped: true }));
+    assert.deepEqual(r, { ok: false, reason: 'timeout' }, JSON.stringify(pos));
+  }
+  // lasciato lo stick, lo stesso passo campiona
+  const at = () => ({ ...REST, lx: REST.lx + 12 * STICK_LSB });
+  const source = scriptedSource(at);
+  const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB, escaped: true }));
+  assert.equal(r.ok, true);
+});
+
+test('no reference, no sample: not even with the escape', async () => {
+  const at = () => REST;
+  const source = scriptedSource(at);
+  for (const escaped of [false, true]) {
+    const r = await gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: null, tol: 4 * STICK_LSB, escaped });
+    assert.deepEqual(r, { ok: false, reason: 'timeout' });
+  }
+  assert.equal(source.listeners.size, 0);
+});
+
+test('with the escape the reference is still captured, with the wider spread gate and within 50%', async () => {
+  // rumore ±5% a 5 Hz: oltre QUICK_STABLE_SPREAD, sotto DRIFT_MOVE_SPREAD
+  let at = t => ({ ...REST, lx: REST.lx + 0.025 * Math.sin(2 * Math.PI * t / 200) });
+  let source = scriptedSource(at);
+  assert.equal(await drive(source, at, captureRestReference(source, idleClock)), null);
+  source = scriptedSource(at);
+  const ref = await drive(source, at, captureRestReference(source, idleClock, { escaped: true }));
+  assert.ok(ref && Math.abs(ref.lx - REST.lx) < 0.02);
+  at = () => ({ ...REST, lx: -0.66, ly: -0.67 });
+  source = scriptedSource(at);
+  assert.equal(await drive(source, at, captureRestReference(source, idleClock, { escaped: true })), null);
 });
 
 test('the in-session reference is a stable window within 50%, never a thumb on the rim', async () => {
