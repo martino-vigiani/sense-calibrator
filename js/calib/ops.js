@@ -5,35 +5,44 @@
 // scollegato) apre un'epoca nuova, e ogni `beginOp()` restituisce un token con
 // l'epoca in cui è partita.
 //
-// Semantica di OGGI, invariata: `endOp` libera sempre il flag, anche se il
-// token appartiene a un'epoca chiusa. È esattamente il difetto noto per cui un
-// ciclo di calibrazione orfano (controller scollegato a metà) può liberare il
-// `busy` di un'operazione nuova. Il token serve già a riconoscerlo
-// (`endOp` restituisce false per un token scaduto) ma nessuno lo fa ancora
-// valere: il passo successivo è ignorare i token scaduti, senza cambiare API.
+// `endOp` con un token di un'epoca chiusa non tocca il flag: un ciclo di
+// calibrazione orfano (controller scollegato a metà, `teardown` ha già fatto
+// `reset()`) esce più tardi dal suo finally, e prima liberava il `busy` di
+// un'operazione nuova partita nel frattempo sul controller ricollegato.
+// Restituisce false per il token scaduto, così chi chiama può saperlo.
 //
 // Il flag va alzato PRIMA di qualunque await lungo, non dopo: la finestra tra
 // il click e l'alzata basta ad avviare una seconda operazione.
+//
+// Il flag appartiene all'ULTIMO token emesso: anche nella stessa epoca, un
+// token vecchio (un'operazione già chiusa che ripassa da un catch) non può
+// liberare quello di un'operazione successiva.
 export function createOpGate() {
   let busy = false;
   let epoch = 0;
+  let owner = null;
   return {
     get busy() { return busy; },
     get epoch() { return epoch; },
     beginOp() {
       busy = true;
-      return { epoch };
+      owner = { epoch };
+      return owner;
     },
-    // Ritorna true se il token era dell'epoca corrente.
+    // Ritorna true se il token possedeva il flag (e l'ha liberato); un token
+    // scaduto, già usato o assente non cambia nulla.
     endOp(token) {
+      if (!token || token !== owner || token.epoch !== epoch) return false;
       busy = false;
-      return token?.epoch === epoch;
+      owner = null;
+      return true;
     },
     isCurrent(token) {
       return token?.epoch === epoch;
     },
     reset() {
       busy = false;
+      owner = null;
       epoch += 1;
     },
   };

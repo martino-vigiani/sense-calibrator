@@ -1,12 +1,12 @@
 'use strict';
 
-import { DS5, HID_FILTERS } from './ds5.js';
+import { DS5, HID_FILTERS, NV_UNKNOWN_MESSAGE, POISONED_MESSAGE, isOldFirmware, parseBuildDate } from './ds5.js';
 import { initGame } from './game.js';
 import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
 import {
-  DRIFT_MAX_RETRIES, DRIFT_MILD_MAX, DRIFT_MIN_STABLE, DRIFT_OK_MAX, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS,
+  DRIFT_MAX_RETRIES, DRIFT_MILD_MAX, DRIFT_MIN_STABLE, DRIFT_OK_MAX, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
 } from './calib/measure.js';
 import { measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
@@ -325,14 +325,61 @@ if (btnCopyLink) {
   });
 }
 
+const NV_CHIP_TITLE = 'State of the controller\'s non-volatile memory';
+const NV_UNLOCKED_MESSAGE = 'Memory unlocked: changes may be permanent. Restart the controller.';
+const NV_UNKNOWN_STATE_MESSAGE = 'The controller did not report its memory state. Calibration is allowed, but changes may not be temporary.';
+const NV_PENDING_MESSAGE = 'The controller has a save pending: restart it (Restart button) before calibrating.';
+
+// Stato della memoria letto alla connessione (e dopo ogni flash). Solo lettura:
+// alla connessione non si scrive nulla, nemmeno il lock automatico di upstream
+// (rimandato finché la verifica hardware H3 non lo giustifica).
+let nvStatus = null;
+
 function setNvChip(nv) {
   const el = $('chip-nvs');
   el.classList.remove('hidden', 'chip-warn', 'chip-on');
+  el.title = NV_CHIP_TITLE;
   if (!nv) { el.classList.add('hidden'); return; }
   if (nv.status === 'locked') { el.textContent = 'NVS protected'; el.classList.add('chip-on'); }
-  else if (nv.status === 'unlocked') { el.textContent = 'NVS unlocked'; el.classList.add('chip-warn'); }
-  else if (nv.status === 'pending_reboot') { el.textContent = 'Restart required'; el.classList.add('chip-warn'); }
-  else el.textContent = 'NVS ?';
+  else if (nv.status === 'unlocked') {
+    el.textContent = 'Memory unlocked';
+    el.title = NV_UNLOCKED_MESSAGE;
+    el.classList.add('chip-warn');
+  } else if (nv.status === 'pending_reboot') {
+    el.textContent = 'Restart required';
+    el.title = NV_PENDING_MESSAGE;
+    el.classList.add('chip-warn');
+  } else if (nv.status === 'poisoned') {
+    el.textContent = 'Not responding';
+    el.title = POISONED_MESSAGE;
+    el.classList.add('chip-warn');
+  } else {
+    el.textContent = 'Memory state unknown';
+    el.title = NV_UNKNOWN_STATE_MESSAGE;
+    el.classList.add('chip-warn');
+  }
+}
+
+// Firmware 2020–2021: avviso con conferma, una volta per connessione. Upstream
+// li blocca; i nostri dati non mostrano fallimenti, quindi non si blocca (C2-10).
+let oldFirmwareAck = false;
+
+// Gate comune prima di aprire Quick, Guided o Range. Blocca SOLO su stati
+// confermati: memoria sbloccata (ogni calibrazione "temporanea" potrebbe finire
+// dritta in NVS) o controller avvelenato da un timeout. `unknown`/`error`
+// mostrano l'avviso nel chip ma lasciano calibrare (C2-19).
+function calibrationAllowed() {
+  if (!ds5 || ops.busy) return false;
+  if (ds5.poisoned) { toast(POISONED_MESSAGE, 7000); return false; }
+  if (nvStatus === 'unlocked') { toast(NV_UNLOCKED_MESSAGE, 7000); return false; }
+  if (!oldFirmwareAck && isOldFirmware(deviceInfo?.buildDate)) {
+    const year = parseBuildDate(deviceInfo.buildDate).year;
+    const go = confirm(`This controller runs firmware built in ${year}. Calibration has not been verified on firmware this old; `
+      + 'updating it from a PS5 first is safer. Continue anyway?');
+    if (!go) return false;
+    oldFirmwareAck = true;
+  }
+  return true;
 }
 
 function setBatteryChip() {
@@ -343,60 +390,129 @@ function setBatteryChip() {
 }
 
 async function refreshNv() {
-  if (!ds5) return;
-  const nv = await ds5.queryNvStatus();
-  setNvChip(nv);
+  const controller = ds5;
+  if (!controller) return;
+  const nv = await controller.queryNvStatus();
+  // Il controller può essere cambiato durante l'attesa: il chip è del nuovo.
+  if (ds5 !== controller) return nv;
+  nvStatus = nv.status;
+  setNvChip(controller.poisoned ? { status: 'poisoned' } : nv);
   return nv;
 }
+
+// Il DS5 ha smesso di rispondere (timeout): nessun altro comando su questa
+// connessione. Se il comando appeso era un commit la RAM (o la NVS) può essere
+// cambiata, quindi lo stato "non salvato" si alza per prudenza.
+let flashing = false;
+function onControllerPoisoned(controller, error) {
+  if (ds5 !== controller) return;
+  if (error.committed) setUnsaved(true);
+  setNvChip({ status: 'poisoned' });
+  log(`Controller not responding: ${error.message}.`);
+  // Durante il flash il messaggio giusto è quello sullo stato della memoria,
+  // mostrato da doFlash.
+  if (!flashing) toast(POISONED_MESSAGE, 8000);
+}
+
+const CONNECT_LABEL = 'Connect DualSense';
+function setConnecting(on) {
+  const btn = $('btn-connect');
+  if (!btn || !navigator.hid) return;
+  btn.disabled = on;
+  btn.textContent = on ? 'Connecting…' : CONNECT_LABEL;
+}
+
+const isDualSense = device => device?.vendorId === 0x054c && device?.productId === 0x0ce6;
+const isUsbDevice = device => !new DS5(device).isBluetooth();
 
 async function connect() {
   if (!navigator.hid) {
     showHeroError('<b>WebHID not available.</b> Use Chrome or Edge: Safari and Firefox don’t support access to HID devices.');
     return;
   }
+  if (adopting) return;
   try {
     const devices = await navigator.hid.requestDevice({ filters: HID_FILTERS });
     if (devices.length === 0) return;
-    await adopt(devices[0]);
+    await adopt(devices.find(isUsbDevice) ?? devices[0]);
   } catch (error) {
     showHeroError(`<b>Connection failed.</b> ${esc(error.message || error)}`);
     log(`Connection error: ${error.message || error}`);
   }
 }
 
+// Un solo adopt alla volta: auto-connessione al boot, evento `connect` e click
+// su Connect arrivavano tutti qui, e due adopt paralleli producevano due eventi
+// connect e due catene di test drift. `aborted` lo alza la disconnessione del
+// dispositivo in corso di adozione, anche prima che diventi `ds5`.
+let adopting = null; // { device, aborted }
+let autoDriftTimer = null;
+
 async function adopt(device) {
-  if (!device.opened) await device.open();
-  const candidate = new DS5(device, log);
+  if (adopting || (ds5 && ds5.device === device)) return;
+  const attempt = { device, aborted: false };
+  adopting = attempt;
+  setConnecting(true);
+  try {
+    if (!device.opened) await device.open();
+    if (attempt.aborted) return;
+    const candidate = new DS5(device, log, {
+      timers: pageClock,
+      onPoison: error => onControllerPoisoned(candidate, error),
+    });
 
-  if (candidate.isBluetooth()) {
-    await candidate.close();
-    showHeroError('<b>Controller on Bluetooth.</b> Calibration requires a <b>USB cable</b> connection: plug it in and try again.');
-    return;
+    if (candidate.isBluetooth()) {
+      await candidate.close();
+      showHeroError('<b>Controller on Bluetooth.</b> Calibration requires a <b>USB cable</b> connection: plug it in and try again.');
+      return;
+    }
+
+    ds5 = candidate;
+    oldFirmwareAck = false;
+    log(`Connected: ${device.productName}`);
+    setConnChip(true);
+
+    device.oninputreport = onInputReport;
+
+    // Info dispositivo e stato NVS: solo letture. Dopo ogni await il
+    // controller può essere stato scollegato (teardown ha già mostrato la
+    // hero): allora questo adopt non tocca più nulla.
+    const info = await candidate.getInfo();
+    if (ds5 !== candidate) return;
+    deviceInfo = info;
+    renderDeviceInfo(info);
+    const nv = await refreshNv();
+    if (ds5 !== candidate) return;
+
+    $('view-hero').classList.add('hidden');
+    $('view-device').classList.remove('hidden');
+    $('hero-error').classList.add('hidden');
+
+    recordEvent('connect', {
+      color: info.color ?? null,
+      build: info.buildDate ?? null,
+    });
+
+    if (nv?.status === 'unlocked') {
+      log(NV_UNLOCKED_MESSAGE);
+      toast(NV_UNLOCKED_MESSAGE, 8000);
+    } else if (nv?.status === 'pending_reboot') {
+      toast(NV_PENDING_MESSAGE, 6000);
+    } else if (nv?.status !== 'locked') {
+      log(`NVS status: ${nv?.status ?? 'n/a'}. ${NV_UNKNOWN_STATE_MESSAGE}`);
+    }
+    if (isOldFirmware(info.buildDate)) log(`Old firmware (${info.buildDate}): calibration will ask for confirmation.`);
+
+    // test drift automatico dopo un breve assestamento; il timer è di questa
+    // connessione e teardown lo cancella.
+    autoDriftTimer = setTimeout(() => {
+      autoDriftTimer = null;
+      if (ds5 === candidate) startDriftTest(true);
+    }, 900);
+  } finally {
+    if (adopting === attempt) adopting = null;
+    setConnecting(false);
   }
-
-  ds5 = candidate;
-  log(`Connected: ${device.productName}`);
-  setConnChip(true);
-
-  device.oninputreport = onInputReport;
-
-  // info dispositivo (non bloccanti)
-  const info = await ds5.getInfo();
-  deviceInfo = info;
-  renderDeviceInfo(info);
-  await refreshNv();
-
-  $('view-hero').classList.add('hidden');
-  $('view-device').classList.remove('hidden');
-  $('hero-error').classList.add('hidden');
-
-  recordEvent('connect', {
-    color: info.color ?? null,
-    build: info.buildDate ?? null,
-  });
-
-  // test drift automatico dopo un breve assestamento
-  setTimeout(() => startDriftTest(true), 900);
 }
 
 function renderDeviceInfo(info) {
@@ -415,8 +531,23 @@ function teardown(message = null) {
   ds5 = null;
   battery = null;
   deviceInfo = null;
+  nvStatus = null;
+  oldFirmwareAck = false;
   rangeSession = null;
+  if (adopting) adopting.aborted = true;
+  clearTimeout(autoDriftTimer);
+  autoDriftTimer = null;
+  stopDriftLoop();
   driftTest = null;
+  // Stato per dispositivo: niente deve sopravvivere al controller che l'ha
+  // prodotto (i quadranti disegnavano l'ultima posizione, il verdetto drift
+  // del vecchio controller veniva confrontato col nuovo).
+  sticks = { lx: 0, ly: 0, rx: 0, ry: 0 };
+  wizard = null;
+  quickPreflightBlocked = false;
+  lastDriftResult = null;
+  lastBattery = 0;
+  modalReturnFocus.clear();
   ops.reset();
   setConnChip(false);
   setNvChip(null);
@@ -500,8 +631,23 @@ function onInputReport(event) {
 
 let driftTest = null;
 
+// Il completamento del test è guidato dagli input report HID (driftSample),
+// non da rAF: Chrome sospende rAF nelle tab nascoste mentre i report continuano
+// ad arrivare, e il "test da 3 s" finiva per analizzare minuti di campioni.
+// rAF resta solo per la barra e per il caso "nessun report" (controller muto).
+const DRIFT_EXPECTED_SAMPLES = Math.round(DRIFT_TEST_MS / 4); // ~250 Hz
+const DRIFT_SAMPLE_CAP = 3 * DRIFT_EXPECTED_SAMPLES;
+const DRIFT_NO_DATA_GRACE_MS = 1000;
+let driftRaf = 0;
+
+function stopDriftLoop() {
+  if (driftRaf) cancelAnimationFrame(driftRaf);
+  driftRaf = 0;
+}
+
 function cancelDriftTest() {
   if (!driftTest) return;
+  stopDriftLoop();
   driftTest = null;
   $('drift-card').dataset.state = 'idle';
   $('drift-progress').classList.add('hidden');
@@ -510,6 +656,9 @@ function cancelDriftTest() {
 
 function startDriftTest(auto = false) {
   if (!ds5 || ops.busy) return;
+  // Un test già in corso (doppio "Run again", timer automatico) si annulla:
+  // due catene rAF sullo stesso `driftTest` sono il difetto di prima.
+  cancelDriftTest();
   driftTest = {
     samples: [],
     deadline: performance.now() + DRIFT_TEST_MS,
@@ -522,25 +671,35 @@ function startDriftTest(auto = false) {
   $('drift-progress').classList.remove('hidden');
   $('verdict-l').classList.add('hidden');
   $('verdict-r').classList.add('hidden');
-  driftTick();
+  driftRaf = requestAnimationFrame(driftTick);
 }
 
 function driftSample() {
-  driftTest.samples.push({ ...sticks });
+  const test = driftTest;
+  test.samples.push({ ...sticks });
+  // Tetto a 3× il previsto: con un controller più veloce del previsto il test
+  // si chiude prima, ma memoria e calcolo restano limitati in ogni caso.
+  if (performance.now() >= test.deadline || test.samples.length >= DRIFT_SAMPLE_CAP) evaluateDriftTest();
 }
 
+// Solo barra di avanzamento e guardia "nessun dato": la fine del test arriva
+// dal primo report dopo la scadenza.
 function driftTick() {
+  driftRaf = 0;
   if (!driftTest) return;
   const now = performance.now();
   const remaining = Math.max(0, driftTest.deadline - now);
   const pct = 100 - (remaining / DRIFT_TEST_MS) * 100;
   $('drift-progress').querySelector('i').style.width = pct + '%';
-
-  if (remaining > 0) {
-    requestAnimationFrame(driftTick);
+  if (now >= driftTest.deadline + DRIFT_NO_DATA_GRACE_MS) {
+    // nessun input report oltre la scadenza: il controller è muto
+    evaluateDriftTest();
     return;
   }
+  driftRaf = requestAnimationFrame(driftTick);
+}
 
+function evaluateDriftTest() {
   if (driftTest.samples.length <= 50) {
     // nessun input report: probabile problema di collegamento
     finishDriftTest(null);
@@ -553,7 +712,8 @@ function driftTick() {
     ? driftTest.samples.slice(DRIFT_SETTLE_SAMPLES)
     : driftTest.samples;
 
-  const { stable, fraction } = extractStableSamples(usable);
+  // Finestra di DRIFT_WINDOW campioni esatti (prima erano 31).
+  const { stable, fraction } = extractStableSamples(usable, DRIFT_WINDOW);
 
   if (fraction < DRIFT_MIN_STABLE) {
     if (driftTest.retries < DRIFT_MAX_RETRIES) {
@@ -561,7 +721,7 @@ function driftTick() {
       driftTest.samples = [];
       driftTest.deadline = performance.now() + DRIFT_TEST_MS;
       $('drift-status').textContent = 'Movement detected. Retrying: don’t touch the sticks…';
-      requestAnimationFrame(driftTick);
+      if (!driftRaf) driftRaf = requestAnimationFrame(driftTick);
       return;
     }
     // Segnale in movimento continuo anche dopo i tentativi: diagnosi, non errore.
@@ -578,6 +738,7 @@ let lastDriftResult = null;
 
 function finishDriftTest(result) {
   const auto = driftTest?.auto === true;
+  stopDriftLoop();
   driftTest = null;
   const card = $('drift-card');
   card.dataset.state = 'idle';
@@ -638,18 +799,28 @@ async function doFlash() {
   // attivo solo alla prossima apertura del modale, non nel finally: durante
   // l'animazione di chiusura sarebbe di nuovo cliccabile.
   if (!ds5 || ops.busy) return;
+  const controller = ds5;
   $('btn-flash-go').disabled = true;
   const op = ops.beginOp();
   closeModal('modal-flash');
+  flashing = true;
   try {
-    await ds5.flash();
+    await controller.flash();
     const nv = await refreshNv();
-    // Parola di stato grezza della NVS dopo il flash (verifica hardware H1):
-    // l'insieme degli stati "riuscito" non è ancora misurato, quindi qui si
-    // registra soltanto, senza decidere nulla sull'esito.
+    // Parola di stato grezza della NVS dopo il flash (verifica hardware H1).
+    // Finché H1 non misura l'insieme degli stati "riuscito", la regola della
+    // release 1 è: nessuna eccezione e stato ≠ `unlocked`. Una NVS rimasta
+    // aperta non è un salvataggio riuscito: ogni calibrazione successiva
+    // finirebbe dritta in memoria, quindi `unsaved` resta alzato.
     const raw = typeof nv?.raw === 'number' ? `0x${nv.raw.toString(16).padStart(8, '0')}` : 'n/a';
     console.info('[flash] NVS status after flash:', nv?.status ?? null, raw);
     log(`NVS status after flash: ${nv?.status ?? 'n/a'} (raw ${raw}).`);
+    if (nv?.status === 'unlocked') {
+      recordEvent('flash', { ok: false, nv: nv.status });
+      toast(`Save not confirmed: ${NV_UNLOCKED_MESSAGE}`, 8000);
+      log('Flash not confirmed: NVS still unlocked.');
+      return;
+    }
     recordEvent('flash', { ok: true, nv: nv?.status ?? null });
     setUnsaved(false);
     if (nv?.status === 'pending_reboot') {
@@ -659,10 +830,15 @@ async function doFlash() {
     }
     log('Flash complete.');
   } catch (error) {
-    recordEvent('flash', { ok: false, err: String(error.message || error).slice(0, 120) });
-    toast(`Error while saving: ${error.message}`, 5000);
+    // Anche qui si rilegge lo stato: un unlock riuscito seguito da un lock
+    // fallito lascia la NVS aperta, e il chip deve dirlo (e bloccare Quick).
+    const nv = await refreshNv();
+    recordEvent('flash', { ok: false, nv: nv?.status ?? null, err: String(error.message || error).slice(0, 120) });
+    if (error.nvUnknown) toast(NV_UNKNOWN_MESSAGE, 8000);
+    else toast(`Error while saving: ${error.message}`, 5000);
     log(`Flash error: ${error.message}`);
   } finally {
+    flashing = false;
     ops.endOp(op);
   }
 }
@@ -688,16 +864,55 @@ const CALIB_STORE_KEY      = 'sense-calib-sessions';
 const TELEMETRY_CONSENT_KEY = 'sense-telemetry-consent';
 const TELEMETRY_NOTICE_KEY = 'sense-telemetry-notice';
 
+// Solo un SecurityError (storage negato dal browser) spegne lo storage per la
+// pagina. Prima lo spegneva qualunque eccezione, anche la quota piena: da lì
+// `telemetryEnabled()` tornava false e chi aveva scelto di condividere smetteva
+// in silenzio, con la casella del consenso ancora spuntata.
 let storageAvailable = true;
+const STORE_TRIM_ON_QUOTA = 50;
+const isSecurityError = error => error?.name === 'SecurityError';
+const isQuotaError = error => error?.name === 'QuotaExceededError'
+  || error?.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error?.code === 22 || error?.code === 1014;
+
 function storageRead(key, fallback = null) {
   if (!storageAvailable) return fallback;
   try { return localStorage.getItem(key) ?? fallback; }
-  catch (_) { storageAvailable = false; return fallback; }
+  catch (error) {
+    if (isSecurityError(error)) storageAvailable = false;
+    return fallback;
+  }
 }
+
+// Ultime STORE_TRIM_ON_QUOTA sessioni locali, o un array vuoto se il valore
+// salvato non è un array leggibile.
+function trimmedSessions(json) {
+  try {
+    const arr = JSON.parse(json ?? '[]');
+    return JSON.stringify(Array.isArray(arr) ? arr.slice(-STORE_TRIM_ON_QUOTA) : []);
+  } catch { return '[]'; }
+}
+
 function storageWrite(key, value) {
   if (!storageAvailable) return false;
   try { localStorage.setItem(key, value); return true; }
-  catch (_) { storageAvailable = false; return false; }
+  catch (error) {
+    if (isSecurityError(error)) { storageAvailable = false; return false; }
+    if (!isQuotaError(error)) return false;
+  }
+  // Quota piena: si sacrifica lo storico locale delle sessioni (la voce più
+  // grande), mai il consenso, e si riprova una volta.
+  try {
+    if (key === CALIB_STORE_KEY) {
+      localStorage.setItem(key, trimmedSessions(value));
+    } else {
+      localStorage.setItem(CALIB_STORE_KEY, trimmedSessions(localStorage.getItem(CALIB_STORE_KEY)));
+      localStorage.setItem(key, value);
+    }
+    return true;
+  } catch (error) {
+    if (isSecurityError(error)) storageAvailable = false;
+    return false;
+  }
 }
 const telemetryEnabled = () => {
   const value = storageRead(TELEMETRY_CONSENT_KEY);
@@ -735,7 +950,10 @@ function recordEvent(kind, data = {}) {
 function recordCalibSession(entry) {
   entry.sid = SESSION_ID;
   try {
-    const arr = JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
+    let arr = JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
+    // Un valore non-array (null, {}) faceva lanciare `push` a ogni evento:
+    // lo storico locale era perso per sempre, in silenzio.
+    if (!Array.isArray(arr)) arr = [];
     arr.push(entry);
     storageWrite(CALIB_STORE_KEY, JSON.stringify(arr.slice(-200)));
   } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
@@ -1109,15 +1327,23 @@ async function finishRange() {
   };
   rangeSession = null;
   try {
-    await ds5.rangeEnd();
-    recordEvent('range', { ...rangeStats, incomplete });
+    const { alreadyClosed } = await ds5.rangeEnd();
+    recordEvent('range', { ...rangeStats, incomplete, alreadyClosed });
     closeModal('modal-range');
+    // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla.
+    if (alreadyClosed) {
+      toast('The range session had already closed: nothing was changed. Repeat the range calibration.', 6000);
+      log('Range calibration already closed (code 3): nothing committed.');
+      return;
+    }
     setUnsaved(true);
     toast(incomplete
       ? 'Range saved but with incomplete coverage: consider repeating the calibration.'
       : 'Range calibration complete.');
     log('Range calibration complete.');
   } catch (error) {
+    // Un rangeEnd partito (o scaduto) può aver committato.
+    if (error.committed) setUnsaved(true);
     closeModal('modal-range');
     toast(`Range calibration error: ${error.message}`, 5000);
     log(`Range error: ${error.message}`);
@@ -1197,6 +1423,8 @@ function closeAllModals() {
 
 async function rebootController() {
   if (!ds5 || ops.busy) return;
+  // Un controller avvelenato non riceve più comandi: il riavvio va fatto a mano.
+  if (ds5.poisoned) { toast(POISONED_MESSAGE, 7000); return; }
   if (unsaved && !confirm('You have an unsaved calibration: restarting the controller will lose it. Continue?'))
     return;
   await ds5.reboot();
@@ -1211,15 +1439,15 @@ $('btn-disconnect').addEventListener('click', disconnect);
 $('btn-reboot').addEventListener('click', rebootController);
 $('btn-retest').addEventListener('click', () => startDriftTest());
 
-$('btn-quick').addEventListener('click', () => { if (!ops.busy && ds5) openModal('modal-quick'); });
+$('btn-quick').addEventListener('click', () => { if (calibrationAllowed()) openModal('modal-quick'); });
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
 $('btn-quick-go').addEventListener('click', quickCalibrate);
 
-$('btn-wizard').addEventListener('click', openWizard);
+$('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
 $('btn-wizard-cancel').addEventListener('click', () => closeModal('modal-wizard'));
 $('btn-wizard-next').addEventListener('click', wizardNext);
 
-$('btn-range').addEventListener('click', openRange);
+$('btn-range').addEventListener('click', () => (calibrationAllowed() ? openRange() : undefined));
 $('btn-range-done').addEventListener('click', finishRange);
 
 $('btn-flash').addEventListener('click', () => {
@@ -1410,23 +1638,41 @@ async function boot() {
   }
 
   navigator.hid.addEventListener('disconnect', e => {
+    if (adopting && e.device === adopting.device) adopting.aborted = true;
     if (ds5 && e.device === ds5.device) {
       log('Controller disconnected.');
       teardown('Controller disconnected.');
     }
   });
 
-  // riconnessione automatica se il permesso è già stato concesso
+  // Un controller già autorizzato che torna (riavvio, cavo ricollegato) si
+  // riaggancia da solo, senza passare dal selettore del browser.
+  navigator.hid.addEventListener('connect', e => {
+    if (ds5 || adopting || !isDualSense(e.device)) return;
+    log('DualSense reconnected: connecting automatically…');
+    adopt(e.device).catch(autoConnectFailed);
+  });
+
+  // riconnessione automatica se il permesso è già stato concesso; tra più
+  // DualSense autorizzati si preferisce quello via USB
   try {
-    const devices = await navigator.hid.getDevices();
-    const known = devices.find(d => d.vendorId === 0x054c && d.productId === 0x0ce6);
+    const devices = (await navigator.hid.getDevices()).filter(isDualSense);
+    const known = devices.find(isUsbDevice) ?? devices[0];
     if (known) {
       log('DualSense already authorized: connecting automatically…');
       await adopt(known);
     }
   } catch (error) {
-    log(`Auto-connection failed: ${error.message || error}`);
+    autoConnectFailed(error);
   }
+}
+
+// Un'apertura fallita (controller tenuto da Steam o da un'altra tab) prima
+// finiva solo nel log: la hero restava muta.
+function autoConnectFailed(error) {
+  log(`Auto-connection failed: ${error.message || error}`);
+  if (ds5) return;
+  showHeroError('<b>Couldn’t open the controller.</b> Another app or browser tab may be using it: close it, then press Connect.');
 }
 
 boot();
