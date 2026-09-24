@@ -27,7 +27,7 @@ input reports use while a calibration session is open).
 | `replay-telemetry.mjs` | Real sessions through `classifyOutcome` (and an optional pure renderer): which outcome each user saw |
 | `fit.mjs` | Grid fit of the firmware/noise model with a minimal emulator that uses the real stop rule |
 | `fits.json` | Top-3 fitted parameter sets (`best`, `alt1`, `alt2`) |
-| `variants.mjs` | Named `params` overrides; `baseline` must stay empty |
+| `variants.mjs` | Named `params` overrides; `baseline` must stay empty. `legacyStop` restores the stop rule before quick-stopping-policy (paired comparisons, pre-refactor goldens); `plateau1` is the plateau-continuation candidate |
 | `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them |
 | `legacy/load-app.mjs` | The pre-refactor harness: extracts the monolithic `quickCalibrate` from `git show 40a08ed:js/app.js` |
 

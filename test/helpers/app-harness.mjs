@@ -18,6 +18,7 @@ import * as measureModule from '../../js/calib/measure.js';
 import * as samplingModule from '../../js/calib/sampling.js';
 import * as quickModule from '../../js/calib/quick.js';
 import * as quickPolicyModule from '../../js/calib/quick-policy.js';
+import * as quickOutcomeCopyModule from '../../js/calib/quick-outcome-copy.js';
 import * as opsModule from '../../js/calib/ops.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 
@@ -290,6 +291,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './calib/sampling.js': samplingModule,
       './calib/quick.js': quickModule,
       './calib/quick-policy.js': quickPolicyModule,
+      './calib/quick-outcome-copy.js': quickOutcomeCopyModule,
       './calib/ops.js': opsModule,
       ...STUBS,
     },

@@ -11,6 +11,7 @@ import {
 } from './calib/measure.js';
 import { measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
+import { quickOutcomeToast, quickOutcomeLog } from './calib/quick-outcome-copy.js';
 import { createOpGate } from './calib/ops.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -334,8 +335,12 @@ const NV_PENDING_MESSAGE = 'The controller has a save pending: restart it (Resta
 // alla connessione non si scrive nulla, nemmeno il lock automatico di upstream
 // (rimandato finché la verifica hardware H3 non lo giustifica).
 let nvStatus = null;
+// Ultimo stato mostrato nel chip (incluso 'poisoned'): lo usa il testo dell'esito
+// rapido, che consiglia lo spegnimento solo se è 'locked'.
+let lastNvStatus = null;
 
 function setNvChip(nv) {
+  lastNvStatus = nv?.status ?? null;
   const el = $('chip-nvs');
   el.classList.remove('hidden', 'chip-warn', 'chip-on');
   el.title = NV_CHIP_TITLE;
@@ -998,30 +1003,6 @@ function quickProgressHtml({ phase, pass, worst }) {
   return null;
 }
 
-// Il controller monta SEMPRE la calibrazione dell'ultima passata: non si può
-// tornare alla migliore. Quando l'ultima è peggiore, l'unica cosa onesta è
-// dirlo, invece di annunciare come risultato un numero che non è il migliore
-// che il tool aveva ottenuto. La precedenza degli esiti vive in
-// js/calib/quick-policy.js (classifyOutcome); qui c'è solo il testo.
-function quickOutcomeToast({ outcome, worst, beforeWorst, bestWorst }) {
-  switch (outcome) {
-    case 'unverified':
-      return ['Calibration applied, but the result could not be verified: run the drift test to check it.', 6000];
-    case 'centered':
-      return ['Quick calibration complete.'];
-    case 'worn':
-      return [`Calibration complete, residual offset ${worst.toFixed(1)}%. The signal is noisy (worn sensor): this is likely the hardware limit.`, 6000];
-    case 'worse-than-start':
-      return [`The last pass ended worse than the starting point (${worst.toFixed(1)}% against ${beforeWorst.toFixed(1)}%). Repeat the calibration keeping the controller still.`, 7000];
-    case 'lost-ground':
-      return [`Calibration complete at ${worst.toFixed(1)}%, but an earlier pass had reached ${bestWorst.toFixed(1)}%. Repeat it to try to get back there.`, 7000];
-    case 'unstable':
-      return [`Calibration complete, residual offset ${worst.toFixed(1)}%. Movement was detected during sampling: repeat on a stable surface.`, 6000];
-    default:
-      return [`Calibration complete, residual offset ${worst.toFixed(1)}%. If it persists, try the guided one.`, 6000];
-  }
-}
-
 // Deliberatamente il `ds5` GLOBALE, letto a ogni comando, e non il controller
 // catturato all'avvio: è il comportamento di sempre, incluso il difetto noto
 // per cui dopo un replug a metà passata i comandi arrivano al controller nuovo
@@ -1092,8 +1073,11 @@ async function quickCalibrate() {
     await sleep(300);
     closeModal('modal-quick');
     setUnsaved(true);
-    toast(...quickOutcomeToast(run));
-    log('Quick calibration complete.');
+    // Il testo dell'esito vive in js/calib/quick-outcome-copy.js: a 15% o più
+    // non suona mai come un successo, e il consiglio di spegnere il controller
+    // compare solo con la NVS letta `locked` (C0-11).
+    toast(...quickOutcomeToast({ ...run, nvStatus: lastNvStatus }));
+    log(quickOutcomeLog(run));
     ops.endOp(op);
     startDriftTest();
   } catch (error) {
