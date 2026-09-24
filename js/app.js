@@ -19,6 +19,10 @@ import {
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
+import {
+  WIZARD_DEFAULTS, captureRestReference, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+} from './calib/wizard-gate.js';
+import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -39,10 +43,8 @@ if (EXPERIMENTAL_PREVIEW) {
 // Soglie e funzioni di misura del drift: js/calib/measure.js (pure, condivise
 // con il simulatore in ops/sim e con i test).
 
-// Calibrazione range
-const RANGE_BINS = 36;
-const RANGE_RADIUS_OK = 0.8;
-const RANGE_UNLOCK_MS = 15000;
+// Calibrazione range: soglie e copertura in js/calib/range-coverage.js.
+const RANGE_BINS = RANGE_DEFAULTS.bins;
 
 let ds5 = null;
 let sticks = { lx: 0, ly: 0, rx: 0, ry: 0 };
@@ -87,6 +89,9 @@ class StickDial {
     this.dotRadius = dotRadius;
     this.target = null; // {x, y} normalizzato: anello bersaglio per il wizard
     this.trail = [];
+    // In traceMode i massimi per settore arrivano dal tracker del range
+    // (range-coverage.js), alimentato dagli input report: il quadrante li
+    // disegna soltanto.
     this.bins = new Array(RANGE_BINS).fill(0);
     this.x = 0;
     this.y = 0;
@@ -114,26 +119,10 @@ class StickDial {
   push(x, y) {
     this.x = x;
     this.y = y;
-    if (this.traceMode) {
-      const r = Math.hypot(x, y);
-      const bin = Math.floor(((Math.atan2(y, x) + Math.PI) / (2 * Math.PI)) * RANGE_BINS) % RANGE_BINS;
-      if (r > this.bins[bin]) this.bins[bin] = r;
-    } else {
+    if (!this.traceMode) {
       this.trail.push({ x, y });
       if (this.trail.length > 36) this.trail.shift();
     }
-  }
-
-  resetBins() { this.bins.fill(0); }
-
-  // Copertura adattiva: un settore conta se il suo massimo si avvicina al
-  // massimo globale osservato. Così la scala (calibrata o raw) non falsa
-  // il progresso: conta la forma del perimetro, non il valore assoluto.
-  coverage() {
-    const globalMax = Math.max(...this.bins);
-    if (globalMax < 0.5) return 0;
-    const thr = Math.max(RANGE_RADIUS_OK * 0.75, globalMax * 0.88);
-    return this.bins.filter(v => v >= thr).length / RANGE_BINS;
   }
 
   draw() {
@@ -250,7 +239,8 @@ function frame(ts) {
   }
 
   if (ds5) {
-    if (rangeSession) {
+    // Solo disegno: i settori del range sono alimentati da onInputReport.
+    if (rangeSession || rangeCheck) {
       dialRangeL.push(sticks.lx, sticks.ly);
       dialRangeR.push(sticks.rx, sticks.ry);
       dialRangeL.draw();
@@ -532,8 +522,12 @@ async function adopt(device) {
     if (ds5 !== candidate) return;
     deviceInfo = info;
     renderDeviceInfo(info);
+    const key = await localDeviceKey(info.serial);
+    if (ds5 !== candidate) return;
+    deviceKey = key;
     const nv = await refreshNv();
     if (ds5 !== candidate) return;
+    reapplyRangeWriteLock(key);
 
     $('view-hero').classList.add('hidden');
     $('view-device').classList.remove('hidden');
@@ -602,6 +596,10 @@ function teardown(message = null) {
   nvStatus = null;
   oldFirmwareAck = false;
   rangeSession = null;
+  rangeCheck = null;
+  // Il blocco della scrittura NON decade allo scollegamento: vedi
+  // rangeWriteLock. Resta la chiave del controller che l'ha prodotto.
+  deviceKey = null;
   if (adopting) adopting.aborted = true;
   clearTimeout(autoDriftTimer);
   autoDriftTimer = null;
@@ -694,13 +692,13 @@ function onInputReport(event) {
 
   if (driftTest) driftSample();
 
-  if (rangeSession) {
-    for (const a of ['lx', 'ly', 'rx', 'ry']) {
-      const v = sticks[a];
-      if (v < rangeSession.stats[a].min) rangeSession.stats[a].min = v;
-      if (v > rangeSession.stats[a].max) rangeSession.stats[a].max = v;
-    }
-  }
+  // Copertura del range e verifica dagli input report (~250 Hz), mai da rAF:
+  // a 60 Hz una rotazione veloce saltava metà dei settori, e in una tab in
+  // background rAF si ferma del tutto.
+  if (rangeSession) rangeSession.tracker.push(sticks);
+  if (rangeCheck) rangeCheck.tracker.push(sticks);
+  // Raggiungimento dell'angolo del wizard, anch'esso dagli input report.
+  if (wizard?.tracker) wizard.tracker.push(sticks);
 
   const now = performance.now();
   feedHandsOff(now);
@@ -896,12 +894,24 @@ function setUnsaved(v) {
 // Quick riuscito non ripara un range incompleto, e viceversa.
 let centerState = null;
 let rangeState = null;
+// Blocco del range (WS7, vedi setRangeWriteLock): motivo e chiave del controller.
+let rangeWriteLock = null;
+let rangeWriteLockKey = null;
 let lastCenterView = null;
 
 function currentWriteLock() {
+  // Il blocco del range (WS7) sopravvive allo scollegamento e segue il
+  // controller; `rangeState` invece è l'esito mostrato e decade col teardown.
+  // Si sommano: basta uno dei due per tenere Write spento.
+  const range = rangeWriteLock
+    ? {
+      incomplete: !!rangeState?.incomplete || rangeWriteLock === 'incomplete',
+      alreadyClosed: !!rangeState?.alreadyClosed || rangeWriteLock !== 'incomplete',
+    }
+    : rangeState;
   return writeLockFor({
     center: centerState,
-    range: rangeState,
+    range,
     poisoned: !!ds5?.poisoned,
     needsPowerCycle: !!ds5 && ds5 === powerCycleController,
   });
@@ -1016,7 +1026,7 @@ async function doFlash() {
   // lancerebbe un secondo ciclo unlock → lock sulla NVS. Il bottone torna
   // attivo solo alla prossima apertura del modale, non nel finally: durante
   // l'animazione di chiusura sarebbe di nuovo cliccabile.
-  if (!ds5 || ops.busy || blockedForPowerCycle()) return;
+  if (!ds5 || ops.busy || blockedForPowerCycle() || blockedByRangeWriteLock()) return;
   // Blocco di Write (WS5), anche qui e non solo sul bottone: un risultato
   // catastrofico, un asse incollato o un range incompleto non si scrivono mai;
   // uno peggiore dell'inizio solo con la seconda conferma spuntata.
@@ -1440,7 +1450,16 @@ const WIZARD_CORNERS = [
   { label: 'to the bottom right', x: 94, y: 94, tx: 0.7, ty: 0.7 },
 ];
 
-let wizard = null; // { step }
+// Stato del wizard (null fuori dalla procedura). `phase`:
+//   'intro'  → Start: stick fermi, misura di partenza, calibBegin
+//   'ref'    → sessione aperta, si attende il punto di riposo di riferimento
+//   'corner' → angolo `corner` mostrato; Continue = gate + calibSample
+//   'done'   → calibEnd fatto, confronto prima/dopo a schermo
+// `step` guida i puntini (0 intro, 1–4 angoli, 5 fatto) ed è il passo
+// registrato se la procedura si rompe.
+let wizard = null;
+// Ultimo confronto prima/dopo del wizard: lo legge il pannello dell'esito (WS5).
+let lastWizardComparison = null;
 
 function wizardSetDots(step) {
   [...$('wizard-dots').children].forEach((dot, i) => {
@@ -1448,15 +1467,15 @@ function wizardSetDots(step) {
   });
 }
 
-function wizardShowCorner(i) {
+function wizardShowCorner(i, note = '') {
   const c = WIZARD_CORNERS[i];
   $('wizard-diagram').classList.remove('hidden');
   $('wizard-line').setAttribute('x2', c.x);
   $('wizard-line').setAttribute('y2', c.y);
   $('wizard-target').setAttribute('cx', c.x);
   $('wizard-target').setAttribute('cy', c.y);
-  $('wizard-msg').innerHTML =
-    `Move <b>both sticks ${c.label}</b> (inside the dashed ring below), then release them.<br>`
+  $('wizard-msg').innerHTML = (note ? `${note}<br>` : '')
+    + `Move <b>both sticks ${c.label}</b> (inside the dashed ring below), then release them.<br>`
     + 'When they’ve returned to the center, press <b>Continue</b>.';
   // mini quadranti live: l'utente vede dove sta puntando davvero,
   // anche con la calibrazione attuale sballata
@@ -1471,89 +1490,264 @@ function wizardHideLive() {
   dialWizR.target = null;
 }
 
+// La procedura appartiene al controller su cui è partita: dopo un replug (o
+// un teardown, che azzera `wizard`) il ciclo orfano non invia più nulla e non
+// tocca il modale della procedura nuova.
+const wizardCurrent = w => wizard === w && !!w.controller && ds5 === w.controller;
+const wizardGone = () => Object.assign(new Error('Controller disconnected'), { gone: true });
+
+// Timeout del gate: nessun campione. Il riferimento non si allarga da solo;
+// dopo `escapeAfter` timeout compare l'uscita esplicita.
+function wizardTimeout(w, why) {
+  w.timeouts += 1;
+  const offerEscape = !w.escaped && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
+  $('btn-wizard-escape').classList.toggle('hidden', !offerEscape);
+  const escapeHint = offerEscape
+    ? '<br>If your stick never settles at the same point, use <b>My stick doesn’t rest still</b>.'
+    : '';
+  $('wizard-msg').innerHTML = `${why} No sample was taken. <b>Let go of both sticks</b>, wait until they settle, `
+    + `then press <b>Continue</b>.${escapeHint}`;
+}
+
+// Punto di riposo di riferimento, preso a sessione aperta (stesso frame dei
+// campioni). Serve anche con l'uscita esplicita: è il centro del raggio largo
+// dell'uscita, che non toglie mai il controllo di posizione.
+async function wizardCaptureRef(w, ensure, isCancelled) {
+  const btn = $('btn-wizard-next');
+  btn.textContent = 'Waiting…';
+  $('wizard-msg').innerHTML = 'Keep your hands off the sticks: measuring where they rest…';
+  const ref = await captureRestReference(stickSource, pageClock, { escaped: w.escaped, isCancelled });
+  ensure();
+  if (!ref) {
+    btn.textContent = 'Continue';
+    wizardTimeout(w, 'The sticks did not come to rest.');
+    return;
+  }
+  w.ref = ref;
+  w.phase = 'corner';
+  w.corner = 0;
+  w.step = 1;
+  w.tracker = createCornerTracker(WIZARD_CORNERS[0]);
+  $('btn-wizard-escape').classList.add('hidden');
+  wizardShowCorner(0);
+  btn.textContent = 'Continue';
+  wizardSetDots(1);
+}
+
+async function wizardSampleCorner(w, ensure, isCancelled) {
+  const btn = $('btn-wizard-next');
+  const i = w.corner;
+  btn.textContent = 'Waiting…';
+  $('wizard-msg').innerHTML = 'Waiting for both sticks to rest…';
+  const gate = await gateWizardSample(stickSource, pageClock, {
+    tracker: w.tracker, ref: w.ref, tol: w.tol, escaped: w.escaped, isCancelled,
+  });
+  ensure();
+  if (!gate.ok) {
+    btn.textContent = 'Continue';
+    if (gate.reason === 'corner') {
+      // Angolo non raggiunto: nessuna attesa e nessun campione. Non conta come
+      // timeout (non è uno stick che non si ferma).
+      w.cornerMisses += 1;
+      const what = gate.missing.length === 2
+        ? 'Neither stick reached the corner.'
+        : `The ${gate.missing[0]} stick didn’t reach the corner.`;
+      wizardShowCorner(i, `<b>${what}</b> No sample was taken.`);
+    } else {
+      wizardTimeout(w, 'The sticks are not resting where they started.');
+    }
+    return;
+  }
+  await w.controller.calibSample();
+  ensure();
+  w.samples += 1;
+  $('btn-wizard-escape').classList.add('hidden');
+  if (i < WIZARD_CORNERS.length - 1) {
+    w.corner = i + 1;
+    w.step = i + 2;
+    w.tracker.reset(WIZARD_CORNERS[w.corner]);
+    wizardShowCorner(w.corner);
+    btn.textContent = 'Continue';
+    wizardSetDots(w.step);
+    return;
+  }
+  // Quarto campione: chiusura della sessione e confronto prima/dopo.
+  w.tracker = null;
+  btn.textContent = 'Saving…';
+  await sleep(400);
+  ensure();
+  await w.controller.calibEnd();
+  w.sessionOpen = false;
+  w.committed = true;
+  setUnsaved(true);
+  ensure();
+  const after = summarizeResult(await measureOffset());
+  ensure();
+  ops.endOp(w.op);
+  w.phase = 'done';
+  w.step = 5;
+  wizardSetDots(5);
+  const comparison = wizardComparison(w.before, after);
+  lastWizardComparison = comparison;
+  w.reported = true;
+  // Solo locale (il payload v1 porta soltanto sessioni quick).
+  recordEvent('wizard', {
+    done: true, before: w.before ?? null, after,
+    samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses, escaped: w.escaped,
+  });
+  $('wizard-diagram').classList.add('hidden');
+  wizardHideLive();
+  // Prima e dopo anche nel pannello persistente (WS5), con lo stesso blocco di
+  // Write della rapida (peggiore dell'inizio, ≥15%, asse incollato).
+  showOutcome(guidedOutcomeView({ before: w.before ?? null, after }, { nvStatus: lastNvStatus }));
+  $('wizard-msg').innerHTML = `${wizardResultHtml(comparison, w.escaped)}<br>The result stays on the page after you close this.`;
+  btn.textContent = 'Done';
+}
+
+function wizardResultHtml(cmp, escaped) {
+  const rows = cmp.sticks.map(s => `${esc(s.name)}: ${esc(s.beforeLabel)} → <b>${esc(s.afterLabel)}</b>`).join('<br>');
+  let tail;
+  if (!cmp.measured) tail = 'The result could not be measured (the sticks were moving): check it with the drift test.';
+  else if (cmp.worse) {
+    // Il consiglio di spegnere solo con la memoria confermata `locked` (C0-11).
+    tail = '<b>This is worse than before.</b> Don’t write it to memory'
+      + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s) to discard it.' : '.');
+  } else tail = 'Check the result with the drift test.';
+  const escapedNote = escaped ? '<br>The rest check was looser for some samples: the result may be less precise.' : '';
+  return `Center calibration complete.<br>${rows}<br>${tail}${escapedNote}`;
+}
+
 async function wizardNext() {
-  if (!ds5) return;
+  const w = wizard;
+  if (!ds5 || !w || w.running) return;
   const btn = $('btn-wizard-next');
   btn.disabled = true;
+  w.running = true;
+  const ensure = () => { if (!wizardCurrent(w)) throw wizardGone(); };
+  const isCancelled = () => !wizardCurrent(w);
   try {
-    if (wizard.step === 0) {
-      // avvio. Misura di partenza: il wizard è il percorso per il drift ostinato,
-      // cioè i casi più informativi, e finora non ne usciva alcun numero.
-      // Cancel va nascosto e `busy` alzato PRIMA di qualunque await: durante il
-      // secondo di misura il modale è ancora a schermo, e un Cancel in quella
-      // finestra chiuderebbe il modale lasciando `busy` a true per sempre —
-      // bloccando ogni calibrazione successiva fino al reload.
+    if (w.phase === 'intro') {
+      // Cancel va nascosto e `busy` alzato PRIMA di qualunque await: durante
+      // l'attesa il modale è ancora a schermo, e un Cancel in quella finestra
+      // chiuderebbe il modale lasciando `busy` a true per sempre — bloccando
+      // ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
-      wizard.op = ops.beginOp();
+      w.op = ops.beginOp();
+      w.controller = ds5;
       clearOutcome();
       btn.textContent = 'Measuring…';
-      wizard.before = summarizeResult(await measureOffset(1000));
-      await ds5.calibBegin();
-      wizardShowCorner(0);
-      btn.textContent = 'Continue';
-    } else if (wizard.step >= 1 && wizard.step <= 3) {
-      await sleep(150);
-      await ds5.calibSample();
-      wizardShowCorner(wizard.step);
-    } else if (wizard.step === 4) {
-      await sleep(150);
-      await ds5.calibSample();
-      btn.textContent = 'Saving…';
-      await sleep(400);
-      await ds5.calibEnd();
-      setUnsaved(true);
-      const wizAfter = summarizeResult(await measureOffset());
-      ops.endOp(wizard.op);
-      wizard.reported = true;
-      recordEvent('wizard', { done: true, before: wizard.before ?? null, after: wizAfter });
-      $('wizard-diagram').classList.add('hidden');
-      wizardHideLive();
-      // Prima e dopo nel pannello persistente, con lo stesso blocco di Write
-      // della rapida (peggiore dell'inizio, ≥15%, asse incollato).
-      const view = guidedOutcomeView({ before: wizard.before ?? null, after: wizAfter }, { nvStatus: lastNvStatus });
-      showOutcome(view);
-      $('wizard-msg').textContent = `${view.title}. The result stays on the page after you close this.`;
-      btn.textContent = 'Done';
+      $('wizard-msg').innerHTML = 'Keep your hands off the sticks for a moment…';
+      // Stick fermi prima di qualunque comando: con un pollice sullo stick
+      // non parte nulla e la procedura si può ancora annullare.
+      const held = await waitForStable({
+        spread: WIZARD_DEFAULTS.spread, holdMs: WIZARD_DEFAULTS.holdMs, timeoutMs: WIZARD_DEFAULTS.timeoutMs, isCancelled,
+      });
+      ensure();
+      if (!held) {
+        ops.endOp(w.op);
+        w.op = null;
+        w.controller = null;
+        $('btn-wizard-cancel').classList.remove('hidden');
+        btn.textContent = 'Start';
+        $('wizard-msg').innerHTML = 'The sticks are moving or being touched. <b>Let go of both sticks</b>, then press '
+          + '<b>Start</b> again. Nothing was sent to the controller.';
+        return;
+      }
+      // Misura di partenza: il wizard è il percorso per il drift ostinato, cioè
+      // i casi più informativi. È anche il "prima" del confronto finale (stesso
+      // frame calibrato del "dopo"), e il suo rumore fissa la tolleranza.
+      w.before = summarizeResult(await measureOffset(1000));
+      ensure();
+      w.tol = restTolerance(w.before);
+      const begun = await w.controller.calibBegin();
+      w.sessionOpen = true;
+      // La riparazione di una sessione rimasta aperta può aver committato:
+      // la RAM è già cambiata.
+      if (begun?.committed) {
+        w.committed = true;
+        setUnsaved(true);
+      }
+      ensure();
+      w.phase = 'ref';
+      await wizardCaptureRef(w, ensure, isCancelled);
+    } else if (w.phase === 'ref') {
+      await wizardCaptureRef(w, ensure, isCancelled);
+    } else if (w.phase === 'corner') {
+      await wizardSampleCorner(w, ensure, isCancelled);
     } else {
       closeModal('modal-wizard');
       setUnsaved(true);
       startDriftTest();
-      return;
     }
-    wizard.step += 1;
-    wizardSetDots(Math.min(wizard.step, 5));
   } catch (error) {
-    ops.endOp(wizard?.op);
-    if (error.committed) setUnsaved(true);
+    ops.endOp(w.op);
+    w.tracker = null;
+    const gone = error.gone || !wizardCurrent(w);
     // Anche il wizard fallito è un dato: registra dove si è rotto. Il flag
     // impedisce un secondo evento se a lanciare è stato il codice DOM che segue
     // l'evento di successo: quella procedura è riuscita, e contarla anche come
     // fallita sporcherebbe il rapporto successi/fallimenti del dataset.
-    if (wizard && !wizard.reported) {
-      wizard.reported = true;
+    if (!w.reported) {
+      w.reported = true;
       recordEvent('wizard', {
         done: false,
-        step: wizard.step ?? null,
-        before: wizard.before ?? null,
-        err: String(error.message || error).slice(0, 120),
+        step: w.step ?? null,
+        before: w.before ?? null,
+        samples: w.samples, timeouts: w.timeouts, escaped: w.escaped,
+        ...(gone ? { aborted: 'disconnected' } : { err: String(error.message || error).slice(0, 120) }),
       });
     }
+    // Scollegato: il teardown ha già chiuso tutto e il controller nuovo non
+    // eredita né il modale né lo stato "non salvato" di questo.
+    if (gone) return;
+    if (error.committed || w.committed) setUnsaved(true);
     closeModal('modal-wizard');
-    showOutcome(guidedOutcomeView({ before: wizard?.before ?? null, error, committed: error.committed === true }, { nvStatus: lastNvStatus }));
+    showOutcome(guidedOutcomeView(
+      { before: w.before ?? null, error, committed: error.committed === true || !!w.committed },
+      { nvStatus: lastNvStatus },
+    ));
     log(`Wizard error: ${error.message}`);
   } finally {
+    w.running = false;
     btn.disabled = false;
     syncBusyTitle();
   }
 }
 
+// Uscita esplicita per uno stick che non torna mai allo stesso punto: dopo
+// `escapeAfter` timeout, con conferma, registrata in locale. Allarga il
+// controllo di posizione a un raggio fisso (WIZARD_DEFAULTS.escapeLsb) attorno
+// al riferimento, senza toglierlo: un pollice fermo sull'angolo o sul bordo
+// resta fuori. La finestra stabile resta obbligatoria.
+function wizardEscape() {
+  const w = wizard;
+  if (!w || w.escaped || w.running || w.timeouts < WIZARD_DEFAULTS.escapeAfter) return;
+  const go = confirm('Continue with a looser check of where the sticks rest? Use this only if your stick never '
+    + 'settles at exactly the same point. Each sample still waits for the sticks to be still and close to where they '
+    + 'rested, so keep your hands off them, but the result may be less precise.');
+  if (!go) return;
+  w.escaped = true;
+  $('btn-wizard-escape').classList.add('hidden');
+  log('Guided calibration: rest-point check loosened at the user’s request (stick does not rest still).');
+  const note = 'Rest check loosened. <b>Let go of both sticks</b>, then press <b>Continue</b>.';
+  if (w.phase === 'corner') wizardShowCorner(w.corner, note);
+  else $('wizard-msg').innerHTML = note;
+}
+
 function openWizard() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
-  wizard = { step: 0 };
+  wizard = {
+    phase: 'intro', step: 0, corner: 0,
+    op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
+    samples: 0, timeouts: 0, cornerMisses: 0, escaped: false, committed: false, sessionOpen: false,
+    running: false, reported: false,
+  };
+  lastWizardComparison = null;
   wizardSetDots(0);
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
+  $('btn-wizard-escape').classList.add('hidden');
   $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started it <b>cannot be cancelled</b>: don’t close the page and don’t disconnect the controller.';
   $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
@@ -1563,121 +1757,327 @@ function openWizard() {
 
 /* ============================== range ============================== */
 
-let rangeSession = null; // { startTs }
+let rangeSession = null; // { startTs, tracker, controller, op }
+// Verifica dopo un rangeEnd riuscito: { tracker, result }. Nessun comando HID.
+let rangeCheck = null;
 let rangeOp = null; // token di ops: la sessione range occupa il controller fino a finishRange
+const RANGE_MSG_HTML = $('range-msg').innerHTML;
+
+// Scrittura in memoria disattivata dopo un range chiuso incompleto ("Finish
+// anyway"), già chiuso (code 3: il range in RAM è ignoto) o fallito dopo un
+// possibile commit (C0-15). L'unico modo di toglierlo è un range completo che
+// sostituisce quello in RAM. Non decade allo scollegamento: se il range in RAM
+// sopravviva a uno stacco USB senza spegnimento è H11, non verificato, e un
+// ricollegamento che riabilitasse Write porterebbe il range incompleto in NVS
+// (aggirando H8). Neppure lo spegnimento lo toglie: l'app non distingue uno
+// spegnimento da uno stacco, e che lo spegnimento annulli il range è H10.
+// Per questo la UI non presenta mai il ricollegamento come via d'uscita.
+// Il blocco segue il controller che l'ha prodotto tramite `rangeWriteLockKey`,
+// hash salato del seriale (vedi localDeviceKey), mai il seriale in chiaro. Se
+// uno dei due seriali non è leggibile il controller che si collega è trattato
+// come lo stesso (prudente). Limite noto: vive solo in memoria, quindi un
+// reload della pagina lo perde; WS5 lo deve risolvere nel blocco generale della
+// scrittura (esiti Quick), di cui questo è il pezzo del range.
+// `rangeWriteLock` e `rangeWriteLockKey` sono dichiarati accanto a
+// `centerState`: currentWriteLock li legge.
+// Chiave locale del controller collegato (null se il seriale non è leggibile).
+let deviceKey = null;
+
+// Sale casuale per pagina: la chiave non è confrontabile tra pagine né
+// riconducibile al seriale, e non esce mai dal browser.
+const DEVICE_KEY_SALT = crypto.getRandomValues?.(new Uint8Array(16)) ?? null;
+
+async function localDeviceKey(rawSerial) {
+  const serial = String(rawSerial ?? '').replace(/\0/g, '').trim();
+  if (!serial || !DEVICE_KEY_SALT || !crypto.subtle) return null;
+  try {
+    const text = new TextEncoder().encode(serial);
+    const buf = new Uint8Array(DEVICE_KEY_SALT.length + text.length);
+    buf.set(DEVICE_KEY_SALT);
+    buf.set(text, DEVICE_KEY_SALT.length);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    return Array.from(digest.slice(0, 16), b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
+
+function rangeLockMessage(reason) {
+  const off = lastNvStatus === 'locked'
+    ? ' Turning the controller off (hold PS for 10 s) should discard the stored range, but Write stays disabled until a complete range calibration.'
+    : '';
+  if (reason === 'closed') {
+    return 'Writing to memory is disabled: the range session had already closed, so the stored range is unknown. '
+      + `Repeat the range calibration first.${off}`;
+  }
+  if (reason === 'error') {
+    return 'Writing to memory is disabled: the range calibration failed after it may have changed the controller. '
+      + `Repeat the range calibration before writing.${off}`;
+  }
+  return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration.${off}`;
+}
+
+// `key`: il controller a cui il blocco appartiene. finishRange passa la chiave
+// letta PRIMA del rangeEnd: se il controller si stacca mentre il rangeEnd è in
+// volo, teardown ha già azzerato deviceKey, ma il blocco va registrato lo
+// stesso e deve seguire quel controller al ricollegamento.
+function setRangeWriteLock(reason, key = deviceKey) {
+  rangeWriteLock = reason;
+  rangeWriteLockKey = reason ? key : null;
+  $('btn-flash').title = reason ? rangeLockMessage(reason) : '';
+  // Il bottone lo decide il blocco generale di Write (WS5), che include questo:
+  // togliere il blocco del range non deve riabilitare Write se un altro motivo
+  // (esito catastrofico, asse incollato, sessione da spegnere) lo tiene spento.
+  updateWriteLock();
+}
+
+// Al collegamento: un blocco lasciato da un altro controller (entrambi i
+// seriali noti e diversi) decade; altrimenti resta e l'utente viene avvisato
+// che il range incompleto può essere ancora attivo.
+function reapplyRangeWriteLock(key) {
+  if (!rangeWriteLock) return;
+  if (key && rangeWriteLockKey && key !== rangeWriteLockKey) {
+    log('A different controller is connected: the range write lock of the previous one does not apply.');
+    setRangeWriteLock(null);
+    return;
+  }
+  const reason = rangeWriteLock;
+  const lockKey = rangeWriteLockKey;
+  setRangeWriteLock(reason);
+  // La chiave nota resta quella del controller che ha prodotto il blocco.
+  rangeWriteLockKey = lockKey ?? key;
+  const msg = 'This controller may still have the incomplete range calibration from before it was disconnected. '
+    + rangeLockMessage(reason);
+  log(msg);
+  toast(msg, 9000);
+}
+
+function blockedByRangeWriteLock() {
+  if (!rangeWriteLock) return false;
+  toast(rangeLockMessage(rangeWriteLock), 7000);
+  return true;
+}
+
+function useRangeTracker(tracker) {
+  dialRangeL.bins = tracker.left.bins;
+  dialRangeR.bins = tracker.right.bins;
+}
+
+function resetRangeReadouts(hint) {
+  $('range-bar').style.width = '0%';
+  $('range-pct').textContent = 'Coverage 0%';
+  $('range-minmax').innerHTML = '<span>LX</span><span>LY</span><span>RX</span><span>RY</span>';
+  $('range-hint').textContent = hint;
+}
 
 async function openRange() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
-  rangeOp = ops.beginOp();
+  const controller = ds5;
+  const op = ops.beginOp();
+  rangeOp = op;
   clearOutcome();
   try {
-    await ds5.rangeBegin();
+    await controller.rangeBegin();
   } catch (error) {
-    ops.endOp(rangeOp);
-    toast(`Failed to start range calibration: ${error.message}`, 5000);
+    ops.endOp(op);
+    if (ds5 === controller) toast(`Failed to start range calibration: ${error.message}`, 5000);
     return;
   }
-  dialRangeL.resetBins();
-  dialRangeR.resetBins();
-  rangeSession = {
-    startTs: performance.now(),
-    stats: {
-      lx: { min: 0, max: 0 }, ly: { min: 0, max: 0 },
-      rx: { min: 0, max: 0 }, ry: { min: 0, max: 0 },
-    },
-  };
-  $('btn-range-done').disabled = true;
-  $('range-bar').style.width = '0%';
-  $('range-minmax').innerHTML = '<span>LX</span><span>LY</span><span>RX</span><span>RY</span>';
-  $('range-hint').textContent = 'Extremes not reached yet';
+  if (ds5 !== controller) { ops.endOp(op); return; }
+  rangeCheck = null;
+  const tracker = createRangeTracker();
+  useRangeTracker(tracker);
+  rangeSession = { startTs: performance.now(), tracker, controller, op };
+  $('range-msg').innerHTML = RANGE_MSG_HTML;
+  const done = $('btn-range-done');
+  done.disabled = true;
+  done.textContent = 'Done';
+  resetRangeReadouts('Extremes not reached yet');
   openModal('modal-range');
 }
 
 let lastMinmax = 0;
 function updateRangeUI(ts) {
-  const cov = Math.min(dialRangeL.coverage(), dialRangeR.coverage());
-  const pct = Math.round(cov * 100);
+  if (rangeCheck) { updateRangeCheckUI(); return; }
+  const st = rangeStatus(rangeSession.tracker, ts - rangeSession.startTs);
+  const pct = Math.round(st.coverage * 100);
   $('range-pct').textContent = `Coverage ${pct}%`;
   $('range-bar').style.width = pct + '%';
 
   if (ts - lastMinmax > 120) {
     lastMinmax = ts;
-    const st = rangeSession.stats;
-    // Soglia relativa al massimo osservato dello stick: con la vecchia
-    // calibrazione un bordo compresso non arriva mai a ±1.0, ma conta che
-    // l'utente l'abbia spinto a fondo, non il valore assoluto.
-    const edgeThr = stick => {
-      const axes = stick === 'l' ? [st.lx, st.ly] : [st.rx, st.ry];
-      const maxAbs = Math.max(...axes.flatMap(a => [Math.abs(a.min), Math.abs(a.max)]));
-      return maxAbs > 0.5 ? Math.max(0.5, maxAbs * 0.7) : Infinity;
-    };
-    const thrL = edgeThr('l'), thrR = edgeThr('r');
+    // Una direzione è "raggiunta" a 0.9 dell'escursione massima dello stesso
+    // stick (range-coverage.js): con la vecchia calibrazione un bordo compresso
+    // non arriva mai a ±1.0, ma conta che l'utente l'abbia spinto a fondo.
+    const { left: L, right: R } = rangeSession.tracker;
+    const ok = (s, d) => !s.missingDirs.includes(d);
     const f = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
-    const span = (name, s, thr) =>
-      `<span>${name} <span class="${s.min <= -thr ? 'edge-ok' : ''}">${f(s.min)}</span>…`
-      + `<span class="${s.max >= thr ? 'edge-ok' : ''}">${f(s.max)}</span></span>`;
+    const span = (name, min, max, okMin, okMax) =>
+      `<span>${name} <span class="${okMin ? 'edge-ok' : ''}">${f(min)}</span>…`
+      + `<span class="${okMax ? 'edge-ok' : ''}">${f(max)}</span></span>`;
     $('range-minmax').innerHTML =
-      span('LX', st.lx, thrL) + span('LY', st.ly, thrL)
-      + span('RX', st.rx, thrR) + span('RY', st.ry, thrR);
+      span('LX', L.min.x, L.max.x, ok(st.left, 'left'), ok(st.left, 'right'))
+      + span('LY', L.min.y, L.max.y, ok(st.left, 'up'), ok(st.left, 'down'))
+      + span('RX', R.min.x, R.max.x, ok(st.right, 'left'), ok(st.right, 'right'))
+      + span('RY', R.min.y, R.max.y, ok(st.right, 'up'), ok(st.right, 'down'));
 
-    const missing = [];
-    const dirs = [
-      [st.lx.min > -thrL, 'L left'], [st.lx.max < thrL, 'L right'],
-      [st.ly.min > -thrL, 'L up'], [st.ly.max < thrL, 'L down'],
-      [st.rx.min > -thrR, 'R left'], [st.rx.max < thrR, 'R right'],
-      [st.ry.min > -thrR, 'R up'], [st.ry.max < thrR, 'R down'],
-    ];
-    for (const [miss, label] of dirs) if (miss) missing.push(label);
-    rangeSession.allEdges = missing.length === 0;
-    $('range-hint').textContent = rangeSession.allEdges
-      ? 'All extremes reached ✓'
-      : `Missing: ${missing.join(', ')}`;
+    let hint;
+    if (st.complete) hint = 'All extremes reached, both directions ✓';
+    else if (st.degenerate && ts - rangeSession.startTs >= RANGE_DEFAULTS.unlockMs) {
+      // Nessuna chiusura con una direzione sotto metà corsa: il range salvato
+      // sarebbe degenere. L'unica uscita senza scrivere è spegnere il controller.
+      // Che lo spegnimento annulli il range è detto solo con la memoria
+      // confermata `locked` (C0-11, H10 non ancora verificato).
+      hint = 'Push each stick all the way to every edge before finishing. '
+        + (lastNvStatus === 'locked'
+          ? 'To leave without changes, turn the controller off (hold PS for 10 s).'
+          : 'The only other way out is to turn the controller off (hold PS for 10 s).');
+    } else hint = `Missing: ${st.missing.join(', ')}`;
+    $('range-hint').textContent = hint;
   }
 
-  const elapsed = ts - rangeSession.startTs;
-  if (pct >= 100 || elapsed > RANGE_UNLOCK_MS) {
-    $('btn-range-done').disabled = false;
-  }
+  const done = $('btn-range-done');
+  done.disabled = !st.canFinish;
+  done.textContent = st.finishAnyway ? 'Finish anyway' : 'Done';
 }
 
 async function finishRange() {
+  if (rangeCheck) { finishRangeCheck(); return; }
   if (!ds5 || !rangeSession) return;
-  // Estremi tutti raggiunti = calibrazione valida anche se qualche settore
-  // diagonale non arriva al 100% di copertura (gate non perfettamente circolare).
-  const incomplete = rangeSession.allEdges !== true
-    && Math.min(dialRangeL.coverage(), dialRangeR.coverage()) < 0.97;
+  const session = rangeSession;
+  const { controller, op } = session;
+  const st = rangeStatus(session.tracker, performance.now() - session.startTs);
+  if (!st.canFinish) {
+    toast('Rotate both sticks along the edge first: the range is not usable yet.', 5000);
+    return;
+  }
+  let finishAnyway = false;
+  if (!st.complete) {
+    const what = st.missingDirs.length
+      ? `Not reached: ${st.missingDirs.join(', ')}.`
+      : 'The sticks were not turned enough in both directions.';
+    const go = confirm(`The range calibration is incomplete. ${what} Part of the stick travel may become unreachable. `
+      + 'If you finish now, writing to memory stays disabled until you repeat the range calibration. Finish anyway?');
+    if (!go || rangeSession !== session) return;
+    finishAnyway = true;
+  }
+  // Campi solo locali: il payload v1 porta soltanto sessioni quick.
   const rangeStats = {
-    covL: +dialRangeL.coverage().toFixed(2),
-    covR: +dialRangeR.coverage().toFixed(2),
-    allEdges: rangeSession.allEdges === true,
-    ms: Math.round(performance.now() - rangeSession.startTs),
+    covL: +st.left.coverage.toFixed(2),
+    covR: +st.right.coverage.toFixed(2),
+    allEdges: st.missingDirs.length === 0,
+    turns: [+st.left.turns.toFixed(1), +st.right.turns.toFixed(1)],
+    reversed: st.left.reversed && st.right.reversed,
+    finishAnyway,
+    ms: Math.round(performance.now() - session.startTs),
   };
   rangeSession = null;
+  // Chiave del controller presa prima di ogni await: se si stacca durante il
+  // rangeEnd, teardown azzera deviceKey, ma il blocco va comunque registrato
+  // per QUESTO controller (è proprio il caso per cui esiste: un rangeEnd
+  // incompleto o dall'esito ignoto seguito da un ricollegamento).
+  const key = deviceKey;
+  // Il blocco si registra anche se il controller non c'è più; se nel frattempo
+  // se n'è collegato un altro, gli si applica la stessa regola del
+  // ricollegamento (decade solo con un seriale noto e diverso).
+  const lockFor = reason => {
+    setRangeWriteLock(reason, key);
+    if (ds5 && ds5 !== controller) reapplyRangeWriteLock(deviceKey);
+  };
   try {
-    const { alreadyClosed } = await ds5.rangeEnd();
-    recordEvent('range', { ...rangeStats, incomplete, alreadyClosed });
-    closeModal('modal-range');
-    // Pannello persistente e blocco di Write: un range incompleto (o chiuso
-    // con "Finish anyway") o già chiuso dal firmware non si scrive.
-    showOutcome(rangeOutcomeView({ incomplete, alreadyClosed }));
-    // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla.
+    const { alreadyClosed } = await controller.rangeEnd();
+    const gone = ds5 !== controller;
+    // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla,
+    // ma il range in RAM è ignoto.
     if (alreadyClosed) {
-      log('Range calibration already closed (code 3): nothing committed.');
+      lockFor('closed');
+      // Scollegato durante il rangeEnd: teardown ha già chiuso la UI.
+      if (gone) return;
+      recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
+      closeModal('modal-range');
+      // Pannello persistente (WS5) al posto del toast.
+      showOutcome(rangeOutcomeView({ alreadyClosed: true }));
+      log('Range calibration already closed (code 3): nothing committed. Writing to memory disabled.');
       return;
     }
+    if (finishAnyway) {
+      lockFor('incomplete');
+      if (gone) return;
+      recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
+      setUnsaved(true);
+      closeModal('modal-range');
+      showOutcome(rangeOutcomeView({ incomplete: true }));
+      log('Range calibration finished incomplete: writing to memory disabled.');
+      ops.endOp(op);
+      startDriftTest();
+      return;
+    }
+    // Range completo ma controller già staccato: il blocco (se c'era) resta,
+    // per prudenza; lo toglie solo un range completo visto a controller
+    // collegato.
+    if (gone) return;
+    recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
     setUnsaved(true);
-    log(incomplete ? 'Range calibration applied with incomplete coverage.' : 'Range calibration complete.');
+    // Un range completo sostituisce in RAM quello incompleto: il blocco decade.
+    setRangeWriteLock(null);
+    showOutcome(rangeOutcomeView({}));
+    log('Range calibration complete.');
+    ops.endOp(op);
+    startRangeCheck();
   } catch (error) {
-    // Un rangeEnd partito (o scaduto) può aver committato.
+    const gone = ds5 !== controller;
+    // Un rangeEnd partito (o scaduto) può aver committato. Staccato durante
+    // il rangeEnd, l'esito è ignoto comunque: blocco anche senza `committed`.
+    if (error.committed || gone) lockFor('error');
+    if (gone) return;
     if (error.committed) setUnsaved(true);
     closeModal('modal-range');
     showOutcome(rangeOutcomeView({ error, committed: error.committed === true }));
     log(`Range error: ${error.message}`);
   } finally {
-    ops.endOp(rangeOp);
+    ops.endOp(op);
     syncBusyTitle();
   }
+}
+
+// Verifica del range appena applicato: un altro giro sul bordo, letto con la
+// calibrazione nuova, dà l'errore di circolarità RMS sui 36 settori. Nessun
+// comando al controller; poi il test drift (il range potrebbe spostare il
+// centro: H12, non ancora verificato).
+function startRangeCheck() {
+  const tracker = createRangeTracker();
+  rangeCheck = { tracker, result: null };
+  useRangeTracker(tracker);
+  $('range-msg').innerHTML = '<b>Range applied</b> (temporary until you write it to memory). Now check it: rotate '
+    + 'both sticks once more along the edge. Nothing is sent to the controller during the check.';
+  resetRangeReadouts('Rotate both sticks once around the edge');
+  const done = $('btn-range-done');
+  done.disabled = false;
+  done.textContent = 'Skip check';
+}
+
+function updateRangeCheckUI() {
+  const { tracker } = rangeCheck;
+  const pct = Math.round(rangeStatus(tracker).coverage * 100);
+  $('range-pct').textContent = `Coverage ${pct}%`;
+  $('range-bar').style.width = pct + '%';
+  const l = circularityRms(tracker.left);
+  const r = circularityRms(tracker.right);
+  if (l === null || r === null) return;
+  rangeCheck.result = [+l.toFixed(1), +r.toFixed(1)];
+  const { min, max } = CIRCULARITY_NORMAL;
+  $('range-hint').textContent = `Circularity error: L ${l.toFixed(1)}% · R ${r.toFixed(1)}% (about ${min}–${max}% is normal)`;
+  $('btn-range-done').textContent = 'Run drift test';
+}
+
+function finishRangeCheck() {
+  const check = rangeCheck;
+  rangeCheck = null;
+  recordEvent('range-check', { circ: check.result, skipped: check.result === null });
+  if (check.result) log(`Range check: circularity error L ${check.result[0]}% · R ${check.result[1]}%.`);
+  closeModal('modal-range');
+  startDriftTest();
 }
 
 /* ============================== modali ============================== */
@@ -1802,6 +2202,7 @@ $('btn-quick-go').addEventListener('click', quickCalibrate);
 $('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
 $('btn-wizard-cancel').addEventListener('click', () => closeModal('modal-wizard'));
 $('btn-wizard-next').addEventListener('click', wizardNext);
+$('btn-wizard-escape').addEventListener('click', wizardEscape);
 
 $('btn-range').addEventListener('click', () => (calibrationAllowed() ? openRange() : undefined));
 $('btn-range-done').addEventListener('click', finishRange);

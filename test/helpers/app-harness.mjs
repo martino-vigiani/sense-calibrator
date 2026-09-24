@@ -23,6 +23,8 @@ import * as outcomeModule from '../../js/ui/outcome.js';
 import * as handsOffModule from '../../js/ui/hands-off.js';
 import * as connectHelpModule from '../../js/ui/connect-help.js';
 import * as opsModule from '../../js/calib/ops.js';
+import * as wizardGateModule from '../../js/calib/wizard-gate.js';
+import * as rangeCoverageModule from '../../js/calib/range-coverage.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 
 const APP_SOURCE = fs.readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
@@ -236,7 +238,7 @@ const SCRIPT = new vm.Script(rewriteImports(APP_SOURCE), { filename: 'js/app.js 
 // successivi nello stesso contesto.
 const PEEK = new vm.Script(`({
   busy: ops.busy, epoch: ops.epoch, ds5, sticks, unsaved, deviceInfo, wizard, driftTest,
-  quickPreflightBlocked, lastDriftResult, rangeSession,
+  quickPreflightBlocked, lastDriftResult, rangeSession, rangeCheck, rangeWriteLock, lastWizardComparison,
 })`);
 
 // `session`: una Map condivisa tra due loadApp simula un ricaricamento nella
@@ -285,6 +287,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
     clearTimeout: clock.clearTimeout,
     performance: { now: clock.now },
     crypto: webcrypto,
+    TextEncoder,
     confirm: () => h.confirmAnswer,
     structuredClone,
     URLSearchParams,
@@ -306,6 +309,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './ui/hands-off.js': handsOffModule,
       './ui/connect-help.js': connectHelpModule,
       './calib/ops.js': opsModule,
+      './calib/wizard-gate.js': wizardGateModule,
+      './calib/range-coverage.js': rangeCoverageModule,
       ...STUBS,
     },
   };

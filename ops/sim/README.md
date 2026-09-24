@@ -31,6 +31,7 @@ input reports use while a calibration session is open).
 | `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
 | `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them |
+| `range-sweep.mjs` | WS7: range coverage of one synthetic turn (8-bit quantized, stored range 0.8–1.4× off, 60/250 Hz), old rule against `js/calib/range-coverage.js`. No telemetry |
 | `legacy/load-app.mjs` | The pre-refactor harness: extracts the monolithic `quickCalibrate` from `git show 40a08ed:js/app.js` |
 
 ## Data

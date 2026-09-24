@@ -388,7 +388,18 @@ test('a good result opens the Write modal with the numbers and no warning', asyn
 test('an incomplete range disables Write until a complete range runs', async () => {
   const { h, dev } = await connectedApp();
   await h.run(h.click('btn-range'));
-  await h.advance(16000); // Done si sblocca a tempo, a copertura zero
+  // Da WS7 un range a movimento zero non si chiude mai: un giro solo, in un
+  // verso, basta per "Finish anyway" (manca il cambio di verso) dopo 15 s.
+  const from = h.clock.now() + 10;
+  for (const stick of [0, 1]) {
+    dev.touches.push({
+      stick, t0: from, dur: 800, tail: 1,
+      at: (t, ax) => 127.5 * (ax === 0 ? Math.cos(2 * Math.PI * (t - from) / 800) : Math.sin(2 * Math.PI * (t - from) / 800)),
+    });
+  }
+  await h.advance(16000);
+  assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
+  h.window.confirm = () => true;
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().unsaved, true);
   assert.match(h.$('calib-outcome').innerHTML, /Range incomplete/);

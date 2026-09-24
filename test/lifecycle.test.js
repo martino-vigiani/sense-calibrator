@@ -25,6 +25,31 @@ async function setup({ devices = 1, schedule = [], drift } = {}) {
   return { h, clock, devs, A: devs[0], B: devs[1] };
 }
 const hidCommands = dev => dev.counts.begin + dev.counts.sample + dev.counts.end;
+
+// WS7: il wizard campiona solo dopo che entrambi gli stick hanno raggiunto
+// l'angolo e sono tornati a riposo; il range si chiude solo dopo una rotazione
+// vera (due giri e un cambio di verso). Mani virtuali per il DualSense finto.
+const WIZARD_CORNER_AMPS = [[-85, -85], [85, -85], [-85, 85], [85, 85]];
+async function wizardCorner(h, dev, amp) {
+  const t0 = h.clock.now() + 20;
+  for (const stick of [0, 1]) dev.touches.push({ stick, t0, dur: 400, tail: 40, amp });
+  await h.advance(650);
+}
+async function rotateSticks(h, dev) {
+  let from = h.clock.now() + 10;
+  for (const [turns, dir] of [[2.2, 1], [1.2, -1]]) {
+    const start = from;
+    const dur = turns * 800;
+    for (const stick of [0, 1]) {
+      dev.touches.push({ stick, t0: start, dur, tail: 1, at: (t, ax) => {
+        const a = dir * 2 * Math.PI * (t - start) / 800;
+        return 127.5 * (ax === 0 ? Math.cos(a) : Math.sin(a));
+      } });
+    }
+    from = start + dur;
+  }
+  await h.advance(from - h.clock.now() + 100);
+}
 const connectEvents = h => h.sessions().filter(s => s.kind === 'connect').length;
 
 // ---------------------------------------------------------------- ops gate
@@ -111,7 +136,10 @@ test('the guided wizard raises busy before its first await and releases it after
   assert.equal(h.peek().busy, true, 'busy is raised synchronously on Start');
   assert.equal(h.visible('btn-wizard-cancel'), false);
   await h.run(start);
-  for (let step = 1; step <= 4; step++) await h.run(h.click('btn-wizard-next'));
+  for (const amp of WIZARD_CORNER_AMPS) {
+    await wizardCorner(h, A, amp);
+    await h.run(h.click('btn-wizard-next'));
+  }
   assert.equal(h.peek().busy, false);
   assert.equal(h.peek().unsaved, true);
   assert.deepEqual([A.counts.begin, A.counts.sample, A.counts.end], [1, 4, 1]);
@@ -127,7 +155,7 @@ test('Range keeps the controller busy until finishRange closes the session', asy
   assert.equal(h.visible('modal-range'), true);
   h.keydown('Escape');
   assert.equal(h.visible('modal-range'), true, 'the range modal is never dismissed with Escape');
-  await h.advance(16000); // sblocco a tempo di "Done"
+  await rotateSticks(h, A);
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().busy, false);
   assert.equal(h.peek().unsaved, true);
@@ -365,7 +393,7 @@ test('Range code 3 (already closed) does not set unsaved', async () => {
   const command = A.command.bind(A);
   A.command = (id, buf) => { command(id, buf); if (id === 0x82 && buf[2] === 2 && buf[0] === 2) A.response = [0x83, 1, 2, 3]; };
   await h.run(h.click('btn-range'));
-  await h.advance(16000);
+  await rotateSticks(h, A);
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().busy, false);
   assert.equal(h.peek().unsaved, false);
