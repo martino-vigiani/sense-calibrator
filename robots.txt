@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /ops/
 
 Sitemap: https://martino-vigiani.github.io/sense-calibrator/sitemap.xml

@@ -1,0 +1,18 @@
+/* Pagina di ricerca: stile minimo, monocromatico, nessuna dipendenza. */
+:root { color-scheme: light; font: 15px/1.45 system-ui, sans-serif; color: #111; background: #fff; }
+body { max-width: 60rem; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
+h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+section { border-top: 1px solid #ccc; }
+.warn { border: 2px solid #111; padding: .6rem .8rem; }
+.status { font-family: ui-monospace, monospace; font-size: .9rem; }
+.steps { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+button { font: inherit; padding: .4rem .7rem; border: 1px solid #111; background: #fff; color: #111; cursor: pointer; }
+button[data-write] { border-width: 2px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 3px solid #111; outline-offset: 2px; }
+label { display: block; margin: .4rem 0; }
+.steps label { display: inline-block; margin: 0; }
+input[type="number"] { width: 4rem; }
+pre { background: #f3f3f3; padding: .6rem; overflow: auto; max-height: 24rem; font-size: .8rem; white-space: pre-wrap; }
+[hidden] { display: none !important; }
