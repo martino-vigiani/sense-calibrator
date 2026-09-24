@@ -8,7 +8,11 @@ import { runQuick } from '../js/calib/quick.js';
 const stick = (offset, noise = 0.2) => ({ offset, noise });
 const reading = ([l, r], noise) => ({ left: stick(l, noise), right: stick(r, noise) });
 
-async function runScripted({ before, verifies, noise = 0.2, params = {} }) {
+// `force`: la passata "Calibrate anyway" (WS1: una partenza sotto okMax senza
+// force non invia comandi). `releasedAfterEnd: false`: dopo il primo calibEnd
+// la tenuta centrata non riesce più (lo stick resta lontano dal centro), così
+// la verifica di WS1 prende per buono un residuo ≥15% invece di rimisurarlo.
+async function runScripted({ before, verifies, noise = 0.2, params = {}, force = false, releasedAfterEnd = true }) {
   let ends = 0;
   let verify = 0;
   const logs = [];
@@ -19,7 +23,7 @@ async function runScripted({ before, verifies, noise = 0.2, params = {} }) {
       calibEnd: async () => { ends++; },
     },
     sampler: {
-      waitForStable: async () => true,
+      waitForStable: async options => releasedAfterEnd || !options?.requireCentered || ends === 0,
       measureOffset: async (ms, options) => options?.requireCentered
         ? reading(before, 0.2)
         : reading(verifies[Math.min(verify++, verifies.length - 1)], noise),
@@ -27,12 +31,13 @@ async function runScripted({ before, verifies, noise = 0.2, params = {} }) {
     clock: { sleep: async () => {} },
     log: line => logs.push(line),
     params,
+    force,
   });
   return { ...run, ends, logs };
 }
 
 test('a plateau worse than the start is not convergence: one more pass when the other stick is centered', async () => {
-  const r = await runScripted({ before: [0.555, 0.555], verifies: [[2, 0.555]] });
+  const r = await runScripted({ before: [0.555, 0.555], verifies: [[2, 0.555]], force: true });
   assert.equal(r.ends, 3);
   assert.deepEqual(r.session.passes, [2, 2, 2]);
   assert.equal(r.outcome, 'worse-than-start');
@@ -48,7 +53,7 @@ test('with neither stick at the floor, recovery uses the whole budget', async ()
 });
 
 test('a verified pass at 15% or more stops the loop as catastrophic', async () => {
-  const r = await runScripted({ before: [3.551, 0.555], verifies: [[100, 0.555], [0.555, 0.555]] });
+  const r = await runScripted({ before: [3.551, 0.555], verifies: [[100, 0.555], [100, 0.555], [0.555, 0.555]], releasedAfterEnd: false });
   assert.equal(r.ends, 1);
   assert.deepEqual(r.session.passes, [100]);
   assert.equal(r.outcome, 'catastrophic');

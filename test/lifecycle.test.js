@@ -266,7 +266,8 @@ async function setupWith(prepare) {
 }
 
 test('a missing calibEnd reply rejects within 1.1 s, poisons the controller, releases busy and marks unsaved', async () => {
-  const { h, A } = await setup();
+  // Stick con drift: da WS1 una partenza già centrata non invia comandi.
+  const { h, A } = await setup({ drift: DRIFTING });
   hangReplies(A, (id, last) => id === 0x83 && last?.op === 'end');
   await h.click('btn-quick');
   await h.run(h.click('btn-quick-go'));
@@ -290,7 +291,8 @@ test('a missing calibEnd reply rejects within 1.1 s, poisons the controller, rel
 });
 
 test('a missing calibSample reply poisons without marking unsaved (nothing was committed)', async () => {
-  const { h, A } = await setup();
+  // Stick con drift: da WS1 una partenza già centrata non invia comandi.
+  const { h, A } = await setup({ drift: DRIFTING });
   hangReplies(A, (id, last) => id === 0x83 && last?.op === 'sample');
   await h.click('btn-quick');
   await h.run(h.click('btn-quick-go'));

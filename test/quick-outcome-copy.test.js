@@ -9,7 +9,7 @@ import { VClock } from '../ops/sim/vclock.mjs';
 // Regola H4 / piano §4.2: con l'ultima passata a 15% o più l'esito non è mai un
 // successo. Il testo è provvisorio (WS5 lo riscrive), la regola no.
 const SUCCESS = /\b(complete|completed|success|successful|done|fixed)\b/i;
-const OUTCOMES = ['catastrophic', 'worse-than-start', 'lost-ground', 'worn', 'unstable', 'residual-deterministic', 'within-1-step', 'residual', 'centered', 'some-future-outcome'];
+const OUTCOMES = ['catastrophic', 'moved', 'worse-than-start', 'lost-ground', 'worn', 'unstable', 'residual-deterministic', 'within-1-step', 'residual', 'centered', 'some-future-outcome'];
 const NV = ['locked', 'unlocked', 'pending_reboot', null];
 
 test('no outcome at 15% or more renders success copy, whatever the label', () => {
@@ -54,11 +54,22 @@ test('the new sub-15% outcomes have their own text, and worse-than-start still w
   assert.equal(quickOutcomeToast({ outcome: 'centered', worst: 0.555 })[0], 'Quick calibration complete.');
 });
 
+test('the WS1 "moved" stop says the sticks were not released, never "complete"', () => {
+  const [known] = quickOutcomeToast({ outcome: 'moved', worst: 2.4, beforeWorst: 5 });
+  assert.match(known, /not released before the next pass\. Residual offset 2\.4%/);
+  assert.doesNotMatch(known, SUCCESS);
+  const [unknown] = quickOutcomeToast({ outcome: 'moved', worst: null });
+  assert.match(unknown, /not released.*could not be verified/);
+  assert.doesNotMatch(quickOutcomeLog({ outcome: 'moved', worst: 2.4 }), SUCCESS);
+});
+
 test('in the page, a runaway pass ends with the do-not-save warning, not "complete"', async () => {
   // Bias persistente di 40 LSB (~31%) sullo stick sinistro: la partenza è
-  // centrata (preflight ok), la prima passata verificata va oltre il 15%.
+  // vicina al centro (preflight ok) ma con un drift vero, perché da WS1 una
+  // partenza già centrata non invia comandi; la prima passata va oltre il 15%
+  // e la verifica (tenuta entro il 15% impossibile) la dichiara catastrofica.
   const clock = new VClock();
-  const dev = makeDevice(clock, { drift: [[0.2, -0.3], [-0.1, 0.4]], sf: 0 });
+  const dev = makeDevice(clock, { drift: [[3.2, -0.3], [-0.1, 0.4]], sf: 0 });
   dev.sticks[0].bias = { axis: 0, B: 40 };
   const h = await loadApp({ clock, authorized: [dev] });
   await h.advance(5000);

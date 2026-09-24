@@ -27,6 +27,15 @@ function catastrophicToast({ worst, beforeWorst, nvStatus }) {
 // Ritorna [messaggio, durata ms] per toast(). `nvStatus` è lo stato NVS letto
 // dal controller ('locked' | 'unlocked' | 'pending_reboot' | null).
 export function quickOutcomeToast({ outcome, worst, beforeWorst = null, bestWorst = null, nvStatus = null }) {
+  // 'moved' (WS1): la tenuta prima di una passata successiva è fallita e non
+  // è partito nessun comando. La RAM monta l'ultima passata verificata (se
+  // c'è): il tetto del 15% vale comunque, per la rete di sicurezza sotto.
+  if (outcome === 'moved' && (worst === null || worst === undefined)) {
+    return ['Calibration stopped: the sticks were not released. The last pass could not be verified: run the drift test to check it.', 7000];
+  }
+  if (outcome === 'moved' && worst < QUICK_CATASTROPHIC_PCT) {
+    return [`Calibration stopped: the sticks were not released before the next pass. Residual offset ${pct(worst)}.`, 7000];
+  }
   if (outcome === 'unverified' || worst === null || worst === undefined) {
     return ['Calibration applied, but the result could not be verified: run the drift test to check it.', 6000];
   }
@@ -60,5 +69,6 @@ export function quickOutcomeLog({ outcome, worst }) {
   if (outcome === 'catastrophic' || (typeof worst === 'number' && worst >= QUICK_CATASTROPHIC_PCT)) {
     return `Quick calibration stopped: last pass at ${worst.toFixed(1)}%, the result must not be saved.`;
   }
+  if (outcome === 'moved') return 'Quick calibration stopped before the next pass: the sticks were not released.';
   return 'Quick calibration complete.';
 }
