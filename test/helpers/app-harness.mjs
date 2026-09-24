@@ -18,7 +18,10 @@ import * as measureModule from '../../js/calib/measure.js';
 import * as samplingModule from '../../js/calib/sampling.js';
 import * as quickModule from '../../js/calib/quick.js';
 import * as quickPolicyModule from '../../js/calib/quick-policy.js';
-import * as quickOutcomeCopyModule from '../../js/calib/quick-outcome-copy.js';
+import * as latticeModule from '../../js/calib/lattice.js';
+import * as outcomeModule from '../../js/ui/outcome.js';
+import * as handsOffModule from '../../js/ui/hands-off.js';
+import * as connectHelpModule from '../../js/ui/connect-help.js';
 import * as opsModule from '../../js/calib/ops.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 
@@ -236,7 +239,9 @@ const PEEK = new vm.Script(`({
   quickPreflightBlocked, lastDriftResult, rangeSession,
 })`);
 
-export async function loadApp({ authorized = [], chooser = [], hidAvailable = true, search = '', hostname = 'sense.test', clock = new VClock(), storage = {}, telemetryNoticeSeen = true } = {}) {
+// `session`: una Map condivisa tra due loadApp simula un ricaricamento nella
+// stessa scheda (sessionStorage sopravvive, localStorage anche).
+export async function loadApp({ authorized = [], chooser = [], hidAvailable = true, search = '', hostname = 'sense.test', clock = new VClock(), storage = {}, telemetryNoticeSeen = true, session = new Map() } = {}) {
   const doc = makeDocument();
   const hid = makeHid();
   hid.authorized.push(...authorized);
@@ -260,6 +265,11 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       getItem: key => (store.has(key) ? store.get(key) : null),
       setItem: (key, value) => { store.set(key, String(value)); },
       removeItem: key => { store.delete(key); },
+    },
+    sessionStorage: {
+      getItem: key => (session.has(key) ? session.get(key) : null),
+      setItem: (key, value) => { session.set(key, String(value)); },
+      removeItem: key => { session.delete(key); },
     },
     matchMedia: () => ({ matches: false, addEventListener: noop, removeEventListener: noop }),
     // rAF a ~60 Hz sull'orologio virtuale; in una tab nascosta il browser lo
@@ -291,7 +301,10 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './calib/sampling.js': samplingModule,
       './calib/quick.js': quickModule,
       './calib/quick-policy.js': quickPolicyModule,
-      './calib/quick-outcome-copy.js': quickOutcomeCopyModule,
+      './calib/lattice.js': latticeModule,
+      './ui/outcome.js': outcomeModule,
+      './ui/hands-off.js': handsOffModule,
+      './ui/connect-help.js': connectHelpModule,
       './calib/ops.js': opsModule,
       ...STUBS,
     },

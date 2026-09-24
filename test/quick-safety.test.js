@@ -387,7 +387,8 @@ test('app: a stalled pass leaves unsaved set and blocks every command until the 
   assert.equal(dev.counts.end, 0);
   assert.equal(h.peek().unsaved, true);
   assert.equal(h.peek().busy, false);
-  assert.ok(h.toasts().some(t => /never settled/.test(t)));
+  assert.match(h.$('calib-outcome').innerHTML, /never settled/);
+  assert.equal(h.$('btn-flash').disabled, true, 'Write is off until the controller is power-cycled');
   await h.advance(1000); // animazione di chiusura del modale
   assert.equal(h.visible('modal-quick'), false);
   const sent = dev.commandLog.length;

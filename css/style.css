@@ -1825,6 +1825,117 @@ a.btn { text-decoration: none; }
 }
 
 /* ============================================================
+   Esiti e avvisi (WS5): pannello esito, blocco di Write, misuratore
+   "mani lontane", aiuto alla connessione. Blocco a sé, così il
+   restyling di WS6 lo trova in un punto solo.
+   ============================================================ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.connect-help { text-align: left; }
+.connect-help ul { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); }
+.connect-help li + li { margin-top: 4px; }
+
+.session-note {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  max-width: none;
+  margin: 18px 0 0;
+  font-size: 13.5px;
+}
+.session-note p { margin: 0; color: var(--ink-2); }
+.session-note b { color: var(--ink); }
+
+.serial-toggle { margin-top: 4px; padding: 3px 0; min-width: 0; }
+
+/* Il tono non si affida al solo colore (il sito è monocromo): il bordo
+   sinistro cambia spessore e il titolo dice già cosa fare. */
+.outcome-card {
+  /* scrollIntoView non deve finire sotto la topbar fissa */
+  scroll-margin-top: 80px;
+  padding: 18px 24px;
+  margin-bottom: 18px;
+  border-color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+.outcome-card[data-tone="warn"] { box-shadow: inset 6px 0 0 var(--ink); }
+.outcome-card[data-tone="bad"] { border-width: 2px; box-shadow: inset 10px 0 0 var(--ink); }
+.outcome-title { margin: 0 0 10px; font-size: 16px; }
+.outcome-card p { margin: 8px 0 0; font-size: 14px; color: var(--ink-2); max-width: 640px; }
+.outcome-sticks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13.5px;
+}
+.outcome-sticks dt { font-family: var(--font); font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.outcome-sticks dd { margin: 2px 0 0; }
+.outcome-before { color: var(--ink-3); }
+.outcome-repair { margin-top: 10px; font-size: 13.5px; }
+.outcome-repair summary { cursor: pointer; font-weight: 600; }
+.outcome-repair ol { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
+.outcome-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+@media (max-width: 480px) {
+  .outcome-card { padding: 16px 16px 16px 22px; }
+  .outcome-sticks { grid-template-columns: 1fr; }
+}
+
+.banner-lock { display: block; margin-top: 4px; font-weight: 600; opacity: 1 !important; }
+.banner .btn-primary:disabled { opacity: 0.45; }
+
+/* Misuratore: pallino colorato più testo, così chi non distingue i colori
+   legge comunque lo stato. */
+.handsoff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.handsoff::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ink-3);
+  transition: background-color 0.16s var(--ease);
+}
+.handsoff[data-level="green"]::before { background: #2b8a3e; }
+.handsoff[data-level="amber"]::before { background: #d48a00; }
+.handsoff[data-level="red"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
+.battery-hint { margin: 8px 0 0; }
+
+.flash-numbers { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13.5px; }
+.flash-numbers li + li { margin-top: 4px; }
+.flash-warning {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+.flash-warning p { margin: 0 0 10px; font-weight: 600; }
+.flash-ack { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.flash-ack input { margin-top: 2px; }
+
+/* ============================================================
    Reduced motion — ultima regola: vince su tutto quanto sopra
    ============================================================ */
 
