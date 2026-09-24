@@ -22,7 +22,9 @@ export function makeSimInstance(clock, dev, meta, params = {}, { isCurrent, onPr
     const sticks = parseSticks(event.reportId, event.data);
     if (sticks) source.push(sticks);
   };
-  const controller = new DS5(dev, null);
+  // Timeout delle risposte HID sull'orologio virtuale: con i timer reali un
+  // run lento potrebbe scadere in tempo reale e avvelenare il controller.
+  const controller = new DS5(dev, null, { timers: clock });
   const logs = [];
   return {
     source,

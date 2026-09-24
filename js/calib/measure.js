@@ -43,16 +43,24 @@ export function median(values) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+// La finestra originale andava da i-DRIFT_WINDOW a i inclusi: 31 campioni, non
+// 30. Il test drift usa la finestra giusta (DRIFT_WINDOW). measureOffset, che
+// decide l'esito di ogni passata Quick, resta sui 31 di sempre: cambiarli è un
+// cambio di algoritmo da valutare col simulatore, non una correzione di
+// ciclo di vita.
+export const DRIFT_WINDOW_LEGACY = DRIFT_WINDOW + 1;
+
 // Classifica ogni campione come stabile o in movimento guardando l'escursione
-// (max-min per asse) nella finestra dei DRIFT_WINDOW campioni precedenti.
+// (max-min per asse) negli ultimi `windowSize` campioni, lui compreso.
 // Un drift fermo, anche enorme, è stabile; una mano sullo stick no.
-export function extractStableSamples(samples) {
+export function extractStableSamples(samples, windowSize = DRIFT_WINDOW_LEGACY) {
+  const w = Math.max(2, Math.floor(windowSize));
   const stable = [];
-  for (let i = DRIFT_WINDOW; i < samples.length; i++) {
+  for (let i = w - 1; i < samples.length; i++) {
     let spread = 0;
     for (const a of AXES) {
       let min = Infinity, max = -Infinity;
-      for (let j = i - DRIFT_WINDOW; j <= i; j++) {
+      for (let j = i - w + 1; j <= i; j++) {
         const v = samples[j][a];
         if (v < min) min = v;
         if (v > max) max = v;
@@ -61,7 +69,7 @@ export function extractStableSamples(samples) {
     }
     if (spread <= DRIFT_MOVE_SPREAD) stable.push(samples[i]);
   }
-  const denom = samples.length - DRIFT_WINDOW;
+  const denom = samples.length - (w - 1);
   return { stable, fraction: denom > 0 ? stable.length / denom : 0 };
 }
 
