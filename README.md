@@ -51,6 +51,10 @@ Sense Calibrator measures the untouched sticks first. A stable offset can often 
 
 The app applies calibration temporarily, runs the same measurements again and lets you decide whether to save it. For the protocol details, read [ARTICLE.md](ARTICLE.md) or the [SubraLabs technical write-up](https://subralabs.com/lab/sense-calibrator.html).
 
+## Reading the numbers
+
+The DualSense reports each stick axis as a whole byte, so every offset sits on a fixed grid. One step is 0.78% per axis. The center falls between two bytes, so a perfectly centered stick reads **0.6%**, not 0%: that is the measurement limit. A stick with one axis a single step off reads **1.2%** and is shown as "Within 1 step", which is fine to save. Results are labelled with the step count, for example `0.6% · at floor` or `1.2% · 1 step`.
+
 ## Limits and safety
 
 - Only the standard DualSense with USB product ID `054C:0CE6` is supported.
