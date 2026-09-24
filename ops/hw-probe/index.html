@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Research tool, never part of the public site: not linked, not indexed. -->
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>DualSense calibration read-back probe (research, localhost only)</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="probe.css">
+</head>
+<body>
+  <header>
+    <h1>Calibration read-back probe</h1>
+    <p class="warn"><strong>Research only. Use a spare DualSense, never the one you play with.</strong>
+      This page sends raw calibration writes (<code>0x80 [12,1]</code>). It never unlocks or writes controller memory (NVS),
+      but two steps (H-c, H-d) are treated as possibly permanent. Protocol: <code>docs/hw-probe-protocol.md</code>.</p>
+  </header>
+
+  <main id="probe" hidden>
+    <section>
+      <h2>1. Connect</h2>
+      <p>USB only. Power-cycle the controller before you start (hold PS for 10 s, then press PS), so its RAM matches its memory.</p>
+      <button id="connect" type="button">Connect DualSense</button>
+      <p id="conn-status" class="status" role="status">Not connected.</p>
+      <p class="sticks">Sticks (raw bytes): <output id="sticks">–</output></p>
+    </section>
+
+    <section>
+      <h2>2. Arm writes on this connection</h2>
+      <label class="check"><input id="spare" type="checkbox"> This is a <strong>spare</strong> controller. I accept that it may end up miscalibrated or need a repair.</label>
+      <label>Type <code>SPARE</code> to confirm: <input id="phrase" type="text" autocomplete="off" spellcheck="false" size="8"></label>
+      <button id="arm" type="button" disabled>Arm</button>
+      <p id="arm-status" class="status" role="status">Disarmed. Read-only steps only.</p>
+    </section>
+
+    <section>
+      <h2>3. Steps</h2>
+      <p>Keep your hands off both sticks during every step. Each write step asks for confirmation.</p>
+      <div class="steps">
+        <button type="button" data-step="preflight" disabled>Preflight: NVS status + [12,2]</button>
+        <button type="button" data-step="H-a" disabled>H-a: read ×3 at rest</button>
+        <button type="button" data-step="H-b" data-write disabled>H-b: Quick pass (12 samples), read</button>
+        <button type="button" data-step="H-c" data-write disabled>H-c: write the baseline back, read</button>
+        <button type="button" data-step="H-d" data-write disabled>H-d: calibEnd with 0 samples, read</button>
+        <button type="button" data-step="restore" data-write disabled>Restore the baseline</button>
+        <button type="button" data-step="H-e" data-write disabled>H-e: slope (units per LSB)</button>
+        <button type="button" data-step="AB" data-write disabled>A/B: 12 vs 4 samples</button>
+        <label>A/B passes per arm <input id="ab-reps" type="number" min="1" max="10" value="5"></label>
+        <button type="button" data-step="H-f-prepare" disabled>H-f (1): snapshot before power-cycle</button>
+        <button type="button" data-step="H-f-check" disabled>H-f (2): check after reconnect</button>
+      </div>
+      <p id="step-status" class="status" role="status">Idle.</p>
+    </section>
+
+    <section>
+      <h2>4. Results</h2>
+      <p>Stays in this tab. Nothing is sent anywhere (the page's policy blocks network requests). The serial number is never recorded.</p>
+      <pre id="evaluation">No steps yet.</pre>
+      <button id="download" type="button" disabled>Download JSON</button>
+      <details>
+        <summary>Full record</summary>
+        <pre id="record"></pre>
+      </details>
+      <details open>
+        <summary>HID log</summary>
+        <pre id="log"></pre>
+      </details>
+    </section>
+  </main>
+
+  <p id="refused" class="warn" hidden></p>
+
+  <script type="module" src="probe.mjs"></script>
+</body>
+</html>
