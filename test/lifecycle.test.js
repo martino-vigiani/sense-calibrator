@@ -60,7 +60,7 @@ test('an authorized DualSense is adopted at boot, then the automatic drift test 
   assert.equal(h.visible('view-device'), true);
   assert.equal(h.visible('view-hero'), false);
   assert.equal(h.peek().ds5.device, A);
-  assert.equal(h.$('chip-nvs').textContent, 'NVS protected');
+  assert.equal(h.$('chip-nvs').textContent, 'Memory locked (normal)');
   assert.equal(connectEvents(h), 1);
   assert.equal(h.sessions().filter(s => s.kind === 'drift').length, 1);
   assert.match(h.$('drift-status').textContent, /correctly centered/);
@@ -343,7 +343,7 @@ test('a lock that fails once after a successful unlock is retried once and the s
   assert.equal(lockAttempts, 2);
   assert.equal(nvsSends(A, 2), 1, 'unlock is never retried');
   assert.equal(h.peek().unsaved, false);
-  assert.equal(h.$('chip-nvs').textContent, 'NVS protected');
+  assert.equal(h.$('chip-nvs').textContent, 'Memory locked (normal)');
 });
 
 test('a flash that fails re-reads the NVS status in the catch', async () => {
@@ -491,7 +491,8 @@ test('an auto-connect that cannot open the device explains why in the hero', asy
   const h = await loadApp({ clock, authorized: [A] });
   await h.advance(1000);
   assert.equal(h.visible('hero-error'), true);
-  assert.match(h.$('hero-error').innerHTML, /Couldn’t open the controller/);
+  assert.match(h.$('hero-error').innerHTML, /couldn’t be opened/);
+  assert.equal(h.visible('connect-help'), true, 'the checklist explains what to try next');
   assert.equal(h.$('btn-connect').disabled, false);
 });
 

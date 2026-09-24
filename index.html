@@ -130,6 +130,15 @@
 
 <main>
 
+  <!-- Una calibrazione applicata in questa scheda e mai scritta né scartata
+       di sicuro. sessionStorage non sa quale controller fosse: il testo lo dice. -->
+  <div id="banner-session" class="callout session-note hidden" role="status">
+    <p><b>A calibration from earlier in this tab may still be active.</b>
+      It was applied but not written to memory. If that controller hasn’t been turned off since, it may still be
+      using it. This page can’t tell which controller it was: run the drift test to check.</p>
+    <button id="btn-session-dismiss" class="btn btn-ghost btn-sm" type="button">Dismiss</button>
+  </div>
+
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
     <h1>Fix PS5 stick drift.<br>From your browser.</h1>
@@ -147,7 +156,7 @@
       <h2 id="unsupported-title" class="unsupported-title">Open this page on a computer</h2>
       <p id="unsupported-msg" class="unsupported-msg">Recalibrating a DualSense means talking to it over a USB
         cable, and browsers only allow that on <b>desktop Chrome or Edge</b>. Send yourself the link, open it
-        there, and the fix takes about two minutes.</p>
+        there: the test takes a minute.</p>
       <div class="unsupported-actions">
         <button id="btn-copy-link" class="btn btn-secondary" type="button">Copy link</button>
       </div>
@@ -155,6 +164,13 @@
     </div>
 
     <div id="hero-error" class="callout hidden" role="alert"></div>
+
+    <!-- Selettore vuoto o apertura fallita: app.js riempie la lista da
+         js/ui/connect-help.js. Prima la pagina restava muta. -->
+    <div id="connect-help" class="callout connect-help hidden">
+      <b>Controller not showing up?</b>
+      <ul id="connect-help-list"></ul>
+    </div>
 
     <ol class="steps-strip" aria-label="How it works">
       <li><b>1</b><span>Connect via USB</span></li>
@@ -223,6 +239,7 @@
       <div class="device-id">
         <h2>DualSense</h2>
         <p id="device-sub" class="device-sub">...</p>
+        <button id="btn-serial" class="btn btn-ghost btn-sm serial-toggle hidden" type="button" aria-pressed="false">Show serial</button>
       </div>
       <dl id="device-info" class="device-info"></dl>
       <div class="device-actions">
@@ -239,6 +256,10 @@
       <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden"><i></i></div>
     </div>
+
+    <!-- Esito persistente dell'ultima calibrazione (js/ui/outcome.js): resta
+         finché non parte la calibrazione successiva, al posto dei toast. -->
+    <div id="calib-outcome" class="card outcome-card hidden" role="status" aria-live="polite" data-tone="ok"></div>
 
     <div class="grid-sticks">
       <div class="card stick-card">
@@ -267,14 +288,14 @@
       <div class="action">
         <div>
           <h4>Quick calibration</h4>
-          <p>Re-centers the sticks automatically in a few seconds. Don't touch the controller during the process.</p>
+          <p>Re-centers the sticks automatically, usually in under half a minute. Don't touch the controller while it runs.</p>
         </div>
         <button id="btn-quick" class="btn btn-primary">Start</button>
       </div>
       <div class="action">
         <div>
           <h4>Guided calibration</h4>
-          <p>A 4-step procedure moving the sticks to the corners. More accurate on marked drift.</p>
+          <p>A 4-step procedure moving the sticks to the corners. Use it when Quick can't get closer, or when a stick rests too far off-center for Quick.</p>
         </div>
         <button id="btn-wizard" class="btn btn-secondary">Start</button>
       </div>
@@ -312,6 +333,7 @@
       <div>
         <b>Calibration active but temporary.</b>
         <span>It's lost when the controller powers off: write it to memory to make it permanent.</span>
+        <span id="banner-lock" class="banner-lock hidden"></span>
       </div>
       <button id="btn-flash" class="btn btn-primary">Write to memory</button>
     </div>
@@ -339,6 +361,8 @@
   <div class="modal-panel modal-narrow">
     <h3 id="quick-title">Quick calibration</h3>
     <p id="quick-msg">Rest the controller on a stable surface and <b>don't touch the sticks</b>.</p>
+    <p id="quick-handsoff" class="handsoff" data-level="unknown">Waiting for the controller…</p>
+    <p id="quick-battery" class="hint battery-hint hidden"></p>
     <div class="progress"><i id="quick-bar"></i></div>
     <label class="telemetry-label" title="Payload: complete Quick calibration only; no serial number, device ID or local session ID">
       <input type="checkbox" id="telemetry-consent">
@@ -368,6 +392,8 @@
       <p id="wizard-msg">This procedure re-centers the sticks by sampling their resting position after each movement.
         Once started it <b>cannot be cancelled</b>: don't close the page and don't disconnect the controller.</p>
     </div>
+    <p id="wizard-handsoff" class="handsoff" data-level="unknown">Waiting for the controller…</p>
+    <p id="wizard-battery" class="hint battery-hint hidden"></p>
     <div id="wizard-live" class="wizard-live hidden">
       <figure>
         <canvas id="dial-wiz-l" width="110" height="110" aria-label="Live left stick position"></canvas>
@@ -415,10 +441,17 @@
 <div id="modal-flash" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="flash-title">
   <div class="modal-panel modal-narrow">
     <h3 id="flash-title">Write to the controller's memory?</h3>
-    <p>The current calibration will be saved <b>permanently</b> in the DualSense's non-volatile memory (NVS)
-      and will stay active on PS5, PC and everywhere.</p>
-    <p class="hint">Identical procedure to dualshock-tools', proven on millions of controllers. If in doubt
-      you can always recalibrate again.</p>
+    <p>The current calibration will be saved <b>permanently</b> in the DualSense's memory and will stay
+      active on PS5, PC and everywhere else.</p>
+    <ul id="flash-numbers" class="flash-numbers mono hidden" aria-label="Current result"></ul>
+    <div id="flash-warning" class="flash-warning hidden">
+      <p id="flash-warning-text"></p>
+      <label class="flash-ack">
+        <input type="checkbox" id="flash-ack">
+        <span>I understand. Save this result anyway.</span>
+      </label>
+    </div>
+    <p class="hint">You can calibrate again and write a new result at any time.</p>
     <div class="modal-actions">
       <button id="btn-flash-cancel" class="btn btn-ghost">Cancel</button>
       <button id="btn-flash-go" class="btn btn-primary">Write permanently</button>

@@ -6,13 +6,19 @@ import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
 import {
-  DRIFT_MAX_RETRIES, DRIFT_MILD_MAX, DRIFT_MIN_STABLE, DRIFT_OK_MAX, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
+  DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
 } from './calib/measure.js';
 import { measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
-import { quickOutcomeToast, quickOutcomeLog } from './calib/quick-outcome-copy.js';
 import { createOpGate } from './calib/ops.js';
+import { formatOffset } from './calib/lattice.js';
+import {
+  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, quickOutcomeView, rangeOutcomeView,
+  revertAdvice, writeLockFor,
+} from './ui/outcome.js';
+import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
+import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -50,7 +56,8 @@ const ops = createOpGate();
 
 const logEl = $('log');
 function log(msg) {
-  const ts = new Date().toLocaleTimeString('it-IT', { hour12: false });
+  // Locale del browser: l'interfaccia è in inglese, e 'it-IT' era un residuo.
+  const ts = new Date().toLocaleTimeString(undefined, { hour12: false });
   logEl.textContent += `${ts}  ${msg}\n`;
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -280,6 +287,19 @@ function showHeroError(html) {
   el.classList.remove('hidden');
 }
 
+// Selettore vuoto o apertura fallita: la lista di controlli al posto del
+// silenzio (prima `devices.length === 0` usciva senza dire nulla).
+function showConnectHelp() {
+  $('connect-help-list').innerHTML = CONNECT_CHECKLIST.map(item => `<li>${esc(item)}</li>`).join('');
+  $('connect-help').classList.remove('hidden');
+}
+
+function showConnectError(error) {
+  const copy = connectErrorCopy(error);
+  showHeroError(`<b>${esc(copy.title)}</b> ${esc(copy.detail)}`);
+  showConnectHelp();
+}
+
 /* Browser senza WebHID (mobile e tablet in generale, Safari, Firefox).
    Solo presentazione: sostituisce la CTA con un'istruzione chiara e lascia
    leggibili hero, steps e FAQ. Nessun impatto sulla calibrazione. */
@@ -327,6 +347,7 @@ if (btnCopyLink) {
 }
 
 const NV_CHIP_TITLE = 'State of the controller\'s non-volatile memory';
+const NV_LOCKED_MESSAGE = 'The controller’s memory is locked, as it normally is: calibrations stay temporary until you write them to memory.';
 const NV_UNLOCKED_MESSAGE = 'Memory unlocked: changes may be permanent. Restart the controller.';
 const NV_UNKNOWN_STATE_MESSAGE = 'The controller did not report its memory state. Calibration is allowed, but changes may not be temporary.';
 const NV_PENDING_MESSAGE = 'The controller has a save pending: restart it (Restart button) before calibrating.';
@@ -345,7 +366,13 @@ function setNvChip(nv) {
   el.classList.remove('hidden', 'chip-warn', 'chip-on');
   el.title = NV_CHIP_TITLE;
   if (!nv) { el.classList.add('hidden'); return; }
-  if (nv.status === 'locked') { el.textContent = 'NVS protected'; el.classList.add('chip-on'); }
+  if (nv.status === 'locked') {
+    // "Locked" è lo stato normale: il nome vecchio ("NVS protected") non diceva
+    // a chi gioca se fosse un bene o un problema.
+    el.textContent = 'Memory locked (normal)';
+    el.title = NV_LOCKED_MESSAGE;
+    el.classList.add('chip-on');
+  }
   else if (nv.status === 'unlocked') {
     el.textContent = 'Memory unlocked';
     el.title = NV_UNLOCKED_MESSAGE;
@@ -389,9 +416,25 @@ function calibrationAllowed() {
 
 function setBatteryChip() {
   const el = $('chip-battery');
-  if (!battery) { el.classList.add('hidden'); return; }
+  if (!battery) { el.classList.add('hidden'); updateBatteryHints(); return; }
   el.classList.remove('hidden');
   el.textContent = battery.charging ? `Charging · ${battery.level}%` : `Battery ${battery.level}%`;
+  updateBatteryHints();
+}
+
+// Batteria bassa e non in carica: un controller che si spegne a metà
+// calibrazione la interrompe. Solo un avviso: non blocca nulla.
+const LOW_BATTERY_PCT = 20;
+function updateBatteryHints() {
+  const low = !!battery && !battery.charging && battery.level <= LOW_BATTERY_PCT;
+  const text = low
+    ? `Battery at ${battery.level}% and not charging. If the controller shuts down mid-calibration, the calibration is interrupted: charge it first, or use a USB port that charges it.`
+    : '';
+  for (const id of ['quick-battery', 'wizard-battery']) {
+    const el = $(id);
+    el.textContent = text;
+    el.classList.toggle('hidden', !low);
+  }
 }
 
 async function refreshNv() {
@@ -413,6 +456,7 @@ function onControllerPoisoned(controller, error) {
   if (ds5 !== controller) return;
   if (error.committed) setUnsaved(true);
   setNvChip({ status: 'poisoned' });
+  updateWriteLock();
   log(`Controller not responding: ${error.message}.`);
   // Durante il flash il messaggio giusto è quello sullo stato della memoria,
   // mostrato da doFlash.
@@ -438,11 +482,13 @@ async function connect() {
   if (adopting) return;
   try {
     const devices = await navigator.hid.requestDevice({ filters: HID_FILTERS });
-    if (devices.length === 0) return;
+    // Selettore vuoto o chiuso senza scegliere: il browser non dice quale dei
+    // due, quindi la lista vale per entrambi.
+    if (devices.length === 0) { showConnectHelp(); return; }
     await adopt(devices.find(isUsbDevice) ?? devices[0]);
   } catch (error) {
-    showHeroError(`<b>Connection failed.</b> ${esc(error.message || error)}`);
-    log(`Connection error: ${error.message || error}`);
+    showConnectError(error);
+    log(`Connection error: ${error.name ? `${error.name}: ` : ''}${error.message || error}`);
   }
 }
 
@@ -492,6 +538,7 @@ async function adopt(device) {
     $('view-hero').classList.add('hidden');
     $('view-device').classList.remove('hidden');
     $('hero-error').classList.add('hidden');
+    $('connect-help').classList.add('hidden');
 
     recordEvent('connect', {
       color: info.color ?? null,
@@ -520,8 +567,22 @@ async function adopt(device) {
   }
 }
 
+// Il seriale identifica il controller: nascosto di default, perché chi
+// condivide uno screenshot del risultato non lo pubblichi senza volerlo.
+let serialShown = false;
+const maskSerial = serial => (serial.length > 4 ? `Serial •••• ${serial.slice(-4)}` : 'Serial ••••');
+function renderSerial() {
+  const serial = deviceInfo?.serial;
+  $('device-sub').textContent = serial ? (serialShown ? serial : maskSerial(serial)) : 'serial number not available';
+  const btn = $('btn-serial');
+  btn.classList.toggle('hidden', !serial);
+  btn.textContent = serialShown ? 'Hide serial' : 'Show serial';
+  btn.setAttribute('aria-pressed', String(serialShown));
+}
+
 function renderDeviceInfo(info) {
-  $('device-sub').textContent = info.serial || 'serial number not available';
+  serialShown = false;
+  renderSerial();
   const rows = [];
   if (info.color) rows.push(['Color', info.color]);
   if (info.board) rows.push(['Board', info.board]);
@@ -533,6 +594,8 @@ function renderDeviceInfo(info) {
 }
 
 function teardown(message = null) {
+  const hadUnsaved = unsaved;
+  const nvAtExit = lastNvStatus;
   ds5 = null;
   battery = null;
   deviceInfo = null;
@@ -554,6 +617,11 @@ function teardown(message = null) {
   lastBattery = 0;
   modalReturnFocus.clear();
   ops.reset();
+  // L'esito e il blocco di Write sono del controller che se ne va.
+  centerState = null;
+  rangeState = null;
+  lastCenterView = null;
+  clearOutcome();
   setConnChip(false);
   setNvChip(null);
   setBatteryChip();
@@ -562,6 +630,16 @@ function teardown(message = null) {
   $('view-device').classList.add('hidden');
   $('view-hero').classList.remove('hidden');
   if (message) toast(message);
+  // La calibrazione in RAM non è stata scritta. Cosa faccia lo scollegamento
+  // (H11) non è verificato: il testo non promette né che sia persa né che resti.
+  if (hadUnsaved) toast(unsavedOnExitMessage(nvAtExit), 10000);
+  syncBusyTitle();
+}
+
+function unsavedOnExitMessage(nv) {
+  const off = revertAdvice(nv);
+  return 'The calibration was never written to memory. '
+    + (off ?? 'We haven’t confirmed whether disconnecting discards it: run the drift test when you reconnect.');
 }
 
 async function disconnect() {
@@ -625,11 +703,34 @@ function onInputReport(event) {
   }
 
   const now = performance.now();
+  feedHandsOff(now);
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
     battery = ds5.parseBattery(d);
     setBatteryChip();
   }
+}
+
+/* ============================== mani lontane ============================== */
+
+// Misuratore nei modali Quick e Guided (js/ui/hands-off.js), alimentato dagli
+// input report come ogni altra misura: niente timer, niente rAF.
+const handsOff = createHandsOffMeter();
+function handsOffTarget() {
+  if (!$('modal-quick').classList.contains('hidden')) return ['quick-handsoff', HANDS_OFF_LABELS.quick];
+  if (!$('modal-wizard').classList.contains('hidden')) return ['wizard-handsoff', HANDS_OFF_LABELS.guided];
+  return null;
+}
+function feedHandsOff(now) {
+  const target = handsOffTarget();
+  if (!target) return;
+  renderHandsOff($(target[0]), handsOff.push(sticks, now), target[1]);
+}
+function resetHandsOff() {
+  handsOff.reset();
+  renderHandsOff($('quick-handsoff'), 'unknown', HANDS_OFF_LABELS.quick);
+  renderHandsOff($('wizard-handsoff'), 'unknown', HANDS_OFF_LABELS.guided);
+  updateBatteryHints();
 }
 
 /* ============================== test drift ============================== */
@@ -755,7 +856,9 @@ function finishDriftTest(result) {
 
   for (const [side, el] of [['left', 'verdict-l'], ['right', 'verdict-r']]) {
     const r = result[side];
-    const v = verdictFor(r);
+    // `unstable` è del risultato intero: passato allo stick, il badge diventa
+    // "Moving" invece di una percentuale calcolata su campioni in movimento.
+    const v = verdictFor({ ...r, unstable: result.unstable === true });
     const badge = $(el);
     badge.className = `verdict ${v.cls}`;
     badge.textContent = v.label;
@@ -764,30 +867,15 @@ function finishDriftTest(result) {
   }
 
   const worst = Math.max(result.left.offset, result.right.offset);
-  const noisy = Math.max(result.left.noise, result.right.noise) > 1.5;
   recordEvent('drift', {
     auto,
     res: summarizeResult(result),
     worst: +worst.toFixed(2),
     unstable: result.unstable === true,
   });
-  let msg;
-  if (result.unstable) {
-    msg = 'Sticks moving continuously during the test. If you weren’t touching them, the signal is severely '
-      + 'unstable (worn sensor): center calibration can reduce but not eliminate the problem.';
-  } else if (worst < DRIFT_OK_MAX) {
-    msg = 'Sticks correctly centered. No calibration needed.';
-  } else if (worst < DRIFT_MILD_MAX) {
-    msg = 'Mild drift detected. A quick calibration should fix it.';
-  } else {
-    msg = 'Marked drift detected. Quick calibration recommended; if that’s not enough, use the guided one.';
-  }
-  if (noisy && !result.unstable) msg += ' The signal is unstable: the potentiometer may be worn.';
-  if (prev && unsaved) {
-    const before = Math.max(prev.left.offset, prev.right.offset);
-    msg = `Max offset: before ${before.toFixed(1)}% → now ${worst.toFixed(1)}%. ` + msg;
-  }
-  $('drift-status').textContent = msg;
+  // Testo e instradamento dal livello peggiore (js/ui/outcome.js): ≥15% →
+  // Guided, Pinned → Range poi Guided, rumore → "il rumore resta".
+  $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved }).text;
 }
 
 /* ============================== unsaved / flash ============================== */
@@ -795,6 +883,131 @@ function finishDriftTest(result) {
 function setUnsaved(v) {
   unsaved = v;
   $('banner-unsaved').classList.toggle('hidden', !v);
+  // Il segno per la scheda si alza con la RAM cambiata e si abbassa solo con
+  // un salvataggio riuscito: uno scollegamento non prova che sia stata persa.
+  if (v) markTabUnsaved(true);
+  updateWriteLock();
+}
+
+/* --------- esito persistente e blocco di Write (js/ui/outcome.js) --------- */
+
+// Cosa monta ora la RAM del controller, per il blocco di Write: l'ultimo esito
+// del centro (Quick o Guided) e l'ultimo del range. Sono indipendenti: un
+// Quick riuscito non ripara un range incompleto, e viceversa.
+let centerState = null;
+let rangeState = null;
+let lastCenterView = null;
+
+function currentWriteLock() {
+  return writeLockFor({
+    center: centerState,
+    range: rangeState,
+    poisoned: !!ds5?.poisoned,
+    needsPowerCycle: !!ds5 && ds5 === powerCycleController,
+  });
+}
+
+function updateWriteLock() {
+  const lock = currentWriteLock();
+  $('btn-flash').disabled = lock.mode === 'disabled';
+  const note = $('banner-lock');
+  const shown = lock.reasons.filter(r => r.mode === lock.mode);
+  if (lock.mode === 'allowed' || !shown.length) {
+    note.textContent = '';
+    note.classList.add('hidden');
+  } else {
+    note.textContent = (lock.mode === 'disabled' ? 'Write is off: ' : 'Check before saving: ') + shown.map(r => r.text).join(' ');
+    note.classList.remove('hidden');
+  }
+  return lock;
+}
+
+// Pannello #calib-outcome: sostituisce i toast di 6-7 s, che il 26% degli esiti
+// affidava a un messaggio che spariva. Resta fino alla calibrazione successiva.
+function showOutcome(view) {
+  if (view.center) { centerState = view.center; lastCenterView = view; }
+  if (view.range) rangeState = view.range;
+  const el = $('calib-outcome');
+  el.dataset.tone = view.tone;
+  el.innerHTML = outcomeHtml(view);
+  el.classList.remove('hidden');
+  el.scrollIntoView?.({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  updateWriteLock();
+}
+
+function clearOutcome() {
+  const el = $('calib-outcome');
+  el.innerHTML = '';
+  el.classList.add('hidden');
+}
+
+function runOutcomeAction(action) {
+  if (action === 'guided') $('btn-wizard').click();
+  else if (action === 'range') $('btn-range').click();
+  else if (action === 'quick') $('btn-quick').click();
+  else if (action === 'retest') startDriftTest();
+  else if (action === 'recovery') openQuickRecovery();
+}
+
+// Modale di Write: le cifre dell'ultimo esito e, se l'esito è peggiore
+// dell'inizio o perso, avviso, Cancel col fuoco e una seconda conferma.
+function openFlashModal() {
+  $('btn-flash-go').disabled = false; // disattivato da doFlash al click precedente
+  const lock = updateWriteLock();
+  if (lock.mode === 'disabled') { toast(lock.reasons[0].text, 7000); return; }
+  const summary = flashSummary(lastCenterView, lock);
+  const numbers = $('flash-numbers');
+  numbers.innerHTML = summary.numbers.map(line => `<li>${esc(line)}</li>`).join('');
+  numbers.classList.toggle('hidden', summary.numbers.length === 0);
+  const ack = $('flash-ack');
+  ack.checked = false;
+  $('flash-warning').classList.toggle('hidden', !summary.guarded);
+  $('flash-warning-text').textContent = summary.guarded ? `${summary.warnings.join(' ')} Saving makes it permanent.` : '';
+  $('btn-flash-go').disabled = summary.guarded;
+  $('btn-flash-go').textContent = summary.guarded ? 'Write anyway' : 'Write permanently';
+  // Il fuoco va su Cancel quando il risultato è a rischio (meccanismo di WS6).
+  $('btn-flash-cancel').toggleAttribute('data-autofocus', summary.guarded);
+  openModal('modal-flash');
+}
+
+// Segno "calibrazione non salvata in questa scheda" in sessionStorage. Non è
+// legato a un controller (non se ne conserva nessun identificativo): dopo un
+// ricaricamento dice solo che una calibrazione PUÒ essere ancora attiva.
+const TAB_UNSAVED_KEY = 'sense-unsaved-in-tab';
+function tabStore() {
+  try { return window.sessionStorage ?? null; } catch { return null; }
+}
+function markTabUnsaved(on) {
+  const store = tabStore();
+  try {
+    if (on) store?.setItem(TAB_UNSAVED_KEY, '1');
+    else store?.removeItem(TAB_UNSAVED_KEY);
+  } catch { /* storage negato: il banner è solo un promemoria */ }
+}
+function tabUnsavedFlag() {
+  try { return tabStore()?.getItem(TAB_UNSAVED_KEY) === '1'; } catch { return false; }
+}
+
+/* --------- scheda in background durante una calibrazione --------- */
+
+const BASE_TITLE = document.title;
+let awayDuringOp = false;
+function syncBusyTitle() {
+  if (document.hidden) {
+    if (ops.busy) {
+      awayDuringOp = true;
+      document.title = rangeSession ? 'Range calibration running…' : 'Calibrating… don’t touch';
+    } else if (awayDuringOp) {
+      document.title = 'Calibration finished · Sense Calibrator';
+    }
+    return;
+  }
+  if (!awayDuringOp) return;
+  awayDuringOp = false;
+  document.title = BASE_TITLE;
+  toast(ops.busy
+    ? 'Still calibrating: keep your hands off the sticks.'
+    : 'The calibration finished while you were away: the result is on the page.', 6000);
 }
 
 async function doFlash() {
@@ -804,6 +1017,11 @@ async function doFlash() {
   // attivo solo alla prossima apertura del modale, non nel finally: durante
   // l'animazione di chiusura sarebbe di nuovo cliccabile.
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
+  // Blocco di Write (WS5), anche qui e non solo sul bottone: un risultato
+  // catastrofico, un asse incollato o un range incompleto non si scrivono mai;
+  // uno peggiore dell'inizio solo con la seconda conferma spuntata.
+  const lock = currentWriteLock();
+  if (lock.mode === 'disabled' || (lock.mode === 'guarded' && !$('flash-ack').checked)) return;
   const controller = ds5;
   $('btn-flash-go').disabled = true;
   const op = ops.beginOp();
@@ -828,6 +1046,7 @@ async function doFlash() {
     }
     recordEvent('flash', { ok: true, nv: nv?.status ?? null });
     setUnsaved(false);
+    markTabUnsaved(false);
     if (nv?.status === 'pending_reboot') {
       toast('Saved. The controller needs a restart: use the "Restart" button.', 5000);
     } else {
@@ -845,6 +1064,7 @@ async function doFlash() {
   } finally {
     flashing = false;
     ops.endOp(op);
+    syncBusyTitle();
   }
 }
 
@@ -853,6 +1073,9 @@ async function doFlash() {
 let quickPreflightBlocked = false;
 // Partenza già centrata: il prossimo "Calibrate anyway" passa force a runQuick.
 let quickForceNext = false;
+// Recupero opt-in dopo un esito catastrofico (C0-10): una sola passata, con
+// force, e comunque dietro la tenuta entro il 15% di runQuick.
+let quickRecoveryNext = false;
 // Durante uno stallo (WS1) Cancel non chiude il modale: chiede a runQuick di
 // abbandonare la passata senza calibEnd. Fuori dallo stallo è ignorato.
 let quickStallCancelable = false;
@@ -869,9 +1092,40 @@ function blockedForPowerCycle() {
   return true;
 }
 
+const QUICK_INTRO = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
 function resetQuickModal() {
   quickForceNext = false;
+  quickRecoveryNext = false;
   $('btn-quick-go').textContent = 'Calibrate now';
+  $('btn-quick-go').className = 'btn btn-primary';
+  $('btn-quick-cancel').textContent = 'Cancel';
+  $('btn-quick-cancel').className = 'btn btn-ghost';
+  $('btn-quick-cancel').removeAttribute('data-autofocus');
+}
+
+// Partenza già centrata: "Close" è l'azione principale, "Calibrate anyway" la
+// secondaria. Una passata da un pavimento può solo restare o peggiorare.
+function offerCalibrateAnyway() {
+  quickForceNext = true;
+  $('btn-quick-go').textContent = 'Calibrate anyway';
+  $('btn-quick-go').className = 'btn btn-secondary';
+  $('btn-quick-cancel').textContent = 'Close';
+  $('btn-quick-cancel').className = 'btn btn-primary';
+  $('btn-quick-cancel').setAttribute('data-autofocus', '');
+}
+
+function openQuickModal() {
+  resetHandsOff();
+  openModal('modal-quick');
+}
+
+function openQuickRecovery() {
+  if (!calibrationAllowed() || blockedForPowerCycle()) return;
+  resetQuickModal();
+  quickRecoveryNext = true;
+  $('btn-quick-go').textContent = 'Run one pass';
+  $('quick-msg').innerHTML = 'One recovery pass, with the same safety checks. <b>Only try it with both sticks fully released</b> and the controller resting on a table.';
+  openQuickModal();
 }
 
 function cancelQuickCalibration() {
@@ -883,11 +1137,11 @@ function cancelQuickCalibration() {
     return;
   }
   closeModal('modal-quick');
-  if (quickPreflightBlocked || quickForceNext) {
-    quickPreflightBlocked = false;
-    resetQuickModal();
-    startDriftTest();
-  }
+  const resume = quickPreflightBlocked || quickForceNext;
+  quickPreflightBlocked = false;
+  resetQuickModal();
+  $('quick-msg').innerHTML = QUICK_INTRO;
+  if (resume) startDriftTest();
 }
 
 /* --------- telemetria locale + upload anonimo (opt-out) --------- */
@@ -1023,25 +1277,26 @@ function uploadEvent(entry) {
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
-// Testi minimi: la UI definitiva degli avvisi dal vivo è di WS5.
+// Accanto c'è il misuratore "mani lontane" (js/ui/hands-off.js), che reagisce
+// in tempo reale; questi testi dicono cosa sta facendo l'algoritmo.
 function quickProgressHtml({ phase, pass, worst }) {
   if (phase === 'preflight') return 'Release both sticks. Waiting for centered, stable readings…';
-  if (phase === 'noisy') return 'Readings are noisy: <b>release the sticks</b> and keep the controller still.';
-  if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b>';
+  if (phase === 'noisy') return 'The readings are jumping around. <b>Let go of both sticks</b> and keep the controller flat on the table. If nobody is touching them, the sensor may be worn.';
+  if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b> A held stick would be saved as the new center.';
   if (phase === 'pass' || phase === 'resumed') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
   if (phase === 'unstable') return `Pass ${pass}: unstable signal. <b>Don’t touch the sticks.</b>`;
   if (phase === 'stalled') return `Pass ${pass} is not settling. <b>Let go of both sticks</b>, or cancel.`;
   if (phase === 'verify') return `Pass ${pass}: verifying…`;
   if (phase === 'next') return worst === null
     ? 'The result could not be verified, running another pass…'
-    : `Residual offset ${worst.toFixed(1)}%, running another pass…`;
+    : `Residual offset ${formatOffset(worst)}, running another pass…`;
   return null;
 }
 
-// Il testo dell'esito finale vive in js/calib/quick-outcome-copy.js (WS2),
-// compresi gli esiti di WS1 ('catastrophic', 'moved'): a 15% o più nessun
-// percorso suona come un successo. runQuick riceve il controller catturato,
-// non più il `ds5` globale (niente `liveController`).
+// L'esito finale va nel pannello persistente (js/ui/outcome.js), compresi gli
+// esiti di WS1 ('catastrophic', 'moved', 'stalled'): a 15% o più nessun
+// percorso suona come un successo e Write è disabilitato. runQuick riceve il
+// controller catturato, non più il `ds5` globale (niente `liveController`).
 
 // UI della calibrazione rapida: l'algoritmo è runQuick (js/calib/quick.js),
 // qui restano `busy`, modale, messaggi, toast, telemetria e stato non salvato.
@@ -1051,9 +1306,11 @@ async function quickCalibrate() {
   // metà passata il ciclo non deve pilotare il controller nuovo (prima usava
   // il `ds5` globale). runQuick controlla isCurrent() dopo ogni await.
   const controller = ds5;
-  const force = quickForceNext;
+  const recovery = quickRecoveryNext;
+  const force = quickForceNext || recovery;
   cancelDriftTest();
   const op = ops.beginOp();
+  clearOutcome();
   const bar = $('quick-bar');
   quickPreflightBlocked = false;
   resetQuickModal();
@@ -1075,7 +1332,7 @@ async function quickCalibrate() {
     session.err = String(error.message || error).slice(0, 120);
     recordSessionOnce(session);
     closeModal('modal-quick');
-    toast(`Calibration failed: ${error.message}. If it keeps failing, restart the controller.`, 6000);
+    showOutcome(quickOutcomeView({ outcome: 'error', error, committed, worst: null, session }, { nvStatus: lastNvStatus }));
     log(`Quick calibration error: ${error.message}`);
   };
   try {
@@ -1086,6 +1343,7 @@ async function quickCalibrate() {
       isCurrent: () => ds5 === controller,
       isCancelled: () => quickCancelRequested,
       force,
+      params: recovery ? { maxPasses: 1 } : {},
       onProgress: event => {
         if (!ops.isCurrent(op)) return; // ciclo orfano: la UI è di un'altra operazione
         if (event.bar !== undefined) bar.style.width = event.bar + '%';
@@ -1110,10 +1368,10 @@ async function quickCalibrate() {
       return;
     }
     if (outcome === 'already-centered') {
-      quickForceNext = true;
       recordSessionOnce(session);
-      $('btn-quick-go').textContent = 'Calibrate anyway';
+      offerCalibrateAnyway();
       blockedMessage = 'Both sticks are already centered, at the measurement limit. <b>Nothing was sent to the controller.</b> Another pass can only keep them there or make them worse.';
+      showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
       return;
     }
     if (outcome === 'stalled') {
@@ -1121,7 +1379,7 @@ async function quickCalibrate() {
       powerCycleController = controller;
       setUnsaved(true);
       closeModal('modal-quick');
-      toast('Calibration stopped: the sticks never settled, so nothing was committed. Restart the controller (hold PS for 10 s) and reconnect it before calibrating again.', 10000);
+      showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
       log('Quick calibration abandoned mid-pass: controller needs a restart.');
       return;
     }
@@ -1144,11 +1402,11 @@ async function quickCalibrate() {
     if (!ops.isCurrent(op)) return;
     closeModal('modal-quick');
     setUnsaved(true);
-    // Il testo dell'esito vive in js/calib/quick-outcome-copy.js: a 15% o più
-    // non suona mai come un successo, e il consiglio di spegnere il controller
+    // Pannello persistente al posto del toast: a 15% o più non suona mai come
+    // un successo e disabilita Write; il consiglio di spegnere il controller
     // compare solo con la NVS letta `locked` (C0-11).
-    toast(...quickOutcomeToast({ ...run, nvStatus: lastNvStatus }));
-    log(quickOutcomeLog(run));
+    showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
+    log(outcomeLogLine(run));
     ops.endOp(op);
     startDriftTest();
   } catch (error) {
@@ -1164,8 +1422,10 @@ async function quickCalibrate() {
       $('btn-quick-go').disabled = false;
       $('btn-quick-cancel').disabled = false;
       bar.style.width = '0%';
-      msg.innerHTML = blockedMessage || 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
+      msg.innerHTML = blockedMessage || QUICK_INTRO;
+      if (quickForceNext && !$('modal-quick').classList.contains('hidden')) $('btn-quick-cancel').focus();
     }
+    syncBusyTitle();
   }
 }
 
@@ -1225,6 +1485,7 @@ async function wizardNext() {
       // bloccando ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
       wizard.op = ops.beginOp();
+      clearOutcome();
       btn.textContent = 'Measuring…';
       wizard.before = summarizeResult(await measureOffset(1000));
       await ds5.calibBegin();
@@ -1247,7 +1508,11 @@ async function wizardNext() {
       recordEvent('wizard', { done: true, before: wizard.before ?? null, after: wizAfter });
       $('wizard-diagram').classList.add('hidden');
       wizardHideLive();
-      $('wizard-msg').innerHTML = 'Center calibration complete. Check the result with the drift test.';
+      // Prima e dopo nel pannello persistente, con lo stesso blocco di Write
+      // della rapida (peggiore dell'inizio, ≥15%, asse incollato).
+      const view = guidedOutcomeView({ before: wizard.before ?? null, after: wizAfter }, { nvStatus: lastNvStatus });
+      showOutcome(view);
+      $('wizard-msg').textContent = `${view.title}. The result stays on the page after you close this.`;
       btn.textContent = 'Done';
     } else {
       closeModal('modal-wizard');
@@ -1274,10 +1539,11 @@ async function wizardNext() {
       });
     }
     closeModal('modal-wizard');
-    toast(`Calibration failed: ${error.message}. If it keeps failing, restart the controller.`, 6000);
+    showOutcome(guidedOutcomeView({ before: wizard?.before ?? null, error, committed: error.committed === true }, { nvStatus: lastNvStatus }));
     log(`Wizard error: ${error.message}`);
   } finally {
     btn.disabled = false;
+    syncBusyTitle();
   }
 }
 
@@ -1291,6 +1557,7 @@ function openWizard() {
   $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started it <b>cannot be cancelled</b>: don’t close the page and don’t disconnect the controller.';
   $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
+  resetHandsOff();
   openModal('modal-wizard');
 }
 
@@ -1303,6 +1570,7 @@ async function openRange() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
   rangeOp = ops.beginOp();
+  clearOutcome();
   try {
     await ds5.rangeBegin();
   } catch (error) {
@@ -1390,25 +1658,25 @@ async function finishRange() {
     const { alreadyClosed } = await ds5.rangeEnd();
     recordEvent('range', { ...rangeStats, incomplete, alreadyClosed });
     closeModal('modal-range');
+    // Pannello persistente e blocco di Write: un range incompleto (o chiuso
+    // con "Finish anyway") o già chiuso dal firmware non si scrive.
+    showOutcome(rangeOutcomeView({ incomplete, alreadyClosed }));
     // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla.
     if (alreadyClosed) {
-      toast('The range session had already closed: nothing was changed. Repeat the range calibration.', 6000);
       log('Range calibration already closed (code 3): nothing committed.');
       return;
     }
     setUnsaved(true);
-    toast(incomplete
-      ? 'Range saved but with incomplete coverage: consider repeating the calibration.'
-      : 'Range calibration complete.');
-    log('Range calibration complete.');
+    log(incomplete ? 'Range calibration applied with incomplete coverage.' : 'Range calibration complete.');
   } catch (error) {
     // Un rangeEnd partito (o scaduto) può aver committato.
     if (error.committed) setUnsaved(true);
     closeModal('modal-range');
-    toast(`Range calibration error: ${error.message}`, 5000);
+    showOutcome(rangeOutcomeView({ error, committed: error.committed === true }));
     log(`Range error: ${error.message}`);
   } finally {
     ops.endOp(rangeOp);
+    syncBusyTitle();
   }
 }
 
@@ -1442,7 +1710,11 @@ function openModal(id) {
   modalReturnFocus.set(el, document.activeElement);
   updateBackgroundInert();
   requestAnimationFrame(() => {
-    const target = el.querySelector('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    // `data-autofocus` (WS5 lo mette su Cancel quando il risultato è a
+    // rischio, e su Close per una partenza già centrata) vince sul primo
+    // elemento focalizzabile. Il meccanismo completo del fuoco è di WS6.
+    const target = el.querySelector('[data-autofocus]:not([disabled]):not(.hidden)')
+      ?? el.querySelector('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])');
     target?.focus({ preventScroll: true });
   });
 }
@@ -1495,7 +1767,24 @@ async function rebootController() {
 /* ============================== eventi ============================== */
 
 $('btn-connect').addEventListener('click', connect);
-$('btn-disconnect').addEventListener('click', disconnect);
+// Disconnect chiede conferma come Restart: con una calibrazione non salvata o
+// in corso l'utente perde lavoro, e cosa fa lo scollegamento non è verificato.
+$('btn-disconnect').addEventListener('click', () => {
+  if (ops.busy && !confirm('A calibration is running. Disconnecting now interrupts it. Disconnect anyway?')) return;
+  if (!ops.busy && unsaved && !confirm('This calibration hasn’t been written to memory, and disconnecting won’t save it. '
+    + 'We haven’t confirmed whether disconnecting discards it. Disconnect anyway?')) return;
+  return disconnect();
+});
+$('btn-serial').addEventListener('click', () => { serialShown = !serialShown; renderSerial(); });
+$('calib-outcome').addEventListener('click', event => {
+  const action = event.target?.closest?.('[data-outcome-action]')?.dataset.outcomeAction;
+  if (action) runOutcomeAction(action);
+});
+$('btn-session-dismiss').addEventListener('click', () => {
+  markTabUnsaved(false);
+  $('banner-session').classList.add('hidden');
+});
+document.addEventListener('visibilitychange', syncBusyTitle);
 $('btn-reboot').addEventListener('click', rebootController);
 $('btn-retest').addEventListener('click', () => startDriftTest());
 
@@ -1504,7 +1793,8 @@ $('btn-quick').addEventListener('click', () => {
   // (WS4). blockedForPowerCycle: sessione lasciata aperta da uno stallo (WS1).
   if (!calibrationAllowed() || blockedForPowerCycle()) return;
   resetQuickModal();
-  openModal('modal-quick');
+  $('quick-msg').innerHTML = QUICK_INTRO;
+  openQuickModal();
 });
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
 $('btn-quick-go').addEventListener('click', quickCalibrate);
@@ -1516,9 +1806,10 @@ $('btn-wizard-next').addEventListener('click', wizardNext);
 $('btn-range').addEventListener('click', () => (calibrationAllowed() ? openRange() : undefined));
 $('btn-range-done').addEventListener('click', finishRange);
 
-$('btn-flash').addEventListener('click', () => {
-  $('btn-flash-go').disabled = false; // disattivato da doFlash al click precedente
-  openModal('modal-flash');
+$('btn-flash').addEventListener('click', openFlashModal);
+// Seconda conferma per un risultato a rischio: Write si attiva solo spuntata.
+$('flash-ack').addEventListener('change', () => {
+  if (!$('flash-warning').classList.contains('hidden')) $('btn-flash-go').disabled = !$('flash-ack').checked;
 });
 $('btn-flash-cancel').addEventListener('click', () => closeModal('modal-flash'));
 $('btn-flash-go').addEventListener('click', doFlash);
@@ -1695,6 +1986,9 @@ document.addEventListener('keydown', e => {
 /* ============================== boot ============================== */
 
 async function boot() {
+  // Una calibrazione di un caricamento precedente di questa scheda, mai
+  // scritta né scartata di sicuro: può essere ancora attiva sul controller.
+  if (tabUnsavedFlag()) $('banner-session').classList.remove('hidden');
   if (!navigator.hid) {
     showUnsupported();
     if (location.protocol === 'file:') {
@@ -1736,9 +2030,9 @@ async function boot() {
 // Un'apertura fallita (controller tenuto da Steam o da un'altra tab) prima
 // finiva solo nel log: la hero restava muta.
 function autoConnectFailed(error) {
-  log(`Auto-connection failed: ${error.message || error}`);
+  log(`Auto-connection failed: ${error.name ? `${error.name}: ` : ''}${error.message || error}`);
   if (ds5) return;
-  showHeroError('<b>Couldn’t open the controller.</b> Another app or browser tab may be using it: close it, then press Connect.');
+  showConnectError(error);
 }
 
 boot();

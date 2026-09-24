@@ -86,7 +86,8 @@ test('in the page, a failure in pass 2 leaves the unsaved banner up', async () =
   assert.equal(h.peek().busy, false);
   const quick = h.sessions().filter(s => s.kind === 'quick').at(-1);
   assert.equal(quick.aborted, 'error');
-  assert.ok(h.toasts().some(t => t.startsWith('Calibration failed: ')));
+  assert.match(h.$('calib-outcome').innerHTML, /Calibration failed/);
+  assert.equal(h.visible('calib-outcome'), true, 'the failure stays on screen instead of a toast');
 });
 
 test('double-clicking Write runs exactly one flash()', async () => {
@@ -133,6 +134,14 @@ test('the raw NVS status word is logged after flash without gating the outcome',
   assert.deepEqual(info.slice(2), ['locked', '0x03030201']);
 });
 
-test('reopening the Write modal re-enables the confirm button', () => {
-  assert.match(source, /\$\('btn-flash'\)\.addEventListener\('click', \(\) => \{\s*\$\('btn-flash-go'\)\.disabled = false;[^\n]*\n\s*openModal\('modal-flash'\);/);
+test('reopening the Write modal re-enables the confirm button', async () => {
+  assert.match(source, /\$\('btn-flash'\)\.addEventListener\('click', openFlashModal\);/);
+  const body = source.match(/function openFlashModal\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(body, 'openFlashModal should exist');
+  assert.match(body, /^\s*\$\('btn-flash-go'\)\.disabled = false;/, 're-enabled first, at every opening');
+  const { h } = await connectedApp();
+  h.ctx.setUnsaved(true);
+  h.$('btn-flash-go').disabled = true;
+  await h.click('btn-flash');
+  assert.equal(h.$('btn-flash-go').disabled, false);
 });
