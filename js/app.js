@@ -1372,8 +1372,12 @@ const modalReturnFocus = new Map();
 function updateBackgroundInert() {
   const hasModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
     .some(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
+  // Anche header e avviso telemetria: sono fuori da main, e senza inert Tab e
+  // screen reader potevano raggiungerli sotto il backdrop del modale.
+  document.querySelector('header')?.toggleAttribute('inert', hasModal);
   document.querySelector('main')?.toggleAttribute('inert', hasModal);
   document.querySelector('footer')?.toggleAttribute('inert', hasModal);
+  $('telemetry-notice')?.toggleAttribute('inert', hasModal);
 }
 
 function openModal(id) {

@@ -55,6 +55,10 @@ main {
 }
 
 .hidden { display: none !important; }
+/* L'attributo `hidden` deve vincere su ogni `display` di classe: senza questa
+   regola `.action { display: flex }` batteva lo stile UA e le righe
+   sperimentali (data-experimental hidden) erano visibili in produzione. */
+[hidden] { display: none !important; }
 .mono { font-family: var(--mono); }
 
 /* ---------------- topbar ---------------- */
@@ -960,13 +964,15 @@ main {
 
 /* ---------------- avviso telemetria ---------------- */
 
-/* Sopra i toast: è una scelta da fare, non una notifica che scorre via. */
+/* Sotto i modali (50): con z-index 110 l'avviso copriva i bottoni dei
+   modali, compresa l'unica uscita del modale range. Resta sopra la topbar
+   (10); mentre un modale è aperto è anche inert (updateBackgroundInert). */
 .notice {
   position: fixed;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 110;
+  z-index: 45;
   width: min(560px, calc(100vw - 32px));
   background: var(--surface);
   border: 1px solid var(--line);
