@@ -1,0 +1,5 @@
+{
+  "best": { "par": { "q": 0.3, "mu": -0.3, "s": 1.5, "sf": 0.4, "k": 0.05 }, "distance": 0.074, "source": "fit.mjs --grid fine --reps 8 --seed 11, rank 1 (= prototype fit-best.json)" },
+  "alt1": { "par": { "q": 0.25, "mu": 0, "s": 1.5, "sf": 0.36, "k": 0.05 }, "distance": 0.075, "source": "fit.mjs --grid fine --reps 8 --seed 11, rank 2" },
+  "alt2": { "par": { "q": 0.3, "mu": -0.3, "s": 1.1, "sf": 0.36, "k": 0.05 }, "distance": 0.084, "source": "fit.mjs --grid fine --reps 8 --seed 11, rank 3" }
+}

@@ -1,76 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
-import { createQuickCenterHold, sticksWithinQuickCenter, QUICK_CENTER_RADIUS } from '../js/quick-center-guard.js';
+import { runQuick } from '../js/calib/quick.js';
+import { measureOffset, waitForStable } from '../js/calib/sampling.js';
+import { QUICK_CENTER_RADIUS } from '../js/quick-center-guard.js';
+import { loadApp, makeDevice } from './helpers/app-harness.mjs';
+import { VClock } from '../ops/sim/vclock.mjs';
 
-const source = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');
-
-// Esegue le funzioni dell'app reale con dipendenze controllate: niente copia
-// della logica di avvio, browser, controller fisico o attese di wall clock.
-function section(start, end) {
-  const from = source.indexOf(start);
-  const to = source.indexOf(end, from);
-  assert.ok(from >= 0 && to > from, `missing app section: ${start}`);
-  return source.slice(from, to);
-}
-
-const cancelSource = section('function cancelQuickCalibration()', '// Attende che tutti gli assi');
-const quickSource = section('async function quickCalibrate()', '/* ============================== wizard guidato');
-const waitSource = section('function waitForStable(', '// Misura dell\'offset residuo');
-const measureSource = section('async function measureOffset(', '/* --------- telemetria locale');
+// Esegue il vero runQuick (js/calib/quick.js) con attese sceneggiate: niente
+// browser, controller fisico o attese di wall clock. La UI del prompt bloccato
+// si verifica sull'app reale nell'harness DOM-stub.
 const result = { left: { offset: 0.5, noise: 0.2 }, right: { offset: 0.6, noise: 0.2 } };
 
 function quickHarness({ holds = [true, true], baseline = result, disconnectAtHold = -1 } = {}) {
-  const elements = new Map();
   const events = [];
-  const sessions = [];
   let holdIndex = 0;
-  const context = vm.createContext({
-    busy: false,
-    quickPreflightBlocked: false,
-    deviceInfo: null,
-    unsaved: false,
-    $: id => {
-      if (!elements.has(id)) elements.set(id, { disabled: false, innerHTML: '', style: {} });
-      return elements.get(id);
-    },
-    ds5: {
-      calibBegin: async () => events.push('begin'),
-      calibSample: async () => events.push('sample'),
-      calibEnd: async () => events.push('end'),
-    },
-    cancelDriftTest: () => events.push('cancel-drift'),
-    startDriftTest: () => events.push('start-drift'),
-    closeModal: () => events.push('close-modal'),
-    setUnsaved: value => { context.unsaved = value; },
-    recordSessionOnce: session => sessions.push(structuredClone(session)),
-    summarizeResult: value => value,
+  let current = true;
+  const controller = {
+    calibBegin: async () => events.push('begin'),
+    calibSample: async () => events.push('sample'),
+    calibEnd: async () => events.push('end'),
+  };
+  const sampler = {
     waitForStable: async options => {
       const index = holdIndex++;
       events.push({ type: 'hold', centered: options.requireCentered === true });
-      if (index === disconnectAtHold) context.ds5 = null;
+      if (index === disconnectAtHold) current = false;
       return holds[index] ?? true;
     },
     measureOffset: async (ms, options) => {
       events.push({ type: 'measure', centered: options?.requireCentered === true });
       return options?.requireCentered ? baseline : result;
     },
-    sleep: async () => {},
-    toast: () => {},
-    log: () => {},
-    QUICK_MAX_PASSES: 4,
-    QUICK_SAMPLES_PER_PASS: 12,
-    QUICK_STABLE_SPREAD: 0.035,
-    QUICK_STABLE_SPREAD_MAX: 0.08,
-    DRIFT_MOVE_SPREAD: 0.08,
-    DRIFT_OK_MAX: 1.2,
-    QUICK_CONVERGE_EPS: 0.15,
-    QUICK_REGRESSION_EPS: 0.8,
-    QUICK_NOISE_WORN: 1.5,
+  };
+  const run = () => runQuick({
+    controller,
+    sampler,
+    clock: { sleep: async () => {} },
+    isCurrent: () => current,
   });
-  vm.runInContext(`${cancelSource}\n${quickSource}`, context);
-  return { context, events, sessions, elements };
+  return { run, events };
 }
 
 test('failed initial/final preflight, invalid baseline and disconnect never send calibration commands', async () => {
@@ -82,26 +50,19 @@ test('failed initial/final preflight, invalid baseline and disconnect never send
     { disconnectAtHold: 1 },
   ]) {
     const h = quickHarness(scenario);
-    await h.context.quickCalibrate();
-    assert.equal(h.events.some(event => ['begin', 'sample', 'end'].includes(event)), false);
-    assert.equal(h.context.unsaved, false);
-    assert.equal(h.context.busy, false);
-    assert.equal(h.elements.get('btn-quick-go').disabled, false);
-    assert.equal(h.elements.get('btn-quick-cancel').disabled, false);
-    assert.equal(h.elements.get('quick-bar').style.width, '0%');
-    assert.match(h.elements.get('quick-msg').innerHTML, /Calibration has not started.*Release both sticks/);
-    assert.equal(h.events.includes('close-modal'), false, 'blocked prompt stays visible');
-    assert.equal(h.sessions.length, 1);
-    assert.equal(h.sessions[0].aborted, 'preflight');
-    assert.equal(h.sessions[0].after, null);
+    const { session, outcome, committed } = await h.run();
+    assert.equal(h.events.some(event => ['begin', 'sample', 'end'].includes(event)), false, JSON.stringify(scenario));
+    assert.equal(outcome, 'preflight');
+    assert.equal(committed, false);
+    assert.equal(session.aborted, 'preflight');
+    assert.equal(session.after, null);
   }
 });
 
 test('a successful Quick sends its first command only after both centered holds and guarded baseline', async () => {
   const h = quickHarness();
-  await h.context.quickCalibrate();
-  assert.deepEqual(h.events.slice(0, 5), [
-    'cancel-drift',
+  const { outcome, committed } = await h.run();
+  assert.deepEqual(h.events.slice(0, 4), [
     { type: 'hold', centered: true },
     { type: 'measure', centered: true },
     { type: 'hold', centered: true },
@@ -109,86 +70,130 @@ test('a successful Quick sends its first command only after both centered holds 
   ]);
   assert.equal(h.events.filter(event => event === 'sample').length, 12);
   assert.equal(h.events.filter(event => event === 'end').length, 1);
-  assert.equal(h.context.unsaved, true);
-  assert.equal(h.context.busy, false);
+  assert.equal(outcome, 'centered');
+  assert.equal(committed, true);
+});
+
+// ---------------------------------------------------------------- UI (app reale)
+
+// Stick sinistro tenuto al 40%: il preflight non può mai passare.
+const heldAtStart = [{ stick: 0, t0: 0, dur: 60_000, tail: 0, amp: [50, 0] }];
+
+async function connectedApp({ schedule = [] } = {}) {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { schedule });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000); // auto-connessione + test drift automatico
+  return { h, dev };
+}
+
+test('a blocked start shows the prompt, keeps the modal open and restores retry/cancel', async () => {
+  const { h, dev } = await connectedApp({ schedule: heldAtStart });
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+
+  assert.deepEqual([dev.counts.begin, dev.counts.sample, dev.counts.end], [0, 0, 0]);
+  assert.equal(h.peek().unsaved, false);
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.$('btn-quick-go').disabled, false);
+  assert.equal(h.$('btn-quick-cancel').disabled, false);
+  assert.equal(h.$('quick-bar').style.width, '0%');
+  assert.match(h.$('quick-msg').innerHTML, /Calibration has not started.*Release both sticks/);
+  assert.equal(h.visible('modal-quick'), true, 'blocked prompt stays visible');
+  const quick = h.sessions().filter(s => s.kind === 'quick');
+  assert.equal(quick.length, 1);
+  assert.equal(quick[0].aborted, 'preflight');
+  assert.equal(quick[0].after, null);
 });
 
 test('Cancel resumes drift after a blocked start, and cannot close an active calibration', async () => {
-  const h = quickHarness({ holds: [false] });
-  await h.context.quickCalibrate();
-  h.context.cancelQuickCalibration();
-  assert.deepEqual(h.events.slice(-2), ['close-modal', 'start-drift']);
-  assert.equal(h.context.quickPreflightBlocked, false);
-  const before = h.events.length;
-  h.context.busy = true;
-  h.context.cancelQuickCalibration();
-  assert.equal(h.events.length, before);
+  const { h } = await connectedApp({ schedule: heldAtStart });
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  assert.equal(h.peek().quickPreflightBlocked, true);
+  await h.click('btn-quick-cancel');
+  assert.equal(h.peek().quickPreflightBlocked, false);
+  assert.ok(h.peek().driftTest, 'drift test restarted');
+  await h.advance(500);
+  assert.equal(h.visible('modal-quick'), false);
+
+  // Durante una calibrazione Cancel è ignorato anche se invocato direttamente.
+  await h.click('btn-quick');
+  const running = h.click('btn-quick-go');
+  await h.advance(50);
+  assert.equal(h.peek().busy, true);
+  h.ctx.cancelQuickCalibration();
+  await h.advance(500);
+  assert.equal(h.visible('modal-quick'), true);
+  await h.run(running);
 });
 
 test('a blocked attempt preserves an existing unsaved result and can be retried successfully', async () => {
-  const h = quickHarness({ holds: [false] });
-  h.context.unsaved = true;
-  await h.context.quickCalibrate();
-  assert.equal(h.context.unsaved, true);
-  assert.equal(h.context.quickPreflightBlocked, true);
-  await h.context.quickCalibrate();
-  assert.equal(h.context.quickPreflightBlocked, false);
-  assert.equal(h.events.filter(event => event === 'begin').length, 1);
-  assert.equal(h.sessions.length, 2);
-  assert.equal(h.context.busy, false);
+  const shortHold = [{ stick: 0, t0: 0, dur: 9000, tail: 0, amp: [50, 0] }];
+  const { h, dev } = await connectedApp({ schedule: shortHold });
+  h.ctx.setUnsaved(true);
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  assert.equal(h.peek().unsaved, true);
+  assert.equal(h.peek().quickPreflightBlocked, true);
+  await h.advance(5000); // la mano si stacca
+  await h.run(h.click('btn-quick-go'));
+  assert.equal(h.peek().quickPreflightBlocked, false);
+  assert.equal(dev.counts.begin, 1);
+  assert.equal(h.sessions().filter(s => s.kind === 'quick').length, 2);
+  assert.equal(h.peek().busy, false);
 });
+
+// ---------------------------------------------------------------- campionamento
+
+function scriptedSource() {
+  const listeners = new Set();
+  const source = {
+    sticks: { lx: 0, ly: 0, rx: 0, ry: 0 },
+    now: () => source.t,
+    t: 0,
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit() { for (const fn of listeners) fn(); },
+    listeners,
+  };
+  return source;
+}
 
 test('guarded baseline rejects even one held report and leaves other measurement paths unchanged', async () => {
   for (const requireCentered of [true, false]) {
-    const listeners = new Set();
+    const source = scriptedSource();
     let finishMeasurement;
-    const context = vm.createContext({
-      stickListeners: listeners,
-      sticks: { lx: 0, ly: 0, rx: 0, ry: 0 },
-      sleep: () => new Promise(resolve => { finishMeasurement = resolve; }),
-      sticksWithinQuickCenter,
-      extractStableSamples: samples => ({ stable: samples }),
-      analyzeDrift: () => result,
-    });
-    vm.runInContext(measureSource, context);
-    const promise = context.measureOffset(1000, { requireCentered });
+    const clock = { sleep: () => new Promise(resolve => { finishMeasurement = resolve; }) };
+    const promise = measureOffset(source, clock, 1000, { requireCentered });
     for (let i = 0; i < 60; i++) {
-      context.sticks.lx = i === 20 ? QUICK_CENTER_RADIUS + 0.1 : 0;
-      for (const listener of listeners) listener();
+      source.sticks = { lx: i === 20 ? QUICK_CENTER_RADIUS + 0.1 : 0, ly: 0, rx: 0, ry: 0 };
+      source.emit();
     }
     finishMeasurement();
-    assert.equal(await promise, requireCentered ? null : result);
-    assert.equal(listeners.size, 0);
+    const measured = await promise;
+    if (requireCentered) assert.equal(measured, null);
+    else assert.ok(measured && measured.left.offset === 0, 'unguarded measurement keeps the median of stable samples');
+    assert.equal(source.listeners.size, 0);
   }
 });
 
 test('real stability waiter rejects steady deflection and cleans up on timeout or missing reports', async () => {
   for (const noReports of [false, true]) {
-    const listeners = new Set();
-    let now = 0;
+    const source = scriptedSource();
+    source.sticks = { lx: 0, ly: 0, rx: QUICK_CENTER_RADIUS + 0.1, ry: 0 };
     let timer;
     let cleared = false;
-    const context = vm.createContext({
-      QUICK_STABLE_SPREAD: 0.035,
-      QUICK_STABLE_MS: 300,
-      QUICK_STABLE_TIMEOUT: 5000,
-      createQuickCenterHold,
-      stickListeners: listeners,
-      sticks: { lx: 0, ly: 0, rx: QUICK_CENTER_RADIUS + 0.1, ry: 0 },
-      performance: { now: () => now },
+    const clock = {
       setTimeout: callback => { timer = callback; return 1; },
       clearTimeout: () => { cleared = true; },
-    });
-    vm.runInContext(waitSource, context);
-    const promise = context.waitForStable({ requireCentered: true, timeoutMs: 1000 });
+    };
+    const promise = waitForStable(source, clock, { requireCentered: true, timeoutMs: 1000 });
     if (noReports) timer();
     else {
-      for (now = 0; now <= 1000; now += 10) {
-        for (const listener of listeners) listener();
-      }
+      for (source.t = 0; source.t <= 1000; source.t += 10) source.emit();
     }
     assert.equal(await promise, false);
-    assert.equal(listeners.size, 0);
+    assert.equal(source.listeners.size, 0);
     assert.equal(cleared, true);
   }
 });
