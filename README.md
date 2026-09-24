@@ -22,7 +22,9 @@ You need a desktop computer, a USB data cable and a standard DualSense (`054C:0C
 6. Run the drift and precision tests again to compare the result.
 7. Select **Write to memory** only when you want to keep the calibration.
 
-Calibration is applied to controller RAM first. If you turn the controller off before **Write to memory**, the temporary calibration is discarded.
+Calibration is applied to controller RAM first. If you turn the controller off (hold PS for 10 s) before **Write to memory**, the temporary calibration is discarded. What unplugging the cable alone does has not been verified yet, so the tool never tells you to rely on it.
+
+After every calibration a result panel stays on screen with the before and after reading of each stick. **Write to memory** is switched off when a result must not be saved (15% or more off-center, a stick stuck at the edge, an incomplete range, a controller that stopped responding), and a result that is worse than where you started needs a second confirmation. If the controller doesn't appear in the browser prompt, the page lists what to check: a data cable, a standard DualSense, another port, apps that hold the controller, and Linux permissions.
 
 Before Quick calibration sends any command, both sticks must stay within 15% of center through two short checks and the baseline measurement. If that safety check fails, nothing is written; release the sticks and retry, or use Guided calibration for a severe resting offset.
 

@@ -103,7 +103,7 @@
       <ul>
         <li><b>A desktop computer.</b> Windows, macOS, Linux or ChromeOS. Phones are not supported.</li>
         <li><b>The standard PS5 DualSense.</b> Only the standard controller is supported.</li>
-        <li><b>A USB data cable.</b> Some cables only carry power. If the controller never appears in the browser prompt, try another cable before anything else.</li>
+        <li><b>A USB data cable.</b> Some cables only carry power. If the controller never appears in the browser prompt, try another cable before anything else. On Linux the browser also needs permission to open the controller, usually a udev rule for its hidraw device.</li>
         <li><b>Desktop Chrome or Edge.</b> The browser talks to the controller through WebHID, which Chromium browsers provide and Safari and Firefox do not.</li>
       </ul>
       <p>The calibration side of the tool rejects Bluetooth, so USB is required for the full workflow. If the controller is paired wirelessly, plug it in with the cable and connect again.</p>
@@ -152,7 +152,7 @@
           <tr>
             <th scope="row">Noisy signal</th>
             <td>Noise above about 1.5%; the position wanders around the median instead of settling.</td>
-            <td>The sensor itself, often wear or dirt. Software is unlikely to help.</td>
+            <td>The sensor itself, often wear or dirt. Calibration can re-center it, but the noise stays.</td>
           </tr>
         </tbody>
       </table>
@@ -177,7 +177,7 @@
       <ul>
         <li><b>Centered and quiet:</b> there is nothing to fix. Test again later if something starts to feel off.</li>
         <li><b>A stable offset:</b> the guide on how to <a href="../calibrate-dualsense-controller/">calibrate a DualSense controller</a> explains whether calibration fits and how to keep the result saved.</li>
-        <li><b>A noisy signal:</b> calibration is unlikely to help. Cleaning, repair or module replacement may be the realistic path.</li>
+        <li><b>A noisy signal:</b> calibration can still re-center the stick, but it will not remove the noise. If the noise bothers you, check the warranty first; cleaning, repair or module replacement may be the realistic path.</li>
       </ul>
       <p>Whatever the result, run the test a second time to confirm it, and compare the numbers again after any change you make.</p>
 
