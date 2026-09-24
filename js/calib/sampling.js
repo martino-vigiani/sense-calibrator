@@ -24,11 +24,30 @@ export const QUICK_STABLE_SPREAD = 0.035;  // più severo di DRIFT_MOVE_SPREAD
 export const QUICK_STABLE_MS = 300;
 export const QUICK_STABLE_TIMEOUT = 5000;
 
+// 1 LSB del byte di report in unità normalizzate ([-1, 1]).
+export const STICK_LSB = 1 / 127.5;
+
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
-// Ritorna false se il segnale non si stabilizza entro `timeoutMs`.
+// Ritorna false se il segnale non si stabilizza entro `timeoutMs` (o se
+// `isCancelled()` diventa vero); altrimenti un oggetto truthy `{ center }`, la
+// media per asse della finestra accettata (non il punto medio min/max: su uno
+// stick rumoroso quello oscilla di qualche LSB da una finestra all'altra).
 // Guidato dagli input report HID, non da un timer: il gating resta preciso
 // anche con i timer della pagina throttlati.
-export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT, requireCentered = false } = {}) {
+//
+// `near` + `tol`: la finestra vale solo se il suo centro dista al più `tol`
+// (per asse) da `near`. Serve al campionamento DENTRO una sessione di
+// calibrazione: il riferimento è la prima finestra stabile presa dopo
+// calibBegin, quindi il confronto avviene sempre nello stesso frame, qualunque
+// cosa riportino gli input report a sessione aperta (H0, non ancora misurato).
+// La sola stabilità non basta: una mano ferma sul bordo ha spread 0.
+//
+// `maxRadius`: il centro della finestra, per stick, deve stare entro questo
+// raggio. Non è un confronto tra frame: è un limite di plausibilità assoluto,
+// largo abbastanza (vedi QUICK_DEFAULTS.refRadius) da contenere qualunque
+// posizione di riposo in qualunque frame, e serve solo a non prendere come
+// riferimento in sessione un pollice premuto sul bordo.
+export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, holdMs = QUICK_STABLE_MS, timeoutMs = QUICK_STABLE_TIMEOUT, requireCentered = false, near = null, tol = 4 * STICK_LSB, maxRadius = null, isCancelled = null } = {}) {
   return new Promise(resolve => {
     const start = source.now();
     const win = [];
@@ -40,6 +59,7 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
       resolve(ok);
     };
     const onSample = () => {
+      if (isCancelled?.()) return done(false);
       const now = source.now();
       const sticks = source.sticks;
       const centered = centerHold ? centerHold(sticks, now) : true;
@@ -47,15 +67,21 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
       while (win.length && win[0].t < now - holdMs) win.shift();
       if (win.length >= 10 && now - win[0].t >= holdMs * 0.8) {
         let maxSpread = 0;
+        const center = {};
         for (const a of ['lx', 'ly', 'rx', 'ry']) {
-          let min = Infinity, max = -Infinity;
+          let min = Infinity, max = -Infinity, sum = 0;
           for (const s of win) {
             if (s[a] < min) min = s[a];
             if (s[a] > max) max = s[a];
+            sum += s[a];
           }
           maxSpread = Math.max(maxSpread, max - min);
+          center[a] = sum / win.length;
         }
-        if (centered && maxSpread <= spread) return done(true);
+        const nearRef = !near || ['lx', 'ly', 'rx', 'ry'].every(a => Math.abs(center[a] - near[a]) <= tol);
+        const plausible = maxRadius === null
+          || (Math.hypot(center.lx, center.ly) <= maxRadius && Math.hypot(center.rx, center.ry) <= maxRadius);
+        if (centered && nearRef && plausible && maxSpread <= spread) return done({ center });
       }
       if (now - start >= timeoutMs) done(false);
     };
@@ -72,6 +98,11 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
 // e la passata di convergenza si interrompeva), e a 8 ms sotto-campionava i
 // ~250 Hz del controller duplicando campioni identici — il che falsava sia la
 // frazione di stabilità sia la durata reale di DRIFT_WINDOW.
+//
+// Il risultato porta `stableFraction` (frazione di campioni stabili, stesso
+// criterio del test drift): la verifica di una passata la confronta con quella
+// della baseline per distinguere una mano in movimento da uno stick che è
+// rumoroso di suo.
 export async function measureOffset(source, clock, ms = 1500, { requireCentered = false } = {}) {
   const samples = [];
   let stayedCentered = true;
@@ -87,8 +118,10 @@ export async function measureOffset(source, clock, ms = 1500, { requireCentered 
     unsubscribe();
   }
   if (samples.length < 40 || !stayedCentered) return null;
-  const { stable } = extractStableSamples(samples);
-  return analyzeDrift(stable.length > 40 ? stable : samples);
+  const { stable, fraction } = extractStableSamples(samples);
+  const result = analyzeDrift(stable.length > 40 ? stable : samples);
+  result.stableFraction = fraction;
+  return result;
 }
 
 // Sorgente minima basata su un Set di listener: la usano la pagina (alimentata
