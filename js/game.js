@@ -428,7 +428,11 @@ export function initGame(deps) {
     scene.R.ring.locked = phase.R.rests.length >= SNAP_FLICKS;
     const total = phase.L.rests.length + phase.R.rests.length;
     setProgress((total / (SNAP_FLICKS * 2)) * 100);
-    elInstr.textContent = `Flick and release. Left ${phase.L.rests.length}/${SNAP_FLICKS}, right ${phase.R.rests.length}/${SNAP_FLICKS}.`;
+    // #game-instr è role="status" e tickSnap gira a ogni report HID: si
+    // riscrive solo quando il conteggio cambia, altrimenti lo screen reader
+    // può ripetere la frase decine di volte al secondo.
+    const instr = `Flick and release. Left ${phase.L.rests.length}/${SNAP_FLICKS}, right ${phase.R.rests.length}/${SNAP_FLICKS}.`;
+    if (elInstr.textContent !== instr) elInstr.textContent = instr;
 
     const done = phase.L.rests.length >= SNAP_FLICKS && phase.R.rests.length >= SNAP_FLICKS;
     const timedOut = ts - phase.start >= SNAP_TIMEOUT_MS;

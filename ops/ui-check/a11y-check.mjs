@@ -220,6 +220,22 @@ try {
 
     await modalCase(width, height, {
       name: 'range', modalId: 'modal-range', open: clickId('btn-range'), expectFocus: ['.modal-panel'],
+      // #range-hint è role="status": ogni mutazione può essere riletta, quindi
+      // il numero di mutazioni deve coincidere con i cambi di testo reali.
+      after: async (page, label) => {
+        const m = await page.evaluate(() => new Promise(resolve => {
+          const el = document.getElementById('range-hint');
+          let mutations = 0, changes = 0, last = el.textContent;
+          const seen = new Set([last]);
+          const obs = new MutationObserver(records => {
+            mutations += records.length;
+            if (el.textContent !== last) { changes++; last = el.textContent; seen.add(last); }
+          });
+          obs.observe(el, { childList: true, characterData: true, subtree: true });
+          setTimeout(() => { obs.disconnect(); resolve({ mutations, changes, distinct: seen.size }); }, 4000);
+        }));
+        check(m.mutations === m.changes, `${label}: #range-hint mutated only on real changes (${m.mutations} mutations, ${m.changes} changes, ${m.distinct} distinct strings in 4 s)`);
+      },
     });
 
     await modalCase(width, height, {

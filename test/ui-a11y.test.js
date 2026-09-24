@@ -79,3 +79,52 @@ test('the wizard step is mirrored as text for the aria-hidden dots', async () =>
   h.eval('wizardSetDots(5); syncWizardStep()');
   assert.equal(h.$('wizard-step').textContent, 'Step 5 of 5');
 });
+
+// Conta le scritture su una proprietà di un elemento finto, così si misura
+// quante volte una regione live viene riscritta (nel browser ogni scrittura è
+// una mutazione, anche con lo stesso testo).
+function countWrites(el, prop) {
+  let value = el[prop];
+  const log = [];
+  Object.defineProperty(el, prop, {
+    configurable: true,
+    get: () => value,
+    set: v => { value = String(v); log.push(value); },
+  });
+  return log;
+}
+
+test('#range-hint (role=status) is written only when its text changes', async () => {
+  const h = await connected();
+  await h.run(h.click('btn-range'));
+  const writes = countWrites(h.$('range-hint'), 'textContent');
+  await h.advance(4000); // stick a riposo: il tick gira ogni 120 ms, il testo non cambia
+  const distinctChanges = writes.filter((w, i) => i === 0 || w !== writes[i - 1]).length;
+  assert.ok(h.$('range-hint').textContent.startsWith('Missing: '), h.$('range-hint').textContent);
+  assert.equal(writes.length, distinctChanges, `every write must change the text: ${JSON.stringify(writes)}`);
+  assert.ok(writes.length <= 1, `a resting stick keeps the same hint, got ${writes.length} writes`);
+  await h.advance(16000);
+  await h.run(h.click('btn-range-done'));
+});
+
+test('setLive skips identical text and identical HTML', async () => {
+  const h = await connected();
+  const el = h.$('quick-msg');
+  const text = countWrites(el, 'textContent');
+  const html = countWrites(el, 'innerHTML');
+  h.eval(`setLive($('quick-msg'), 'Hold still')`);
+  h.eval(`setLive($('quick-msg'), 'Hold still')`);
+  assert.deepEqual(text, ['Hold still']);
+  h.eval(`setLive($('quick-msg'), 'Pass <b>1</b>', { html: true })`);
+  h.eval(`setLive($('quick-msg'), 'Pass <b>1</b>', { html: true })`);
+  h.eval(`setLive($('quick-msg'), 'Pass <b>2</b>', { html: true })`);
+  assert.deepEqual(html, ['Pass <b>1</b>', 'Pass <b>2</b>']);
+});
+
+test('game.js rewrites #game-instr during the flick phase only when the count changes', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../js/game.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('function tickSnap('), src.indexOf('function tickSnap(') + 1200);
+  assert.match(body, /if \(elInstr\.textContent !== instr\) elInstr\.textContent = instr;/);
+  assert.doesNotMatch(body, /elInstr\.textContent = `/);
+});

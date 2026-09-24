@@ -81,6 +81,25 @@ function toast(msg, ms = 3200, { alert = false } = {}) {
   }, ms);
 }
 
+// Le regioni live (role="status") vanno riscritte solo quando il testo cambia:
+// riassegnare lo stesso testo produce comunque una mutazione, e uno screen
+// reader può rileggerla. Il range lo farebbe ogni 120 ms e la quick a ogni
+// evento di progresso. Il confronto è con il DOM, non con una cache: se altro
+// codice scrive l'elemento, il valore di riferimento resta quello vero. Per
+// l'HTML si serializza il nuovo valore con lo stesso parser del browser, così
+// entità e spazi non producono falsi "cambiato".
+function setLive(el, value, { html = false } = {}) {
+  if (!el) return;
+  if (!html) {
+    if (el.textContent !== value) el.textContent = value;
+    return;
+  }
+  const probe = document.createElement('template');
+  probe.innerHTML = value;
+  const normalized = probe.innerHTML ?? value;
+  if (el.innerHTML !== normalized) el.innerHTML = value;
+}
+
 /* ============================== dial canvas ============================== */
 
 const INK = '#0a0a0a';
@@ -1455,7 +1474,7 @@ async function quickCalibrate() {
         // Durante lo stallo il prompt "lascia gli stick" resta visibile.
         if (quickStallCancelable && event.phase === 'unstable') return;
         const html = quickProgressHtml(event);
-        if (html !== null) msg.innerHTML = html;
+        if (html !== null) setLive(msg, html, { html: true });
       },
       log,
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
@@ -1731,9 +1750,9 @@ function updateRangeUI(ts) {
     ];
     for (const [miss, label] of dirs) if (miss) missing.push(label);
     rangeSession.allEdges = missing.length === 0;
-    $('range-hint').textContent = rangeSession.allEdges
+    setLive($('range-hint'), rangeSession.allEdges
       ? 'All extremes reached ✓'
-      : `Missing: ${missing.join(', ')}`;
+      : `Missing: ${missing.join(', ')}`);
   }
 
   const elapsed = ts - rangeSession.startTs;
