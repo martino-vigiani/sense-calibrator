@@ -10,8 +10,11 @@ import { VClock } from '../ops/sim/vclock.mjs';
 // browser, controller fisico o attese di wall clock. La UI del prompt bloccato
 // si verifica sull'app reale nell'harness DOM-stub.
 const result = { left: { offset: 0.5, noise: 0.2 }, right: { offset: 0.6, noise: 0.2 } };
+// Baseline con drift vero: sotto 1.2% la partenza è "già centrata" e non parte
+// alcun comando (WS1), quindi il percorso di calibrazione va provato da qui.
+const drifting = { left: { offset: 2.4, noise: 0.2 }, right: { offset: 0.6, noise: 0.2 } };
 
-function quickHarness({ holds = [true, true], baseline = result, disconnectAtHold = -1 } = {}) {
+function quickHarness({ holds = [true, true], baseline = drifting, disconnectAtHold = -1 } = {}) {
   const events = [];
   let holdIndex = 0;
   let current = true;
@@ -81,7 +84,8 @@ const heldAtStart = [{ stick: 0, t0: 0, dur: 60_000, tail: 0, amp: [50, 0] }];
 
 async function connectedApp({ schedule = [] } = {}) {
   const clock = new VClock();
-  const dev = makeDevice(clock, { schedule });
+  // Stick sinistro a ~2.5%: deve esserci qualcosa da calibrare.
+  const dev = makeDevice(clock, { schedule, drift: [[3.2, -0.3], [-0.1, 0.4]] });
   const h = await loadApp({ clock, authorized: [dev] });
   await h.advance(5000); // auto-connessione + test drift automatico
   return { h, dev };

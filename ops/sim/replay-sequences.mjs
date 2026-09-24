@@ -49,6 +49,7 @@ export function replayCohort(rows, params = QUICK_DEFAULTS) {
   const summary = {
     sessions: rows.length,
     skippedBeforeStart: 0,
+    skippedAtOrAboveOkMax: 0,
     sameStop: 0,
     stopsEarlier: 0,
     passesAvoided: 0,
@@ -76,6 +77,8 @@ export function replayCohort(rows, params = QUICK_DEFAULTS) {
     // centrato"): se la policy la esporta, il replay la applica.
     if (typeof policy.decideBeforeStart === 'function' && policy.decideBeforeStart({ beforeWorst, before: r.before }, params)?.skip) {
       summary.skippedBeforeStart++;
+      // Controllo WS1: una partenza a un passo (1.24) non va mai saltata.
+      if (beforeWorst >= params.okMax) summary.skippedAtOrAboveOkMax++;
       details.push({ t: r.t, passes: r.passes, skipped: true });
       continue;
     }

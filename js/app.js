@@ -803,7 +803,7 @@ async function doFlash() {
   // lancerebbe un secondo ciclo unlock → lock sulla NVS. Il bottone torna
   // attivo solo alla prossima apertura del modale, non nel finally: durante
   // l'animazione di chiusura sarebbe di nuovo cliccabile.
-  if (!ds5 || ops.busy) return;
+  if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   const controller = ds5;
   $('btn-flash-go').disabled = true;
   const op = ops.beginOp();
@@ -851,12 +851,41 @@ async function doFlash() {
 /* ============================== calibrazione rapida ============================== */
 
 let quickPreflightBlocked = false;
+// Partenza già centrata: il prossimo "Calibrate anyway" passa force a runQuick.
+let quickForceNext = false;
+// Durante uno stallo (WS1) Cancel non chiude il modale: chiede a runQuick di
+// abbandonare la passata senza calibEnd. Fuori dallo stallo è ignorato.
+let quickStallCancelable = false;
+let quickCancelRequested = false;
+// Controller con una sessione di calibrazione lasciata aperta da uno stallo:
+// nessun comando di calibrazione o scrittura finché non viene riavviato e
+// ricollegato (un nuovo DS5 è un oggetto diverso, quindi il blocco decade da
+// solo alla riconnessione).
+let powerCycleController = null;
+
+function blockedForPowerCycle() {
+  if (!ds5 || ds5 !== powerCycleController) return false;
+  toast('Restart the controller (hold PS for 10 s) and reconnect it before calibrating or saving again.', 6000);
+  return true;
+}
+
+function resetQuickModal() {
+  quickForceNext = false;
+  $('btn-quick-go').textContent = 'Calibrate now';
+}
 
 function cancelQuickCalibration() {
-  if (ops.busy) return;
+  if (ops.busy) {
+    if (quickStallCancelable) {
+      quickCancelRequested = true;
+      $('btn-quick-cancel').disabled = true;
+    }
+    return;
+  }
   closeModal('modal-quick');
-  if (quickPreflightBlocked) {
+  if (quickPreflightBlocked || quickForceNext) {
     quickPreflightBlocked = false;
+    resetQuickModal();
     startDriftTest();
   }
 }
@@ -994,41 +1023,49 @@ function uploadEvent(entry) {
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
+// Testi minimi: la UI definitiva degli avvisi dal vivo è di WS5.
 function quickProgressHtml({ phase, pass, worst }) {
   if (phase === 'preflight') return 'Release both sticks. Waiting for centered, stable readings…';
-  if (phase === 'pass') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
+  if (phase === 'noisy') return 'Readings are noisy: <b>release the sticks</b> and keep the controller still.';
+  if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b>';
+  if (phase === 'pass' || phase === 'resumed') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
   if (phase === 'unstable') return `Pass ${pass}: unstable signal. <b>Don’t touch the sticks.</b>`;
+  if (phase === 'stalled') return `Pass ${pass} is not settling. <b>Let go of both sticks</b>, or cancel.`;
   if (phase === 'verify') return `Pass ${pass}: verifying…`;
-  if (phase === 'next') return `Residual offset ${worst.toFixed(1)}%, running another pass…`;
+  if (phase === 'next') return worst === null
+    ? 'The result could not be verified, running another pass…'
+    : `Residual offset ${worst.toFixed(1)}%, running another pass…`;
   return null;
 }
 
-// Deliberatamente il `ds5` GLOBALE, letto a ogni comando, e non il controller
-// catturato all'avvio: è il comportamento di sempre, incluso il difetto noto
-// per cui dopo un replug a metà passata i comandi arrivano al controller nuovo
-// (e con `ds5` null l'errore è un TypeError). L'estrazione dell'algoritmo non
-// deve cambiarlo; il binding al controller catturato è una modifica a parte.
-const liveController = {
-  calibBegin: () => ds5.calibBegin(),
-  calibSample: () => ds5.calibSample(),
-  calibEnd: () => ds5.calibEnd(),
-};
+// Il testo dell'esito finale vive in js/calib/quick-outcome-copy.js (WS2),
+// compresi gli esiti di WS1 ('catastrophic', 'moved'): a 15% o più nessun
+// percorso suona come un successo. runQuick riceve il controller catturato,
+// non più il `ds5` globale (niente `liveController`).
 
 // UI della calibrazione rapida: l'algoritmo è runQuick (js/calib/quick.js),
 // qui restano `busy`, modale, messaggi, toast, telemetria e stato non salvato.
 async function quickCalibrate() {
-  if (!ds5 || ops.busy) return;
+  if (!ds5 || ops.busy || blockedForPowerCycle()) return;
+  // Il controller catturato è l'UNICO bersaglio dei comandi: dopo un replug a
+  // metà passata il ciclo non deve pilotare il controller nuovo (prima usava
+  // il `ds5` globale). runQuick controlla isCurrent() dopo ogni await.
   const controller = ds5;
+  const force = quickForceNext;
   cancelDriftTest();
   const op = ops.beginOp();
   const bar = $('quick-bar');
   quickPreflightBlocked = false;
+  resetQuickModal();
+  quickStallCancelable = false;
+  quickCancelRequested = false;
   const msg = $('quick-msg');
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
   let blockedMessage = null;
   let run = null;
   const fail = (session, error, committed) => {
+    if (!ops.isCurrent(op)) { recordSessionOnce(session); return; }
     ops.endOp(op);
     // La RAM del controller è cambiata se una passata precedente ha già chiuso
     // con calibEnd (un errore alla passata 2 non la annulla), oppure se la
@@ -1043,12 +1080,21 @@ async function quickCalibrate() {
   };
   try {
     run = await runQuick({
-      controller: liveController,
+      controller,
       source: stickSource,
       clock: pageClock,
       isCurrent: () => ds5 === controller,
+      isCancelled: () => quickCancelRequested,
+      force,
       onProgress: event => {
+        if (!ops.isCurrent(op)) return; // ciclo orfano: la UI è di un'altra operazione
         if (event.bar !== undefined) bar.style.width = event.bar + '%';
+        if (event.phase === 'stalled' || event.phase === 'resumed') {
+          quickStallCancelable = event.phase === 'stalled';
+          $('btn-quick-cancel').disabled = !quickStallCancelable || quickCancelRequested;
+        }
+        // Durante lo stallo il prompt "lascia gli stick" resta visibile.
+        if (quickStallCancelable && event.phase === 'unstable') return;
         const html = quickProgressHtml(event);
         if (html !== null) msg.innerHTML = html;
       },
@@ -1056,6 +1102,29 @@ async function quickCalibrate() {
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
     });
     const { session, outcome } = run;
+    if (outcome === 'disconnected') {
+      // Il teardown ha già chiuso i modali e avvisato: la UI ora può essere di
+      // un altro controller, quindi qui si registra soltanto.
+      recordSessionOnce(session);
+      log('Quick calibration interrupted: controller disconnected.');
+      return;
+    }
+    if (outcome === 'already-centered') {
+      quickForceNext = true;
+      recordSessionOnce(session);
+      $('btn-quick-go').textContent = 'Calibrate anyway';
+      blockedMessage = 'Both sticks are already centered, at the measurement limit. <b>Nothing was sent to the controller.</b> Another pass can only keep them there or make them worse.';
+      return;
+    }
+    if (outcome === 'stalled') {
+      recordSessionOnce(session);
+      powerCycleController = controller;
+      setUnsaved(true);
+      closeModal('modal-quick');
+      toast('Calibration stopped: the sticks never settled, so nothing was committed. Restart the controller (hold PS for 10 s) and reconnect it before calibrating again.', 10000);
+      log('Quick calibration abandoned mid-pass: controller needs a restart.');
+      return;
+    }
     if (outcome === 'preflight') {
       quickPreflightBlocked = true;
       recordSessionOnce(session);
@@ -1068,9 +1137,11 @@ async function quickCalibrate() {
       return;
     }
     recordSessionOnce(session);
+    if (!ops.isCurrent(op)) return;
 
     bar.style.width = '100%';
     await sleep(300);
+    if (!ops.isCurrent(op)) return;
     closeModal('modal-quick');
     setUnsaved(true);
     // Il testo dell'esito vive in js/calib/quick-outcome-copy.js: a 15% o più
@@ -1085,11 +1156,16 @@ async function quickCalibrate() {
     // chiusa e registrata, quindi `recordSessionOnce` non la duplica.
     fail(run?.session ?? { kind: 'quick' }, error, run?.committed === true);
   } finally {
-    ops.endOp(op);
-    $('btn-quick-go').disabled = false;
-    $('btn-quick-cancel').disabled = false;
-    bar.style.width = '0%';
-    msg.innerHTML = blockedMessage || 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
+    quickStallCancelable = false;
+    // Un ciclo orfano (controller scollegato e magari già sostituito) non tocca
+    // né il flag busy né il modale dell'operazione nuova.
+    if (ops.isCurrent(op)) {
+      ops.endOp(op);
+      $('btn-quick-go').disabled = false;
+      $('btn-quick-cancel').disabled = false;
+      bar.style.width = '0%';
+      msg.innerHTML = blockedMessage || 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
+    }
   }
 }
 
@@ -1206,7 +1282,7 @@ async function wizardNext() {
 }
 
 function openWizard() {
-  if (!ds5 || ops.busy) return;
+  if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
   wizard = { step: 0 };
   wizardSetDots(0);
@@ -1224,7 +1300,7 @@ let rangeSession = null; // { startTs }
 let rangeOp = null; // token di ops: la sessione range occupa il controller fino a finishRange
 
 async function openRange() {
-  if (!ds5 || ops.busy) return;
+  if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
   rangeOp = ops.beginOp();
   try {
@@ -1423,7 +1499,13 @@ $('btn-disconnect').addEventListener('click', disconnect);
 $('btn-reboot').addEventListener('click', rebootController);
 $('btn-retest').addEventListener('click', () => startDriftTest());
 
-$('btn-quick').addEventListener('click', () => { if (calibrationAllowed()) openModal('modal-quick'); });
+$('btn-quick').addEventListener('click', () => {
+  // calibrationAllowed: NVS sbloccata / controller avvelenato / firmware vecchio
+  // (WS4). blockedForPowerCycle: sessione lasciata aperta da uno stallo (WS1).
+  if (!calibrationAllowed() || blockedForPowerCycle()) return;
+  resetQuickModal();
+  openModal('modal-quick');
+});
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
 $('btn-quick-go').addEventListener('click', quickCalibrate);
 

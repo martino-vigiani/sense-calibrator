@@ -173,3 +173,16 @@ export function classifyOutcome(facts, params) {
   if (worst <= p.withinOneStepMax) return 'within-1-step';
   return 'residual';
 }
+
+// Regola PRIMA della passata 1 (WS1): se entrambi gli stick sono già sotto
+// `okMax` (1.2 = entrambi al pavimento 0.555, 0 LSB di errore) non si invia
+// alcun comando. Dati PG: 29 partenze sotto 1.2, nessuna è migliorata e 4 sono
+// peggiorate. Le partenze a 1.24 (un passo) calibrano normalmente: 24/30
+// arrivano sotto 1.2. Il replay (ops/sim/replay-sequences.mjs) applica la
+// stessa funzione alle sequenze reali.
+//   state = { beforeWorst }   params = { okMax }
+// Ritorna { skip, reason } con reason 'already-centered' | null.
+export function decideBeforeStart({ beforeWorst }, { okMax }) {
+  const skip = Number.isFinite(beforeWorst) && beforeWorst < okMax;
+  return { skip, reason: skip ? 'already-centered' : null };
+}

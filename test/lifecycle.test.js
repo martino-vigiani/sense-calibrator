@@ -12,9 +12,14 @@ import { VClock } from '../ops/sim/vclock.mjs';
 // comportamento voluto per i difetti noti (piano §1 F9, report robustezza) e
 // falliscono finché non vengono corretti: chi corregge il difetto toglie `todo`.
 
-async function setup({ devices = 1, schedule = [] } = {}) {
+// Stick sinistro a ~2.5%: una partenza già centrata (sotto 1.2%) non invia più
+// alcun comando (WS1), quindi i test che devono vedere una passata partono da
+// un drift vero.
+const DRIFTING = [[3.2, -0.3], [-0.1, 0.4]];
+
+async function setup({ devices = 1, schedule = [], drift } = {}) {
   const clock = new VClock();
-  const devs = Array.from({ length: devices }, (_, i) => makeDevice(clock, { seed: 11 + i, name: `DualSense ${'AB'[i]}`, schedule }));
+  const devs = Array.from({ length: devices }, (_, i) => makeDevice(clock, { seed: 11 + i, name: `DualSense ${'AB'[i]}`, schedule, drift }));
   const h = await loadApp({ clock, authorized: [devs[0]] });
   await h.advance(5000);
   return { h, clock, devs, A: devs[0], B: devs[1] };
@@ -80,7 +85,7 @@ test('a disconnect event tears down to the hero view and clears busy and unsaved
 // ---------------------------------------------------------------- operazioni
 
 test('Quick holds busy for the whole run, then marks the RAM unsaved and resumes drift', async () => {
-  const { h, A } = await setup();
+  const { h, A } = await setup({ drift: DRIFTING });
   await h.click('btn-quick');
   const running = h.click('btn-quick-go');
   await h.advance(2500);
@@ -133,7 +138,7 @@ test('Range keeps the controller busy until finishRange closes the session', asy
 
 // Scollega A a metà passata e ricollega B dallo stesso tab.
 async function replugMidPass() {
-  const { h, A, B } = await setup({ devices: 2 });
+  const { h, A, B } = await setup({ devices: 2, drift: DRIFTING });
   await h.click('btn-quick');
   const orphan = h.click('btn-quick-go');
   await h.advance(3000);
@@ -145,20 +150,22 @@ async function replugMidPass() {
   return { h, A, B, orphan };
 }
 
-test('today: a replug mid-pass lets the orphan loop drive the new controller', async () => {
-  const { h, B, orphan } = await replugMidPass();
-  await h.run(orphan);
-  assert.ok(hidCommands(B) > 0, 'known defect (pass loop uses the global ds5)');
-});
-
-test('a replug mid-pass sends no command to the new controller', { todo: 'bind the pass loop to the captured controller' }, async () => {
-  const { h, B, orphan } = await replugMidPass();
+// WS1: il ciclo usa il controller catturato e controlla isCurrent() dopo ogni
+// await (repro B del report robustezza: prima erano {A: 14, B: 14}).
+test('a replug mid-pass sends no command to the new controller', async () => {
+  const { h, A, B, orphan } = await replugMidPass();
+  const commandsOnA = hidCommands(A);
   await h.run(orphan);
   assert.equal(hidCommands(B), 0);
+  assert.equal(hidCommands(A), commandsOnA, 'nothing more reaches the unplugged controller either');
+  assert.equal(h.peek().ds5.device, B);
+  const quick = h.sessions().filter(s => s.kind === 'quick').at(-1);
+  assert.equal(quick.aborted, 'disconnected');
 });
 
-test('a disconnect mid-pass is recorded as disconnected, not as a generic error', { todo: 'aborted:"disconnected"' }, async () => {
-  const { h, A } = await setup();
+// Repro C: prima "Cannot read properties of null (reading 'calibBegin')".
+test('a disconnect mid-pass is recorded as disconnected, not as a generic error', async () => {
+  const { h, A } = await setup({ drift: DRIFTING });
   await h.click('btn-quick');
   const running = h.click('btn-quick-go');
   await h.advance(3000);
