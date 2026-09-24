@@ -21,7 +21,7 @@ import {
   measureOffset as measureOffsetFrom,
   waitForStable as waitForStableFrom,
 } from './sampling.js';
-import { classifyOutcome, decideAfterPass } from './quick-policy.js';
+import { POLICY_DEFAULTS, classifyOutcome, decideAfterPass } from './quick-policy.js';
 
 export const QUICK_MAX_PASSES = 4;
 export const QUICK_SAMPLES_PER_PASS = 12;
@@ -70,6 +70,10 @@ export const QUICK_DEFAULTS = Object.freeze({
   gateOffDelayMs: 100,
   sampleSettleMs: 60,
   endDelayMs: 150,
+  // Regola di arresto ed esito (js/calib/quick-policy.js): tetto fisico,
+  // soglia "entro un passo", continuazione su plateau (0 = disattiva) e
+  // `bestWorst` seminato con il punto di partenza.
+  ...POLICY_DEFAULTS,
 });
 
 // Esiti: 'preflight' (nessun comando inviato), 'error' (eccezione; vedi
@@ -152,8 +156,9 @@ export async function runQuick({
       if (baseGate > p.stableSpread)
         log(`Noisy signal: stability gate widened to ±${(baseGate * 100).toFixed(1)}%.`);
     }
-    // Punto di partenza, nella stessa scala delle passate. Oggi decideAfterPass
-    // non lo usa (lo stato completo è passato comunque); classifyOutcome sì.
+    // Punto di partenza, nella stessa scala delle passate: decideAfterPass ci
+    // semina `bestWorst` (un plateau peggiore dell'inizio non è convergenza),
+    // classifyOutcome lo usa per "peggiore dell'inizio".
     const beforeWorst = Math.max(before.left.offset, before.right.offset);
     let gateSpread = baseGate;
     let gateMax = baseGate;
@@ -163,6 +168,8 @@ export async function runQuick({
     let worst = null;
     let prevWorst = null;
     let bestWorst = null;
+    let bestPass = null;
+    let extraUsed = 0;
     let result = null;
     for (let pass = 1; pass <= p.maxPasses; pass++) {
       // Il gate si restringe verso la baseline a ogni passata: un disturbo
@@ -226,21 +233,39 @@ export async function runQuick({
       }
       worst = Math.max(result.left.offset, result.right.offset);
       session.passes.push(+worst.toFixed(2));
-      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst }, p);
-      ({ prevWorst, bestWorst } = decision);
+      // `otherWorst`: lo stick migliore. Se è già al pavimento, le passate
+      // oltre la regola precedente sono limitate (rischiano di rovinarlo).
+      const otherWorst = Math.min(result.left.offset, result.right.offset);
+      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed }, p);
+      ({ prevWorst, bestWorst, bestPass, extraUsed } = decision);
       log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (decision.reason === 'target') break;
+      if (decision.reason === 'catastrophic') {
+        log(`Pass ${pass}: residual offset ${worst.toFixed(1)}% is not a released stick: stopping, no further passes.`);
+        break;
+      }
+      if (decision.extra === 'recovery')
+        log(`Pass ${pass} is worse than the starting point: one more pass to try to recover.`);
+      if (decision.extra === 'plateau')
+        log(`Pass ${pass} repeated the previous result: one more pass (plateau continuation).`);
       if (decision.regressed)
         log(`Pass ${pass} came out worse than the previous one: trying again instead of stopping.`);
       if (decision.reason === 'converged') {
         log('Converged: residual offset at the noise floor, further passes won’t help.');
         break;
       }
+      if (decision.reason === 'floor-cap') {
+        log('Still worse than the starting point, but the other stick is centered: stopping to avoid disturbing it.');
+        break;
+      }
       if (pass < p.maxPasses) onProgress({ phase: 'next', pass, worst });
     }
 
     session.after = worst === null ? null : summarizeResult(result);
-    session.best = bestWorst === null ? null : +bestWorst.toFixed(2);
+    // `best` resta la migliore passata VERIFICATA, come nei dati già raccolti:
+    // `bestWorst` ora parte dal punto di partenza, che sta già in `before`.
+    const verified = session.passes.filter(v => v !== null);
+    session.best = verified.length ? Math.min(...verified) : null;
     // `gate` è il valore finale, che con gateOff o dopo un decadimento non dice
     // quanto si è dovuto allargare: `gateMax` è il dato utile per il tuning.
     session.gate = +gateSpread.toFixed(3);
@@ -253,7 +278,7 @@ export async function runQuick({
     // tornare alla migliore. L'esito lo dice invece di annunciare come
     // risultato un numero che non è il migliore ottenuto.
     const maxNoise = result && worst !== null ? Math.max(result.left.noise, result.right.noise) : null;
-    const outcome = classifyOutcome({ worst, beforeWorst, bestWorst, maxNoise, unstableEvents: session.unstableEvents }, p);
+    const outcome = classifyOutcome({ worst, beforeWorst, bestWorst, maxNoise, unstableEvents: session.unstableEvents, passes: session.passes }, p);
     return { session, outcome, committed: true, worst, beforeWorst, bestWorst };
   } catch (error) {
     // La RAM del controller è cambiata se una passata precedente ha già chiuso

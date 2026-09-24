@@ -22,16 +22,21 @@ import { cohort, loadSessions, worstOf } from './population.mjs';
 export const REPLAY_LABEL = 'real-data replay';
 
 // Fatti ricostruibili dalla telemetria v1 (9 campi). `bestWorst` è il minimo
-// delle passate verificate, come nel ciclo di oggi; `maxNoise` è il rumore
-// della verifica finale (after.noise).
+// fra il punto di partenza e le passate verificate, come nel ciclo
+// (decideAfterPass lo semina con il punto di partenza); `maxNoise` è il rumore
+// della verifica finale (after.noise); `passes` serve a riconoscere un residuo
+// che si ripete identico.
 export function factsFromSession(r) {
   const verified = r.passes.filter(p => p !== null);
+  const beforeWorst = r.before ? worstOf(r.before) : null;
+  const seeds = beforeWorst === null ? verified : [beforeWorst, ...verified];
   return {
     worst: r.after ? worstOf(r.after) : null,
-    beforeWorst: r.before ? worstOf(r.before) : null,
-    bestWorst: verified.length ? Math.min(...verified) : null,
+    beforeWorst,
+    bestWorst: seeds.length ? Math.min(...seeds) : null,
     maxNoise: r.after ? Math.max(...r.after.noise) : null,
     unstableEvents: r.unstableEvents ?? 0,
+    passes: r.passes,
   };
 }
 
@@ -56,7 +61,11 @@ export function replayOutcomes(rows, params = QUICK_DEFAULTS, render = null) {
     const outcome = classifyOutcome(facts, params);
     summary.outcomes[outcome] = (summary.outcomes[outcome] ?? 0) + 1;
     const worse = facts.worst !== null && facts.beforeWorst !== null && facts.worst - facts.beforeWorst > params.regressionEps;
-    const lost = facts.worst !== null && facts.bestWorst !== null && facts.worst - facts.bestWorst > params.regressionEps;
+    // "Perso terreno" rispetto alla migliore PASSATA, come prima del seme con
+    // il punto di partenza: così il contatore resta confrontabile nel tempo
+    // (il peggioramento rispetto all'inizio ha già il suo).
+    const verified = r.passes.filter(p => p !== null);
+    const lost = facts.worst !== null && verified.length > 0 && facts.worst - Math.min(...verified) > params.regressionEps;
     const catastrophic = facts.worst !== null && facts.worst >= 15;
     if (worse) summary.worseThanStart++;
     if (lost) summary.lostGround++;

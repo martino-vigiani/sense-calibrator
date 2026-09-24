@@ -19,20 +19,30 @@ const FLOOR = 0.555;
 const atFloor = v => Math.abs(v - FLOOR) < 0.01;
 
 // Applica la policy a una sequenza. Ritorna dove si ferma, perché, e quante
-// passate chiede oltre quelle registrate (`extra`).
-export function replayDecisions(passes, params = QUICK_DEFAULTS, { beforeWorst = null, decide = policy.decideAfterPass } = {}) {
+// passate chiede oltre quelle registrate (`extra`), e quante ne ha aggiunte la
+// regola rispetto a quella precedente (`added`: recupero o plateau).
+// `otherWorst` è lo stick migliore: la telemetria v1 lo conosce solo a fine
+// sessione (after.off), quindi il replay usa quel valore per ogni passata.
+// Per le passate extra è l'ipotesi coerente con "ripetono l'ultimo valore".
+export function replayDecisions(passes, params = QUICK_DEFAULTS, { beforeWorst = null, otherWorst = null, decide = policy.decideAfterPass } = {}) {
   let prevWorst = null;
   let bestWorst = null;
+  let bestPass = null;
+  let extraUsed = 0;
+  const kinds = {};
   const limit = Math.max(params.maxPasses, passes.length);
   for (let pass = 1; pass <= limit; pass++) {
     const worst = pass <= passes.length ? passes[pass - 1] : passes.at(-1);
-    const d = decide({ pass, worst, beforeWorst, prevWorst, bestWorst }, params);
+    const d = decide({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed }, params);
     ({ prevWorst, bestWorst } = d);
+    bestPass = d.bestPass ?? bestPass;
+    extraUsed = d.extraUsed ?? extraUsed;
+    if (d.extra) kinds[d.extra] = (kinds[d.extra] ?? 0) + 1;
     if (d.stop || pass >= params.maxPasses) {
-      return { stopAt: pass, reason: d.stop ? d.reason : 'budget', extra: Math.max(0, pass - passes.length), bestWorst };
+      return { stopAt: pass, reason: d.stop ? d.reason : 'budget', extra: Math.max(0, pass - passes.length), added: kinds, bestWorst, worst };
     }
   }
-  return { stopAt: limit, reason: 'budget', extra: Math.max(0, limit - passes.length), bestWorst };
+  return { stopAt: limit, reason: 'budget', extra: Math.max(0, limit - passes.length), added: kinds, bestWorst, worst: passes.at(-1) };
 }
 
 export function replayCohort(rows, params = QUICK_DEFAULTS) {
@@ -47,6 +57,14 @@ export function replayCohort(rows, params = QUICK_DEFAULTS) {
     extraPassesOtherStickAtFloor: 0,
     extraPassesOther: 0,
     sessionsWithExtraOtherStickAtFloor: 0,
+    // Sessioni in cui la variante si ferma per "convergenza" su un valore
+    // peggiore del punto di partenza (> convergeEps): con `bestWorst` seminato
+    // dal punto di partenza devono essere 0 (13 nella regola precedente).
+    convergedWorseThanStart: 0,
+    // Decisioni "continua" dove la regola precedente si fermava: recupero da
+    // un plateau peggiore dell'inizio, e continuazione su plateau (0 di default).
+    recoveryContinuations: 0,
+    plateauContinuations: 0,
     reasons: {},
     startsBelowOkMax: rows.filter(r => worstOf(r.before) < params.okMax).length,
     startsAtOneStep: rows.filter(r => Math.abs(worstOf(r.before) - 1.24) < 0.01).length,
@@ -61,8 +79,11 @@ export function replayCohort(rows, params = QUICK_DEFAULTS) {
       details.push({ t: r.t, passes: r.passes, skipped: true });
       continue;
     }
-    const d = replayDecisions(r.passes, params, { beforeWorst });
+    const d = replayDecisions(r.passes, params, { beforeWorst, otherWorst: Math.min(...r.after.off) });
     summary.reasons[d.reason] = (summary.reasons[d.reason] ?? 0) + 1;
+    if (d.reason === 'converged' && d.worst > beforeWorst + params.convergeEps) summary.convergedWorseThanStart++;
+    summary.recoveryContinuations += d.added.recovery ?? 0;
+    summary.plateauContinuations += d.added.plateau ?? 0;
     const recorded = r.passes.length;
     if (d.stopAt === recorded) summary.sameStop++;
     else if (d.stopAt < recorded) { summary.stopsEarlier++; summary.passesAvoided += recorded - d.stopAt; }
