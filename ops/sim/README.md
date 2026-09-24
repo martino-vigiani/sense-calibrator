@@ -18,7 +18,7 @@ input reports use while a calibration session is open).
 | File | Purpose |
 |---|---|
 | `vclock.mjs` | Virtual clock: `setTimeout`/`clearTimeout`/`now`, drains real microtasks between events |
-| `fake-dualsense.mjs` | WebHID-level fake: input report `0x01` at ~250 Hz, feature reports `0x82`/`0x83` with the fitted firmware model, minimal NVS (`0x80`/`0x81`), range status, unplug, fault injection, command counters |
+| `fake-dualsense.mjs` | WebHID-level fake: input report `0x01` at ~250 Hz, feature reports `0x82`/`0x83` with the fitted firmware model, minimal NVS (`0x80`/`0x81`), range status, unplug, fault injection, command counters. For R1 only (`ops/hw-probe`): the module calibration read `[12,2]` and write `[12,1]`, a power-cycle that restores the NVS copy, and switches for each unverified hypothesis (`MODULE_DEFAULTS`). `[12,x]` commands have their own `moduleCounts` and consume no random numbers, so the golden runs do not move |
 | `population.mjs` | Loads telemetry, cohorts (`PG`, `PGP`, `ALL`, `MC`), lattice decoding, templates, synthetic population for tests |
 | `harness.mjs` | Wires the fake to `parseSticks` → stick source → `runQuick` |
 | `run.mjs` | Runs N sessions (optionally in worker threads) and writes a JSON output |

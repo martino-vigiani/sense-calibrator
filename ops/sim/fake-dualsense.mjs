@@ -16,16 +16,49 @@ export { gauss };
 const NV_WORDS = { locked: 0x03030201, unlocked: 0x03030200, pending_reboot: 0x15010100 };
 const OPS = { 1: 'begin', 2: 'end', 3: 'sample' };
 
+// Dati di calibrazione "module" (0x80 [12,2] lettura / [12,1] scrittura), solo
+// per la ricerca R1 (ops/hw-probe). Ordine dei 12 uint16 come in upstream
+// (finetune-modal.js): 8 bordi del range, poi i 4 centri.
+export const MODULE_FIELDS = ['LL', 'LT', 'RL', 'RT', 'LR', 'LB', 'RR', 'RB', 'LX', 'LY', 'RX', 'RY'];
+// Tutto qui è un'IPOTESI, non una misura: la scala unità/LSB, il segno, i
+// valori di base e il comportamento dei casi limite sono esattamente ciò che il
+// protocollo R1 deve misurare sull'hardware. I default servono solo a dare al
+// probe un firmware plausibile contro cui girare; ogni opzione ha un'alternativa
+// così i test possono verificare che il probe distingua le ipotesi.
+export const MODULE_DEFAULTS = {
+  // Unità del valore a 16 bit per 1 LSB del byte di report (segno incluso).
+  // Segnaposto: il report protocollo stima "circa 256× più fine", mai misurato.
+  unitsPerLsb: 64,
+  // Valori di partenza: 8 bordi plausibili e i centri a metà scala.
+  range: [2400, 2400, 2400, 2400, 63100, 63100, 63100, 63100],
+  centerBase: [32768, 32768, 32768, 32768],
+  // p2 della risposta a [12,2]: upstream accetta 2 o 4 senza spiegare il 4.
+  readP2: 2,
+  // [12,1] ha effetto sui centri in RAM (true) o viene ignorato (false).
+  writeApplies: true,
+  // Una scrittura (calibEnd o [12,1]) con NVS aperta finisce subito anche in
+  // memoria permanente: è l'etichetta "unlocked = permanent" di upstream (F2).
+  unlockedWritesPersist: true,
+  // calibEnd senza campioni: 'keep' (centro invariato, il comportamento storico
+  // del fake) oppure 'raw' (centro azzerato: l'uscita torna alla posizione grezza).
+  zeroSampleEnd: 'keep',
+  // Aggregazione dei calibSample: 0 = media di tutti; N > 0 = media degli ultimi N.
+  lastN: 0,
+};
+
 export class FakeDualSense {
   // stick: [{ drift:[dx,dy] (LSB, posizione a riposo meno centro firmware),
   //           noise: sigma LSB, bias:{axis,B} errore di cattura persistente }]
   // faults: funzioni ({ id, buf, op, counts }) → Error | null, controllate
   //         prima di ogni feature report in uscita (solo per i test).
-  constructor({ clock, seed, sticks, fw, timing, hand = {}, faults = [], name = 'Virtual DualSense' }) {
+  // module: override di MODULE_DEFAULTS (ricerca R1). Senza scritture [12,x]
+  //         non cambia nulla del comportamento né della sequenza casuale.
+  constructor({ clock, seed, sticks, fw, timing, hand = {}, faults = [], name = 'Virtual DualSense', module = {} }) {
     this.clock = clock; this.r = rng(seed);
     this.opened = true; this.productName = name;
     this.vendorId = 0x054c; this.productId = 0x0ce6;
     this.collections = [{ inputReports: [{ reportId: 0x01 }], featureReports: [
+      { reportId: 0x80, items: [{ reportCount: 63 }] }, { reportId: 0x81, items: [{ reportCount: 63 }] },
       { reportId: 0x82, items: [{ reportCount: 63 }] }, { reportId: 0x83, items: [{ reportCount: 63 }] }] }];
     this.oninputreport = null;
     this.sticks = sticks.map(s => ({ ...s, rest: [...s.drift], center: [0, 0] }));
@@ -35,10 +68,20 @@ export class FakeDualSense {
     this.stopped = false; this.reports = 0; this.calibEnds = 0;
     this.faults = faults;
     this.nvState = 'locked';
+    // Ultima risposta preparata per 0x81 (stato NVS o dati [12,2]): come nel
+    // firmware, 0x81 risponde all'ultimo comando 0x80.
     this.nvResponse = null;
     this.unplugged = false;
     // Contatori per le verifiche di sicurezza (comandi inviati, per opcode).
     this.counts = { begin: 0, sample: 0, end: 0, range: 0, other: 0, nvs: 0 };
+    // Contatori separati per [12,x]: `counts` entra nei golden di equivalenza
+    // (deepEqual), quindi non gli si aggiungono chiavi.
+    this.moduleCounts = { read: 0, write: 0 };
+    this.module = { ...MODULE_DEFAULTS, ...module };
+    this.moduleRange = [...this.module.range];
+    // Copia "in NVS" dei centri e dei bordi: la RAM riparte da qui a ogni
+    // spegnimento (powerCycle). Un ciclo unlock → lock la aggiorna.
+    this.stored = this.snapshotCal();
     this.commandLog = [];
     this.schedule();
   }
@@ -76,12 +119,16 @@ export class FakeDualSense {
   closedError() { return Object.assign(new Error('The device is not opened.'), { name: 'InvalidStateError' }); }
   sendFeatureReport(id, buf) {
     if (this.unplugged || !this.opened) return Promise.reject(this.closedError());
-    const op = id === 0x82 && buf[2] === 1 ? OPS[buf[0]] ?? 'other' : id === 0x82 && buf[2] === 2 ? 'range' : id === 0x80 ? 'nvs' : 'other';
+    const op = id === 0x82 && buf[2] === 1 ? OPS[buf[0]] ?? 'other' : id === 0x82 && buf[2] === 2 ? 'range'
+      : id === 0x80 && buf[0] === 12 ? (buf[1] === 1 ? 'moduleWrite' : buf[1] === 2 ? 'moduleRead' : 'other')
+      : id === 0x80 ? 'nvs' : 'other';
     for (const fault of this.faults) {
       const error = fault({ id, buf, op, counts: this.counts });
       if (error) return Promise.reject(error);
     }
-    this.counts[op] += 1;
+    if (op === 'moduleRead') this.moduleCounts.read += 1;
+    else if (op === 'moduleWrite') this.moduleCounts.write += 1;
+    else this.counts[op] += 1;
     this.commandLog.push({ t: this.clock.now(), id, op, bytes: [...buf.slice(0, 6)] });
     return new Promise((res, rej) => this.clock.setTimeout(() => {
       if (this.unplugged) { rej(this.closedError()); return; }
@@ -117,13 +164,21 @@ export class FakeDualSense {
       if (this.cal) {
         this.sticks.forEach((s, i) => {
           for (const ax of [0, 1]) {
-            const xs = this.cal[i][ax]; if (!xs.length) continue;
+            let xs = this.cal[i][ax];
+            if (!xs.length) {
+              // calibEnd senza campioni (percorso di riparazione di calibBegin):
+              // cosa scriva il firmware è ignoto (H-d), qui è un'opzione.
+              if (this.module.zeroSampleEnd === 'raw') s.center[ax] = 0;
+              continue;
+            }
+            if (this.module.lastN > 0) xs = xs.slice(-this.module.lastN);
             const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
             const bias = s.bias.axis === ax ? s.bias.B : 0;
             s.center[ax] = mean + bias + this.fw.sf * gauss(this.r);
           }
         });
         this.calibEnds++;
+        this.persistIfUnlocked();
       }
       this.cal = null; this.response = [0x83, 1, 1, 2];
     }
@@ -132,10 +187,61 @@ export class FakeDualSense {
   // del ciclo di vita (adopt, flash), non al modello di calibrazione.
   nvsCommand(buf) {
     const [a, b] = buf;
+    if (a === 12) { this.moduleCommand(buf); return; }
+    // Il lock che chiude un ciclo unlock → lock è il "salva" (flash): la RAM
+    // diventa la copia permanente.
     if (a === 3 && b === 2) this.nvState = 'unlocked';
-    else if (a === 3 && b === 1) this.nvState = 'locked';
+    else if (a === 3 && b === 1) {
+      if (this.nvState === 'unlocked') this.stored = this.snapshotCal();
+      this.nvState = 'locked';
+    }
     const word = NV_WORDS[this.nvState];
     this.nvResponse = [0x81, (word >>> 24) & 0xff, (word >>> 16) & 0xff, (word >>> 8) & 0xff, word & 0xff];
+  }
+  // Centri correnti (LSB) e bordi, per la copia in NVS e per powerCycle.
+  snapshotCal() {
+    return { centers: this.sticks.map(s => [...s.center]), range: [...this.moduleRange] };
+  }
+  persistIfUnlocked() {
+    if (this.nvState === 'unlocked' && this.module.unlockedWritesPersist) this.stored = this.snapshotCal();
+  }
+  // I 12 uint16 come li restituirebbe [12,2]: bordi, poi LX LY RX RY.
+  moduleValues() {
+    const { unitsPerLsb, centerBase } = this.module;
+    const centers = [this.sticks[0].center[0], this.sticks[0].center[1], this.sticks[1].center[0], this.sticks[1].center[1]];
+    const clamp = v => Math.max(0, Math.min(0xffff, Math.round(v)));
+    return [...this.moduleRange.map(clamp), ...centers.map((c, k) => clamp(centerBase[k] + unitsPerLsb * c))];
+  }
+  // [12,2]: prepara la risposta 0x81 (validata dal probe come in upstream).
+  // [12,1, lo0, hi0, …]: scrive i 12 valori in RAM, senza risposta (upstream
+  // non legge alcun ack). Nessun numero casuale consumato.
+  moduleCommand(buf) {
+    const [, b] = buf;
+    if (b === 2) {
+      const reply = [0x81, 12, this.module.readP2, 2];
+      for (const v of this.moduleValues()) reply.push(v & 0xff, v >> 8);
+      this.nvResponse = reply;
+      return;
+    }
+    if (b !== 1 || !this.module.writeApplies) return;
+    const values = Array.from({ length: 12 }, (_, i) => buf[2 + 2 * i] | (buf[3 + 2 * i] << 8));
+    this.moduleRange = values.slice(0, 8);
+    const { unitsPerLsb, centerBase } = this.module;
+    [[0, 0], [0, 1], [1, 0], [1, 1]].forEach(([si, ax], k) => {
+      this.sticks[si].center[ax] = (values[8 + k] - centerBase[k]) / unitsPerLsb;
+    });
+    this.persistIfUnlocked();
+  }
+  // Spegnimento e riaccensione (tenere PS 10 s): la RAM torna alla copia in
+  // NVS, la sessione aperta si perde, la NVS riparte bloccata. La pagina vede
+  // una disconnessione e deve ricostruire DS5: qui il dispositivo resta aperto.
+  powerCycle() {
+    this.sticks.forEach((s, i) => { s.center = [...this.stored.centers[i]]; });
+    this.moduleRange = [...this.stored.range];
+    this.cal = null;
+    this.nvState = 'locked';
+    this.response = [0x83, 0, 0, 0];
+    this.nvResponse = null;
   }
   // Cavo staccato: niente più report, ogni comando fallisce come in WebHID.
   unplug() { this.unplugged = true; this.stopped = true; this.opened = false; }
