@@ -63,6 +63,8 @@ Comments in the JS are in Italian; UI strings are English.
 
 `ops/sim/` is the headless simulator (see its README): `run.mjs` runs the real `runQuick` against a fitted virtual DualSense, `score.mjs` compares with the real cohort using a cluster bootstrap by template, `replay-sequences.mjs` and `replay-telemetry.mjs` replay the real pass sequences and outcomes through `quick-policy.js`. Label every simulator result **model-verified**: it is never hardware verification. The real telemetry is gitignored and must never be committed, not even in derived form; tests use only the synthetic population.
 
+`ops/hw-probe/` is the R1 research page (localhost only, spare controller only, see `docs/hw-probe-protocol.md`): it reads the RAM calibration with `0x80 [12,2]` and writes it back with `[12,1]`. Nothing in `js/` may import it or carry a `[12,1]` payload (`test/hw-probe-public-surface.test.js`), and the irreversibility invariant in *Domain constraints* stays in force until the protocol's go/no-go is filled in from a hardware run.
+
 ## Telemetry
 
 Every significant action emits a typed local event via `recordEvent(kind, data)` in app.js. Ogni evento porta `sid`, un valore casuale per caricamento di pagina mai persistito: collega gli eventi di una singola visita, non due visite tra loro. `summarizeResult` include `xy` (componenti per asse): `off` è la loro ipotenusa, quindi senza `xy` la direzione del drift è perduta. Events always go to `localStorage` (`sense-calib-sessions`, capped at 200; on a quota error the history is trimmed to 50 and the write retried, and only a `SecurityError` disables storage for the page).
