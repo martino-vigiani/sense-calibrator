@@ -332,11 +332,82 @@ test('a range already closed (code 3) disables Write without setting unsaved', a
   assert.equal(h.$('btn-flash').disabled, true);
 });
 
-test('a reconnect clears the range write lock (the new controller never inherits it)', async () => {
-  const { h, A } = await setup();
-  h.ctx.setRangeWriteLock('incomplete');
-  A.unplug();
-  h.hid.fire('disconnect', A);
+// Il seriale che ds5.getSerial legge (0x80 [1,19] → 0x81 [1,19,2,…]); il
+// DualSense virtuale di base non ne ha uno.
+function withSerial(dev, serial) {
+  const nvs = dev.nvsCommand.bind(dev);
+  dev.nvsCommand = buf => {
+    if (buf[0] === 1 && buf[1] === 19) {
+      dev.nvResponse = [0x81, 1, 19, 2, ...new TextEncoder().encode(serial)];
+      return;
+    }
+    nvs(buf);
+  };
+  return dev;
+}
+
+async function lockThenReplug({ serialA = null, serialB = null, reason = 'incomplete' } = {}) {
+  const { h, clock, A } = await setup();
+  if (serialA) {
+    // ricollega A col seriale per leggere la chiave locale
+    A.unplug();
+    h.hid.fire('disconnect', A);
+  }
+  const first = serialA ? withSerial(makeDevice(clock, { seed: 31 }), serialA) : A;
+  if (serialA) {
+    h.hid.fire('connect', first);
+    await h.advance(2000);
+    assert.equal(h.peek().ds5.device, first);
+  }
+  h.ctx.setRangeWriteLock(reason);
+  first.unplug();
+  h.hid.fire('disconnect', first);
+  const back = makeDevice(clock, { seed: 32 });
+  if (serialB) withSerial(back, serialB);
+  h.hid.fire('connect', back);
+  await h.advance(2000);
+  assert.equal(h.peek().ds5.device, back);
+  return { h, back };
+}
+
+test('the range write lock survives a replug of the same controller (H11 unverified)', async () => {
+  const { h, back } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'E8475C3A1B2F' });
+  assert.equal(h.peek().rangeWriteLock, 'incomplete');
+  assert.equal(h.$('btn-flash').disabled, true);
+  assert.ok(h.toasts().some(t => /may still have the incomplete range calibration/.test(t)));
+  const nvs = back.counts.nvs;
+  await h.run(h.ctx.doFlash());
+  assert.equal(back.counts.nvs, nvs, 'no NVS write after a replug');
+});
+
+test('without a readable serial the reconnected controller keeps the lock (conservative)', async () => {
+  for (const reason of ['incomplete', 'closed', 'error']) {
+    const { h } = await lockThenReplug({ reason });
+    assert.equal(h.peek().rangeWriteLock, reason);
+    assert.equal(h.$('btn-flash').disabled, true);
+  }
+});
+
+test('a different controller (both serials known) does not inherit the range write lock', async () => {
+  const { h } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'A1B2C3D4E5F6' });
   assert.equal(h.peek().rangeWriteLock, null);
   assert.equal(h.$('btn-flash').disabled, false);
+});
+
+test('the device key is a salted hash, never the raw serial', async () => {
+  const { h } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'E8475C3A1B2F' });
+  const key = h.eval('rangeWriteLockKey');
+  assert.match(key, /^[0-9a-f]{32}$/);
+  assert.equal(h.eval('deviceKey'), key, 'same controller, same key');
+  assert.ok(!key.toLowerCase().includes('e8475c3a1b2f'));
+  assert.equal(h.sessions().some(s => JSON.stringify(s).includes(key)), false, 'the key never reaches an event');
+});
+
+test('no copy presents a reconnect as a way to re-enable Write', async () => {
+  const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8'));
+  const lockCopy = src.slice(src.indexOf('function rangeLockMessage'), src.indexOf('function blockedByRangeWriteLock'));
+  const confirmCopy = src.slice(src.indexOf('The range calibration is incomplete.'), src.indexOf('Finish anyway?'));
+  for (const text of [lockCopy, confirmCopy]) {
+    assert.doesNotMatch(text, /reconnect|unplug|replug/i);
+  }
 });

@@ -277,6 +277,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
     clearTimeout: clock.clearTimeout,
     performance: { now: clock.now },
     crypto: webcrypto,
+    TextEncoder,
     confirm: () => h.confirmAnswer,
     structuredClone,
     URLSearchParams,

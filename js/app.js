@@ -476,8 +476,12 @@ async function adopt(device) {
     if (ds5 !== candidate) return;
     deviceInfo = info;
     renderDeviceInfo(info);
+    const key = await localDeviceKey(info.serial);
+    if (ds5 !== candidate) return;
+    deviceKey = key;
     const nv = await refreshNv();
     if (ds5 !== candidate) return;
+    reapplyRangeWriteLock(key);
 
     $('view-hero').classList.add('hidden');
     $('view-device').classList.remove('hidden');
@@ -530,7 +534,9 @@ function teardown(message = null) {
   oldFirmwareAck = false;
   rangeSession = null;
   rangeCheck = null;
-  setRangeWriteLock(null);
+  // Il blocco della scrittura NON decade allo scollegamento: vedi
+  // rangeWriteLock. Resta la chiave del controller che l'ha prodotto.
+  deviceKey = null;
   if (adopting) adopting.aborted = true;
   clearTimeout(autoDriftTimer);
   autoDriftTimer = null;
@@ -1478,29 +1484,85 @@ const RANGE_MSG_HTML = $('range-msg').innerHTML;
 
 // Scrittura in memoria disattivata dopo un range chiuso incompleto ("Finish
 // anyway"), già chiuso (code 3: il range in RAM è ignoto) o fallito dopo un
-// possibile commit (C0-15). Resta finché un range completo non lo sostituisce
-// o il controller non viene ricollegato. Il blocco generale della scrittura
-// (esiti Quick) è di WS5: questo copre solo il range.
+// possibile commit (C0-15). L'unico modo di toglierlo è un range completo che
+// sostituisce quello in RAM. Non decade allo scollegamento: se il range in RAM
+// sopravviva a uno stacco USB senza spegnimento è H11, non verificato, e un
+// ricollegamento che riabilitasse Write porterebbe il range incompleto in NVS
+// (aggirando H8). Neppure lo spegnimento lo toglie: l'app non distingue uno
+// spegnimento da uno stacco, e che lo spegnimento annulli il range è H10.
+// Per questo la UI non presenta mai il ricollegamento come via d'uscita.
+// Il blocco segue il controller che l'ha prodotto tramite `rangeWriteLockKey`,
+// hash salato del seriale (vedi localDeviceKey), mai il seriale in chiaro. Se
+// uno dei due seriali non è leggibile il controller che si collega è trattato
+// come lo stesso (prudente). Limite noto: vive solo in memoria, quindi un
+// reload della pagina lo perde; WS5 lo deve risolvere nel blocco generale della
+// scrittura (esiti Quick), di cui questo è il pezzo del range.
 let rangeWriteLock = null;
+let rangeWriteLockKey = null;
+// Chiave locale del controller collegato (null se il seriale non è leggibile).
+let deviceKey = null;
+
+// Sale casuale per pagina: la chiave non è confrontabile tra pagine né
+// riconducibile al seriale, e non esce mai dal browser.
+const DEVICE_KEY_SALT = crypto.getRandomValues?.(new Uint8Array(16)) ?? null;
+
+async function localDeviceKey(rawSerial) {
+  const serial = String(rawSerial ?? '').replace(/\0/g, '').trim();
+  if (!serial || !DEVICE_KEY_SALT || !crypto.subtle) return null;
+  try {
+    const text = new TextEncoder().encode(serial);
+    const buf = new Uint8Array(DEVICE_KEY_SALT.length + text.length);
+    buf.set(DEVICE_KEY_SALT);
+    buf.set(text, DEVICE_KEY_SALT.length);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    return Array.from(digest.slice(0, 16), b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
 
 function rangeLockMessage(reason) {
-  const off = lastNvStatus === 'locked' ? ', or turn the controller off (hold PS for 10 s) to discard it' : '';
+  const off = lastNvStatus === 'locked'
+    ? ' Turning the controller off (hold PS for 10 s) should discard the stored range, but Write stays disabled until a complete range calibration.'
+    : '';
   if (reason === 'closed') {
     return 'Writing to memory is disabled: the range session had already closed, so the stored range is unknown. '
-      + 'Repeat the range calibration first.';
+      + `Repeat the range calibration first.${off}`;
   }
   if (reason === 'error') {
     return 'Writing to memory is disabled: the range calibration failed after it may have changed the controller. '
-      + 'Restart the controller before calibrating again.';
+      + `Repeat the range calibration before writing.${off}`;
   }
-  return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration${off}.`;
+  return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration.${off}`;
 }
 
 function setRangeWriteLock(reason) {
   rangeWriteLock = reason;
+  rangeWriteLockKey = reason ? deviceKey : null;
   const btn = $('btn-flash');
   btn.disabled = !!reason;
   btn.title = reason ? rangeLockMessage(reason) : '';
+}
+
+// Al collegamento: un blocco lasciato da un altro controller (entrambi i
+// seriali noti e diversi) decade; altrimenti resta e l'utente viene avvisato
+// che il range incompleto può essere ancora attivo.
+function reapplyRangeWriteLock(key) {
+  if (!rangeWriteLock) return;
+  if (key && rangeWriteLockKey && key !== rangeWriteLockKey) {
+    log('A different controller is connected: the range write lock of the previous one does not apply.');
+    setRangeWriteLock(null);
+    return;
+  }
+  const reason = rangeWriteLock;
+  const lockKey = rangeWriteLockKey;
+  setRangeWriteLock(reason);
+  // La chiave nota resta quella del controller che ha prodotto il blocco.
+  rangeWriteLockKey = lockKey ?? key;
+  const msg = 'This controller may still have the incomplete range calibration from before it was disconnected. '
+    + rangeLockMessage(reason);
+  log(msg);
+  toast(msg, 9000);
 }
 
 function blockedByRangeWriteLock() {
@@ -1608,8 +1670,7 @@ async function finishRange() {
       ? `Not reached: ${st.missingDirs.join(', ')}.`
       : 'The sticks were not turned enough in both directions.';
     const go = confirm(`The range calibration is incomplete. ${what} Part of the stick travel may become unreachable. `
-      + 'If you finish now, writing to memory stays disabled until you repeat the range calibration or reconnect '
-      + 'the controller. Finish anyway?');
+      + 'If you finish now, writing to memory stays disabled until you repeat the range calibration. Finish anyway?');
     if (!go || rangeSession !== session) return;
     finishAnyway = true;
   }
