@@ -13,10 +13,14 @@ import {
 } from 'node:fs/promises';
 
 import {
+  DEFAULT_REPORT_CONFIG,
   buildQualityReport,
   createQualityReportFromFile,
   formatQualitySummary,
 } from '../quality-report.mjs';
+import { parseCliArgs } from '../quality-report-cli.mjs';
+import { CENTERED_MAX, GUIDED_ONLY_MIN, WITHIN_ONE_STEP_MAX } from '../../../js/calib/lattice.js';
+import { QUICK_DEFAULTS } from '../../../js/calib/quick.js';
 
 const FIXED_NOW = '2026-09-16T18:00:00.000Z';
 
@@ -25,7 +29,7 @@ function slot(off, noise = [0.2, 0.3]) {
 }
 
 function record({
-  receivedAt = '2026-09-16T12:00:00.000Z',
+  receivedAt = '2026-09-18T12:00:00.000Z',
   board = 'BDM-030',
   before = [4, 2],
   after = [1, 0.5],
@@ -59,11 +63,11 @@ async function tempDirectory(t) {
 }
 
 test('cutoff is inclusive and board/null counts use privacy-safe buckets', () => {
-  const cutoff = '2026-09-16T12:00:00.000Z';
+  const cutoff = '2026-09-18T12:00:00.000Z';
   const report = reportFor([
-    record({ receivedAt: '2026-09-16T11:59:59.999Z', board: 'BDM-020' }),
+    record({ receivedAt: '2026-09-18T11:59:59.999Z', board: 'BDM-020' }),
     record({ receivedAt: cutoff, board: 'BDM-030' }),
-    record({ receivedAt: '2026-09-16T12:00:00.001Z', board: null }),
+    record({ receivedAt: '2026-09-18T12:00:00.001Z', board: null }),
   ], { sinceInclusive: cutoff });
 
   assert.equal(report.sessions.total, 2);
@@ -176,7 +180,7 @@ test('report contains no individual identifiers, raw timestamps, tuples or suspi
       t: '2099-01-02T03:04:05.678Z',
     }),
     ...[1, 2, 3, 4, 5].map(value => record({
-      receivedAt: `2026-09-16T12:00:0${value}.000Z`,
+      receivedAt: `2026-09-18T12:00:0${value}.000Z`,
       before: [value, 0],
       after: [value / 2, 0],
     })),
@@ -346,4 +350,196 @@ test('fixed clock produces deterministic JSON with stable board order', () => {
   ]);
   assert.equal(first.generatedAt, FIXED_NOW);
   assert.match(formatQualitySummary(first), /^2026-09-16T18:00:00.000Z; 3 sessioni;/);
+});
+
+// ---- Report v2 -------------------------------------------------------------
+
+// Valori reali del reticolo (vedi js/calib/lattice.js).
+const FLOOR = 0.555;
+const STEP1 = 1.24;
+const STEP11 = 1.664;
+
+test('v2 thresholds come from the lattice module and the Quick policy', () => {
+  assert.equal(DEFAULT_REPORT_CONFIG.publicThresholdPct, CENTERED_MAX);
+  assert.equal(DEFAULT_REPORT_CONFIG.withinOneStepPct, WITHIN_ONE_STEP_MAX);
+  assert.equal(DEFAULT_REPORT_CONFIG.highDeflectionPct, GUIDED_ONLY_MIN);
+  assert.equal(DEFAULT_REPORT_CONFIG.worseThanStartEpsPct, QUICK_DEFAULTS.regressionEps);
+  assert.equal(DEFAULT_REPORT_CONFIG.changeEpsilonPct, 0.6);
+
+  const report = reportFor([record()]);
+  assert.equal(report.schema, 'sense-calibrator.telemetry-quality.v2');
+  assert.equal(report.reportVersion, 2);
+  assert.equal(report.definitions.changeEpsilonPct, 0.6);
+  assert.equal(report.definitions.withinOneStepPct, 1.25);
+  assert.equal(report.definitions.latticeFloorPct, 0.554594);
+});
+
+test('the v1 KPI keeps its rule while within-one-step is a separate metric', () => {
+  const report = reportFor([
+    record({ before: [4, 2], after: [FLOOR, FLOOR] }),
+    record({ before: [4, 2], after: [STEP1, FLOOR] }),
+    record({ before: [4, 2], after: [STEP11, FLOOR] }),
+    record({ before: [4, 2], after: [1.2, FLOOR] }),
+  ]);
+  assert.deepEqual(report.publicThreshold, { denominator: 4, passingAfter: 1, failingAfter: 3, passingRate: 0.25 });
+  assert.deepEqual(report.withinOneStep, { denominator: 4, withinAfter: 3, withinOneStepRate: 0.75 });
+});
+
+test('epsilon 0.6 counts the first lattice step as a change; 0.8 hid it', () => {
+  const rows = [
+    record({ before: [STEP1, FLOOR], after: [FLOOR, FLOOR] }),
+    record({ before: [FLOOR, FLOOR], after: [STEP1, FLOOR] }),
+    record({ before: [STEP1, FLOOR], after: [STEP1, FLOOR] }),
+  ];
+  const v2 = reportFor(rows);
+  assert.deepEqual(v2.outcomes, { denominator: 3, improved: 1, worsened: 1, unchanged: 1 });
+  const legacy = reportFor(rows, { changeEpsilonPct: 0.8 });
+  assert.deepEqual(legacy.outcomes, { denominator: 3, improved: 0, worsened: 0, unchanged: 3 });
+});
+
+test('default exclusions drop fw 1234 and pre-guard sessions, and count each once', () => {
+  const rows = [
+    record({ fw: 1234, receivedAt: '2026-07-03T16:50:22.721Z' }),
+    record({ fw: 17825834, receivedAt: '2026-09-16T17:16:59.999Z' }),
+    record({ fw: 17825834, receivedAt: '2026-09-16T17:17:00.000Z' }),
+    record({ fw: 17825834 }),
+  ];
+  const report = reportFor(rows);
+  assert.equal(report.sessions.total, 2);
+  assert.equal(report.input.excludedFirmware, 1, 'firmware wins over the time window');
+  assert.equal(report.input.excludedBeforeGuard, 1);
+  assert.deepEqual(report.exclusions, { firmware: [1234], receivedBefore: '2026-09-16T17:17:00.000Z' });
+
+  const none = reportFor(rows, { excludeFirmware: null, excludeReceivedBefore: null });
+  assert.equal(none.sessions.total, 4);
+  assert.deepEqual(none.exclusions, { firmware: [], receivedBefore: null });
+  assert.equal(none.input.excludedFirmware, 0);
+  assert.equal(none.input.excludedBeforeGuard, 0);
+
+  const since = reportFor(rows, { sinceInclusive: '2026-09-18T00:00:00Z' });
+  assert.equal(since.input.excludedBeforeCutoff, 2);
+  assert.equal(since.input.excludedBeforeGuard, 0, 'the --since window is applied first');
+});
+
+test('the plausible cohort carries its own KPI, within-one-step and outcomes', () => {
+  const report = reportFor([
+    record({ before: [4, 2], after: [FLOOR, FLOOR] }),
+    record({ before: [4, 2], after: [STEP1, FLOOR] }),
+    record({ before: [4, 2], after: [30, FLOOR] }),
+  ], { minimumCohortSize: 1 });
+  const m = report.cohorts.plausible.metrics;
+  assert.equal(m.sessions, 2);
+  assert.equal(m.passingAfter, 1);
+  assert.equal(m.withinOneStep, 2);
+  assert.equal(m.improved, 2);
+  assert.equal(m.runaways, 0);
+  assert.equal(report.safety.runaways, 1);
+});
+
+test('matched cohort: starts beyond one step, with worse-than-start at 0.8 and runaways', () => {
+  const report = reportFor([
+    record({ before: [FLOOR, FLOOR], after: [STEP1, FLOOR] }),   // già centrato: fuori
+    record({ before: [STEP1, FLOOR], after: [FLOOR, FLOOR] }),   // 1 passo: fuori
+    record({ before: [STEP11, FLOOR], after: [FLOOR, FLOOR] }),  // dentro, passa
+    record({ before: [2, FLOOR], after: [3.551, FLOOR] }),       // dentro, peggiore di 1.55
+    record({ before: [8.245, 2], after: [40.394, 2] }),          // dentro, runaway
+    record({ before: [2, FLOOR], after: [2.287, FLOOR] }),       // dentro, +0.29: non peggiore
+  ], { minimumCohortSize: 1 });
+  const m = report.cohorts.matched.metrics;
+  assert.equal(m.sessions, 4);
+  assert.equal(m.passingAfter, 1);
+  assert.equal(m.passingRate, 0.25);
+  assert.equal(m.worseThanStart, 2);
+  assert.equal(m.worseThanStartRate, 0.5);
+  assert.equal(m.runaways, 1);
+  assert.equal(m.passingRateStandardError, Number(Math.sqrt(0.25 * 0.75 / 4).toFixed(6)));
+  // Da 0.555 a 1.24 sono +0.685: un passo, sotto il margine di peggioramento.
+  assert.equal(report.safety.worseThanStart, 2);
+});
+
+test('de-duplication keeps the first session of each board+fw repeat cluster', () => {
+  const at = minutes => new Date(Date.parse('2026-09-18T12:00:00.000Z') + minutes * 60_000).toISOString();
+  const report = reportFor([
+    // Cluster A: tre sessioni ravvicinate sullo stesso board+fw.
+    record({ board: 'BDM-020', fw: 17825834, t: at(0), receivedAt: at(0.2), after: [STEP1, FLOOR] }),
+    record({ board: 'BDM-020', fw: 17825834, t: at(10), receivedAt: at(10.2), after: [FLOOR, FLOOR] }),
+    record({ board: 'BDM-020', fw: 17825834, t: at(24), receivedAt: at(24.2), after: [FLOOR, FLOOR] }),
+    // Oltre 15 minuti dalla ricezione precedente: nuovo cluster.
+    record({ board: 'BDM-020', fw: 17825834, t: at(40), receivedAt: at(40.2), after: [FLOOR, FLOOR] }),
+    // Stesso istante, board diversa: cluster separato.
+    record({ board: 'BDM-030', fw: 17825834, t: at(1), receivedAt: at(1.2), after: [FLOOR, FLOOR] }),
+    // Senza `t` valido si usa receivedAt.
+    record({ board: 'BDM-030', fw: 17825834, t: 'garbage', receivedAt: at(5), after: [STEP1, FLOOR] }),
+  ], { minimumCohortSize: 1 });
+  const d = report.cohorts.deduplicated;
+  assert.equal(d.clusters, 3);
+  assert.equal(d.repeatSessions, 3);
+  assert.equal(d.metrics.sessions, 3);
+  assert.equal(d.metrics.passingAfter, 2, 'the first of cluster A ended at one step');
+  assert.deepEqual(Object.keys(report.breakdowns.boardDeduplicated), ['BDM-020', 'BDM-030']);
+  assert.equal(report.breakdowns.boardDeduplicated['BDM-020'].sessions, 2);
+});
+
+test('breakdowns by board, firmware and build year stay privacy-safe and suppress small rates', () => {
+  const report = reportFor([
+    ...Array.from({ length: 5 }, () => record({ fw: 17825834, board: 'BDM-030' })),
+    record({ fw: 17760256, board: 'BDM-020' }),
+    record({ fw: 99999999, board: 'SERIAL-SENTINEL' }),
+  ], { firmwareBuildYears: { 17825834: 2024 } });
+  const fw = report.breakdowns.firmware;
+  assert.deepEqual(Object.keys(fw), ['0x10f0000', '0x110002a', 'other_or_unknown']);
+  assert.equal(fw['0x110002a'].sessions, 5);
+  assert.equal(fw['0x110002a'].ratesSuppressed, false);
+  assert.equal(fw['0x110002a'].passingRate, 1);
+  assert.equal(fw['0x10f0000'].ratesSuppressed, true);
+  assert.equal(fw['0x10f0000'].passingRate, null);
+  assert.equal(fw['0x10f0000'].passingAfter, 1, 'counts stay visible');
+  assert.deepEqual(Object.keys(report.breakdowns.buildYear), ['2024', 'unknown']);
+  assert.equal(report.breakdowns.buildYear['2024'].sessions, 5);
+  assert.deepEqual(Object.keys(report.breakdowns.board), ['BDM-020', 'BDM-030', 'other_or_unknown']);
+  const rendered = JSON.stringify(report);
+  for (const sentinel of ['SERIAL-SENTINEL', '99999999', '5f5e0ff']) assert.equal(rendered.includes(sentinel), false, sentinel);
+});
+
+test('lattice shapes are aggregate counts and never echo individual values', () => {
+  const report = reportFor([
+    record({ before: [2.773, 1.664], after: [FLOOR, STEP1] }),
+    record({ before: [2.1, 0.4], after: [FLOOR, FLOOR] }),
+  ]);
+  assert.deepEqual(report.lattice.before, { singleAxis: 0, twoAxis: 1, ambiguous: 1, offLattice: 2 });
+  assert.deepEqual(report.lattice.after, { singleAxis: 4, twoAxis: 0, ambiguous: 0, offLattice: 0 });
+  assert.ok(report.lattice.maxDecodeErrorPct <= 0.0005);
+  assert.equal(JSON.stringify(report.lattice).includes('2.773'), false);
+});
+
+test('the summary line adds within-one-step, the matched cohort and runaways', () => {
+  const summary = formatQualitySummary(reportFor([record({ before: [4, 2], after: [STEP1, FLOOR] })]));
+  assert.match(summary, /0 sotto 1\.2%; 1 entro 1 passo \(<=1\.25%\); MC 1 sessioni, tasso n\/d; 0 runaway;/);
+});
+
+test('CLI flags and environment configure exclusions, thresholds and build years', () => {
+  const parsed = parseCliArgs([
+    '--exclude-firmware', 'none',
+    '--exclude-before', 'none',
+    '--within-one-step', '1.3',
+    '--worse-than-start', '0.6',
+    '--dedup-gap', '30',
+    '--known-firmware', '1,2',
+    '--build-years', '17825834:2023,17760256:2022',
+  ], {});
+  assert.equal(parsed.excludeFirmware, null);
+  assert.equal(parsed.excludeReceivedBefore, null);
+  assert.equal(parsed.withinOneStepPct, 1.3);
+  assert.equal(parsed.worseThanStartEpsPct, 0.6);
+  assert.equal(parsed.dedupGapMinutes, 30);
+  assert.deepEqual(parsed.knownFirmware, [1, 2]);
+  assert.deepEqual(parsed.firmwareBuildYears, { 17825834: 2023, 17760256: 2022 });
+
+  const fromEnv = parseCliArgs([], { CALIB_REPORT_EXCLUDE_FIRMWARE: '1234,42', CALIB_REPORT_EXCLUDE_BEFORE: '2026-09-17T00:00:00Z' });
+  assert.deepEqual(fromEnv.excludeFirmware, [1234, 42]);
+  assert.equal(fromEnv.excludeReceivedBefore, '2026-09-17T00:00:00Z');
+  const defaults = parseCliArgs([], {});
+  assert.equal(defaults.excludeFirmware, undefined, 'undefined falls back to the library defaults');
+  assert.throws(() => parseCliArgs(['--build-years', '17825834-2023'], {}), /fw:year/);
+  assert.throws(() => parseCliArgs(['--exclude-firmware', 'abc'], {}), /integers/);
 });
