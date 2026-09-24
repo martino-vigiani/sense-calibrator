@@ -83,15 +83,25 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
   };
   // Stato per connessione, fuori dal record: l'identità (seriale) resta in
   // memoria e non entra mai nel JSON esportato.
+  //
+  // L'identità della prima connessione si fissa una volta sola e non si
+  // riassegna mai: se la prima connessione non ha un seriale, nessuna
+  // connessione successiva può diventare "la prima" al suo posto.
   let conn = null;
   let firstIdentity = null;
+  // Identità della connessione che ha scritto record.baseline (può non essere
+  // la prima, se la prima si è fermata al preflight).
+  let baselineIdentity = null;
+  let preCycleIdentity = null;
 
   function attach({ ds5, source, info = {}, identity = null }) {
     const id = record.connections.length + 1;
-    conn = { id, ds5, source, identity, arming: createArming(id), nv: null, baseline: null, baselineOut: null, snapshots: [], needsPowerCycle: false };
-    if (firstIdentity === null) firstIdentity = identity;
+    conn = { id, ds5, source, identity: knownIdentity(identity) ? identity : null, arming: createArming(id), nv: null, baseline: null, baselineOut: null, snapshots: [], needsPowerCycle: false };
+    if (id === 1) firstIdentity = conn.identity;
     record.controller ??= { board: info.board ?? null, fwversion: info.fwversion ?? null, buildDate: info.buildDate ?? null };
-    record.connections.push({ id, at: new Date(now()).toISOString(), sameController: identity === firstIdentity, nv: null });
+    // true/false solo quando entrambi i seriali sono noti; null = sconosciuto.
+    const sameController = id === 1 ? true : sameIdentity(conn.identity, firstIdentity);
+    record.connections.push({ id, at: new Date(now()).toISOString(), sameController, nv: null });
     log(`Connection ${id}: disarmed. Run the preflight read first.`);
     return id;
   }
@@ -119,12 +129,23 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
 
   const measure = () => measureOutput(conn.source, clock, P.measureMs);
 
+  // La baseline del diario appartiene a questo controller? Sì se l'ha letta
+  // questa stessa connessione, oppure se entrambi i seriali sono noti e
+  // uguali. Un seriale mancante non prova nulla: senza prova si usa solo ciò
+  // che questa connessione ha letto, così il probe non scrive mai su un
+  // controller i bordi del range di un altro.
+  function baselineIsThisController() {
+    if (!record.baseline) return false;
+    if (record.baseline.connection === conn.id) return true;
+    return sameIdentity(conn.identity, baselineIdentity) === true;
+  }
+
   // Valori ammessi per [12,1]: letture di questa connessione, più la baseline
-  // della prima connessione se il controller è lo stesso (restauro dopo una
-  // riconnessione).
+  // del diario solo se è provato che viene da questo controller (restauro dopo
+  // una riconnessione).
   function allowedSnapshots() {
     const snaps = [...conn.snapshots];
-    if (record.baseline && conn.identity === firstIdentity) snaps.push(record.baseline.values);
+    if (baselineIsThisController()) snaps.push(record.baseline.values);
     return snaps;
   }
 
@@ -155,19 +176,38 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
   // solo dopo una finestra stabile vicina al riferimento in sessione, mai un
   // calibSample dopo un timeout, mai un calibEnd su una passata incompleta
   // (la sessione resta aperta e il controller va spento).
+  //
+  // Qualsiasi errore da calibBegin (incluso) fino a calibEnd risolto (incluso),
+  // timeout o errore HID qualunque, lascia una sessione 0x82 aperta o in uno
+  // stato sconosciuto: il percorso di riparazione di calibBegin in js/ds5.js
+  // può aver già chiuso o riaperto qualcosa. Da lì in poi ogni comando
+  // scriverebbe dentro quella sessione (e un calibBegin successivo potrebbe
+  // committare la passata parziale), quindi la connessione si segna da
+  // spegnere e guardWrite rifiuta tutto.
+  async function inOpenSession(body) {
+    try {
+      return await body();
+    } catch (error) {
+      conn.needsPowerCycle = true;
+      throw error;
+    }
+  }
+
   async function pass(n) {
     await hold('calibBegin');
-    const begin = await conn.ds5.calibBegin();
-    const ref = await waitForStable(conn.source, clock, { maxRadius: 0.5, timeoutMs: P.sampleTimeoutMs });
-    if (!ref) { conn.needsPowerCycle = true; throw new StepAbort('no stable reference after calibBegin: session left open, power-cycle the controller', { stalled: true }); }
-    for (let i = 0; i < n; i++) {
-      const ok = await waitForStable(conn.source, clock, { near: ref.center, timeoutMs: P.sampleTimeoutMs });
-      if (!ok) { conn.needsPowerCycle = true; throw new StepAbort(`sample ${i + 1}/${n} never stable: session left open, power-cycle the controller`, { stalled: true, samples: i }); }
-      await conn.ds5.calibSample();
-    }
-    await clock.sleep(P.settleMs);
-    await conn.ds5.calibEnd();
-    return { samples: n, repairCommitted: begin?.committed === true };
+    return inOpenSession(async () => {
+      const begin = await conn.ds5.calibBegin();
+      const ref = await waitForStable(conn.source, clock, { maxRadius: 0.5, timeoutMs: P.sampleTimeoutMs });
+      if (!ref) throw new StepAbort('no stable reference after calibBegin: session left open, power-cycle the controller', { stalled: true });
+      for (let i = 0; i < n; i++) {
+        const ok = await waitForStable(conn.source, clock, { near: ref.center, timeoutMs: P.sampleTimeoutMs });
+        if (!ok) throw new StepAbort(`sample ${i + 1}/${n} never stable: session left open, power-cycle the controller`, { stalled: true, samples: i });
+        await conn.ds5.calibSample();
+      }
+      await clock.sleep(P.settleMs);
+      await conn.ds5.calibEnd();
+      return { samples: n, repairCommitted: begin?.committed === true };
+    });
   }
 
   // --- passi ---------------------------------------------------------------
@@ -187,7 +227,10 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       if (nv.status !== 'locked') throw new StepAbort(`NVS is ${nv.status}, not locked: abort, nothing will be written`, data);
       conn.baseline = { values: r.values, p2: r.p2 };
       conn.baselineOut = out;
-      if (!record.baseline) record.baseline = { values: r.values, p2: r.p2, out, connection: conn.id };
+      if (!record.baseline) {
+        record.baseline = { values: r.values, p2: r.p2, out, connection: conn.id };
+        baselineIdentity = conn.identity;
+      }
       return data;
     },
 
@@ -244,9 +287,12 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       const before = await read('before H-d');
       const outBefore = await measure();
       await hold('calibBegin');
-      const begin = await conn.ds5.calibBegin();
-      await clock.sleep(P.settleMs);
-      await conn.ds5.calibEnd();
+      const begin = await inOpenSession(async () => {
+        const b = await conn.ds5.calibBegin();
+        await clock.sleep(P.settleMs);
+        await conn.ds5.calibEnd();
+        return b;
+      });
       const after = await read('after H-d');
       const outAfter = await measure();
       const diff = diffValues(before.values, after.values);
@@ -325,11 +371,11 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       return { reps, arms, base: base.values, runs, summary: summarizeAB(runs, arms), restored };
     },
 
-    // Ripristino manuale: la baseline della prima connessione (stesso
-    // controller) o quella di questa connessione.
+    // Ripristino manuale: la baseline del diario solo se è provato che è di
+    // questo controller, altrimenti quella di questa connessione.
     async restore() {
       await guardWrite('restore');
-      const target = record.baseline && conn.identity === firstIdentity ? record.baseline.values : conn.baseline.values;
+      const target = baselineIsThisController() ? record.baseline.values : conn.baseline.values;
       await write(target);
       const after = await read('after restore');
       return { target, after: after.values, exact: sameValues(target, after.values) };
@@ -340,6 +386,7 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       const r = await read('before power-cycle');
       const out = await measure();
       record.preCycle = { values: r.values, out, connection: conn.id };
+      preCycleIdentity = conn.identity;
       return { values: r.values, out, differsFromBaseline: !!record.baseline && !sameValues(r.values, record.baseline.values) };
     },
 
@@ -348,7 +395,12 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
     async 'H-f-check'() {
       if (!record.preCycle) throw new StepAbort('run H-f-prepare before the power-cycle');
       if (conn.id === record.preCycle.connection) throw new StepAbort('power the controller off (hold PS 10 s) and reconnect first');
-      if (conn.identity !== firstIdentity) throw new StepAbort('a different controller is connected');
+      // Serve la prova che baseline, fotografia e lettura vengano dallo stesso
+      // controller: senza seriali noti e uguali il verdetto H-f non vale.
+      const vsPre = sameIdentity(conn.identity, preCycleIdentity);
+      const vsBase = sameIdentity(conn.identity, baselineIdentity);
+      if (vsPre === false || vsBase === false) throw new StepAbort('a different controller is connected');
+      if (vsPre !== true || vsBase !== true) throw new StepAbort('serial unavailable, cannot confirm same controller', { sameController: null });
       const r = await read('after power-cycle');
       const out = await measure();
       return {
@@ -394,6 +446,15 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
     evaluate: () => evaluate(record),
     exportJson: () => JSON.stringify({ ...record, evaluation: evaluate(record) }, null, 2),
   };
+}
+
+// Un seriale conta solo se è una stringa non vuota.
+const knownIdentity = v => typeof v === 'string' && v.length > 0;
+// true = stesso controller provato; false = controller diversi provati;
+// null = almeno un seriale manca, non si può dire.
+function sameIdentity(a, b) {
+  if (!knownIdentity(a) || !knownIdentity(b)) return null;
+  return a === b;
 }
 
 // Minimi quadrati per l'origine: Δuscita (LSB) = k · Δvalore. `unitsPerLsb` è

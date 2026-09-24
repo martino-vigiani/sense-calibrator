@@ -51,18 +51,24 @@ None of this has been checked on our hardware. The questions:
 - **NVS must be `locked`.** The preflight aborts otherwise, and the NVS status is re-read right
   before every write step. With NVS unlocked, a "temporary" write could land in memory.
 - **Only values read from this controller.** `[12,1]` accepts only a snapshot read on this
-  connection (or the first connection's baseline for the same controller), with the range edges
-  identical and each center within ±512 units of the snapshot.
+  connection (or the recorded baseline, but only when both serials are known, non-empty and
+  equal), with the range edges identical and each center within ±512 units of the snapshot. A
+  missing serial proves nothing: `restore` then targets this connection's own baseline, and the
+  connection is logged with `sameController: null` (unknown), never `true`.
 - **No NVS writes.** The probe never unlocks NVS and never flashes. A test scans `ops/hw-probe/`
   for `nvsUnlock`, `.flash(` and `[3,2]`.
 - **Quick invariants in the probe's own passes.** A centered hold before every `calibBegin`, a
   sample only after a stable window near the in-session reference, never a `calibSample` after a
-  timeout, never a `calibEnd` on an incomplete pass. A stalled pass marks the connection "needs
-  power-cycle", and every write is refused until the controller is reconnected.
+  timeout, never a `calibEnd` on an incomplete pass. Any failure from `calibBegin` up to a resolved
+  `calibEnd` (a stall, a timeout or a plain HID error) marks the connection "needs power-cycle":
+  the A/B write-back is skipped and every write step is refused until the controller is
+  reconnected.
 - **Timeouts poison the connection** (the `DS5` class, unchanged). The step is marked `poisoned`
   and the evaluation says "no-go" until a clean rerun.
 - **The serial is never recorded.** It is kept in memory only, to recognise the same controller
-  after the power-cycle. The exported JSON has board, firmware version and build date only.
+  after the power-cycle. The exported JSON has board, firmware version and build date only. If the
+  serial cannot be read, H-f-check refuses ("serial unavailable, cannot confirm same controller"):
+  its verdict would otherwise rest on an unproven identity.
 
 ## Setup
 

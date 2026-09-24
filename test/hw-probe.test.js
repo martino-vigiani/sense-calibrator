@@ -382,3 +382,153 @@ test('evaluate on an empty record is NO-GO and lists what is missing', () => {
   assert.equal(ev.readbackRestore, 'no-go');
   assert.equal(ev.verdict.readStable, 'missing');
 });
+
+/* ------------------- identità del controller sconosciuta ------------------- */
+
+// Due controller con bordi del range diversi: se il probe scrivesse la
+// baseline di A su B, B finirebbe con i bordi di A.
+const RANGE_A = [2000, 2000, 2000, 2000, 60000, 60000, 60000, 60000];
+const RANGE_B = [3000, 3000, 3000, 3000, 62000, 62000, 62000, 62000];
+
+async function twoControllers(idA, idB) {
+  const clock = new VClock();
+  const devA = makeDev(clock, { module: { range: RANGE_A } });
+  const devB = makeDev(clock, { module: { range: RANGE_B }, seed: 99 });
+  const sclock = { sleep: ms => new Promise(r => clock.setTimeout(r, ms)), setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout };
+  const probe = createProbe({ hostname: 'localhost', clock: sclock, confirm: async () => true, now: () => 1_700_000_000_000 + clock.now() });
+  const run = (id, opts) => clock.run(probe.run(id, opts));
+  const armNow = () => probe.armWith({ spareChecked: true, phrase: SPARE_PHRASE });
+  const a = connect(clock, devA);
+  probe.attach({ ds5: a.ds5, source: a.source, info: {}, identity: idA });
+  assert.equal((await run('preflight')).ok, true);
+  armNow();
+  assert.equal((await run('H-f-prepare')).ok, true);
+  const b = connect(clock, devB);
+  probe.attach({ ds5: b.ds5, source: b.source, info: {}, identity: idB });
+  assert.equal((await run('preflight')).ok, true);
+  armNow();
+  return { clock, devA, devB, probe, run };
+}
+
+for (const [label, idA, idB] of [
+  ['the first connection has no serial', null, 'serial-B'],
+  ['the second connection has no serial', 'serial-A', null],
+  ['neither connection has a serial', null, null],
+  ['the serials are empty strings', '', ''],
+]) {
+  test(`${label}: no cross-connection write of the baseline and H-f-check refuses (model-verified)`, async () => {
+    const s = await twoControllers(idA, idB);
+    const rangeB = [...s.devB.moduleRange];
+    assert.deepEqual(rangeB, RANGE_B);
+    assert.equal(s.probe.record.connections[1].sameController, null, 'unknown, not true');
+
+    // restore punta alla baseline di questa connessione, non a quella di A.
+    const restore = await s.run('restore');
+    assert.equal(restore.ok, true, restore.error);
+    assert.deepEqual(restore.target.slice(0, 8), RANGE_B);
+    assert.deepEqual(s.devB.moduleRange, rangeB, 'B keeps its own range edges');
+
+    // H-c con la baseline di A come bersaglio esplicito: rifiutato.
+    const w = s.devB.moduleCounts.write;
+    const hc = await s.run('H-c', { target: s.probe.record.baseline.values });
+    assert.equal(hc.ok, false);
+    assert.match(hc.error, /refused write/);
+    assert.equal(s.devB.moduleCounts.write, w);
+    assert.deepEqual(s.devB.moduleRange, rangeB);
+    assert.equal(s.devA.moduleCounts.write, 0);
+
+    const hf = await s.run('H-f-check');
+    assert.equal(hf.ok, false);
+    assert.match(hf.error, /serial unavailable, cannot confirm same controller/);
+    assert.equal(hf.sameController, null);
+    assert.equal(s.probe.evaluate().verdict.revertsOnPowerCycle, 'missing');
+  });
+}
+
+test('a third connection cannot inherit the first identity when the first serial was missing', async () => {
+  const s = await twoControllers(null, 'serial-B');
+  const clock = s.clock;
+  const devC = makeDev(clock, { module: { range: RANGE_B }, seed: 7 });
+  const c = connect(clock, devC);
+  s.probe.attach({ ds5: c.ds5, source: c.source, info: {}, identity: 'serial-B' });
+  // Il seriale di B non è diventato "quello della prima connessione".
+  assert.equal(s.probe.record.connections[2].sameController, null);
+});
+
+test('known and different serials still refuse H-f-check as another controller', async () => {
+  const s = await twoControllers('serial-A', 'serial-B');
+  assert.equal(s.probe.record.connections[1].sameController, false);
+  assert.match((await s.run('H-f-check')).error, /different controller/);
+  const r = await s.run('restore');
+  assert.deepEqual(r.target.slice(0, 8), RANGE_B);
+  assert.deepEqual(s.devB.moduleRange, RANGE_B);
+});
+
+/* --------------- errore HID qualunque in mezzo a una sessione --------------- */
+
+// Rifiuta con un Error qualunque (non un timeout) il calibSample numero `nth`
+// (1-based) contato dall'installazione del guasto, una volta sola.
+function failSampleOnce(dev, nth) {
+  const start = dev.counts.sample;
+  let fired = false;
+  dev.faults.push(({ op, counts }) => {
+    if (fired || op !== 'sample' || counts.sample !== start + nth - 1) return null;
+    fired = true;
+    return new Error('NotAllowedError: Failed to write the feature report.');
+  });
+}
+
+async function assertSessionPoisoned(s, entry) {
+  assert.equal(entry.ok, false);
+  assert.equal(entry.needsPowerCycle, true, 'needsPowerCycle recorded in the entry');
+  assert.equal(s.probe.needsPowerCycle, true);
+  const begins = s.dev.counts.begin, ends = s.dev.counts.end, w = s.dev.moduleCounts.write;
+  for (const step of ['restore', 'H-b', 'H-c', 'H-d', 'H-e', 'AB']) {
+    const r = await s.run(step);
+    assert.equal(r.ok, false, step);
+    assert.match(r.error, /power-cycle/, step);
+  }
+  assert.equal(s.dev.counts.begin, begins, 'no calibBegin after the failure');
+  assert.equal(s.dev.counts.end, ends, 'no calibEnd after the failure');
+  assert.equal(s.dev.moduleCounts.write, w, 'no [12,1] after the failure');
+}
+
+test('a plain HID error on a middle calibSample during H-b poisons the session (model-verified)', async () => {
+  const s = setup();
+  await s.run('preflight');
+  s.armNow();
+  failSampleOnce(s.dev, 3);
+  const r = await s.run('H-b');
+  assert.equal(r.hidError, true);
+  assert.equal(s.dev.counts.sample, 2);
+  assert.equal(s.dev.counts.end, 0, 'no calibEnd on the incomplete pass');
+  await assertSessionPoisoned(s, r);
+});
+
+test('a plain HID error on a middle calibSample during A/B skips the write-back (model-verified)', async () => {
+  const s = setup();
+  await s.run('preflight');
+  s.armNow();
+  const writesBefore = s.dev.moduleCounts.write;
+  failSampleOnce(s.dev, 3);
+  const r = await s.run('AB', { reps: 2 });
+  assert.equal(r.hidError, true);
+  assert.equal(s.dev.moduleCounts.write, writesBefore, 'the A/B finally does not write into the open session');
+  assert.equal(s.dev.counts.end, 0);
+  await assertSessionPoisoned(s, r);
+});
+
+test('a failing calibBegin or calibEnd also marks the connection for a power-cycle (model-verified)', async () => {
+  for (const op of ['begin', 'end']) {
+    for (const step of ['H-b', 'H-d']) {
+      const s = setup();
+      await s.run('preflight');
+      s.armNow();
+      let fired = false;
+      s.dev.faults.push(f => (!fired && f.op === op ? (fired = true, new Error(`${op} failed`)) : null));
+      const r = await s.run(step);
+      assert.equal(r.hidError, true, `${step}/${op}`);
+      await assertSessionPoisoned(s, r);
+    }
+  }
+});
