@@ -20,11 +20,20 @@ Options:
   --input PATH                 JSONL input (default: ${DEFAULT_INPUT})
   --output PATH                Atomically persist JSON instead of printing it
   --since RFC3339              Include receivedAt >= this cutoff
-  --public-threshold PCT       Success threshold (strictly below; default: ${DEFAULT_REPORT_CONFIG.publicThresholdPct})
+  --public-threshold PCT       Success threshold, the v1 KPI (strictly below; default: ${DEFAULT_REPORT_CONFIG.publicThresholdPct})
+  --within-one-step PCT        Second metric, at most one lattice step (inclusive; default: ${DEFAULT_REPORT_CONFIG.withinOneStepPct})
   --high-deflection PCT        Suspicious cohort threshold (default: ${DEFAULT_REPORT_CONFIG.highDeflectionPct})
   --change-epsilon PCT         Minimum outcome change (default: ${DEFAULT_REPORT_CONFIG.changeEpsilonPct})
-  --minimum-cohort COUNT       Minimum plausible cohort for mean/median (default: ${DEFAULT_REPORT_CONFIG.minimumCohortSize})
+  --worse-than-start PCT       Worse-than-start margin (default: ${DEFAULT_REPORT_CONFIG.worseThanStartEpsPct})
+  --minimum-cohort COUNT       Minimum cohort for mean/median and rates (default: ${DEFAULT_REPORT_CONFIG.minimumCohortSize})
+  --dedup-gap MINUTES          Gap that starts a new repeat cluster (default: ${DEFAULT_REPORT_CONFIG.dedupGapMinutes})
+  --exclude-firmware CSV|none  Firmware integers to drop (default: ${DEFAULT_REPORT_CONFIG.excludeFirmware.join(',')})
+  --exclude-before RFC3339|none
+                               Drop sessions received before the guard release
+                               (default: ${DEFAULT_REPORT_CONFIG.excludeReceivedBefore})
   --known-boards CSV           Board labels safe to expose; all others are grouped
+  --known-firmware CSV         Firmware integers safe to expose; all others are grouped
+  --build-years CSV            fw:year pairs for the build-year breakdown (v1 has no build date)
   --summary                    Print a concise aggregate summary
   --help                       Show this help
 
@@ -32,7 +41,10 @@ Environment equivalents:
   CALIB_REPORT_INPUT, CALIB_REPORT_OUTPUT, CALIB_REPORT_SINCE,
   CALIB_REPORT_PUBLIC_THRESHOLD_PCT, CALIB_REPORT_HIGH_DEFLECTION_PCT,
   CALIB_REPORT_CHANGE_EPSILON_PCT, CALIB_REPORT_MINIMUM_COHORT_SIZE,
-  CALIB_REPORT_KNOWN_BOARDS
+  CALIB_REPORT_KNOWN_BOARDS, CALIB_REPORT_WITHIN_ONE_STEP_PCT,
+  CALIB_REPORT_WORSE_THAN_START_PCT, CALIB_REPORT_DEDUP_GAP_MINUTES,
+  CALIB_REPORT_EXCLUDE_FIRMWARE, CALIB_REPORT_EXCLUDE_BEFORE,
+  CALIB_REPORT_KNOWN_FIRMWARE, CALIB_REPORT_BUILD_YEARS
 `;
 }
 
@@ -68,6 +80,31 @@ function csv(value, name) {
   return values;
 }
 
+// "none" disattiva un'esclusione di default: null per la libreria.
+function integerList(value, name) {
+  if (value === undefined) return undefined;
+  if (value.trim() === 'none') return null;
+  return csv(value, name).map(item => {
+    if (!/^\d+$/.test(item)) throw new Error(`${name} must contain non-negative integers`);
+    return Number(item);
+  });
+}
+
+function instantOrNone(value) {
+  if (value === undefined) return undefined;
+  return value.trim() === 'none' ? null : value;
+}
+
+function buildYears(value, name) {
+  if (value === undefined) return undefined;
+  const entries = csv(value, name).map(pair => {
+    const match = /^(\d+):(\d{4})$/.exec(pair);
+    if (!match) throw new Error(`${name} entries must look like fw:year`);
+    return [match[1], Number(match[2])];
+  });
+  return Object.fromEntries(entries);
+}
+
 export function parseCliArgs(argv, env = process.env) {
   const parsed = {
     inputPath: env.CALIB_REPORT_INPUT || DEFAULT_INPUT,
@@ -90,6 +127,19 @@ export function parseCliArgs(argv, env = process.env) {
       'CALIB_REPORT_MINIMUM_COHORT_SIZE',
     ),
     knownBoards: csv(env.CALIB_REPORT_KNOWN_BOARDS, 'CALIB_REPORT_KNOWN_BOARDS'),
+    withinOneStepPct: numeric(
+      env.CALIB_REPORT_WITHIN_ONE_STEP_PCT,
+      'CALIB_REPORT_WITHIN_ONE_STEP_PCT',
+    ),
+    worseThanStartEpsPct: numeric(
+      env.CALIB_REPORT_WORSE_THAN_START_PCT,
+      'CALIB_REPORT_WORSE_THAN_START_PCT',
+    ),
+    dedupGapMinutes: numeric(env.CALIB_REPORT_DEDUP_GAP_MINUTES, 'CALIB_REPORT_DEDUP_GAP_MINUTES'),
+    excludeFirmware: integerList(env.CALIB_REPORT_EXCLUDE_FIRMWARE, 'CALIB_REPORT_EXCLUDE_FIRMWARE'),
+    excludeReceivedBefore: instantOrNone(env.CALIB_REPORT_EXCLUDE_BEFORE),
+    knownFirmware: integerList(env.CALIB_REPORT_KNOWN_FIRMWARE, 'CALIB_REPORT_KNOWN_FIRMWARE'),
+    firmwareBuildYears: buildYears(env.CALIB_REPORT_BUILD_YEARS, 'CALIB_REPORT_BUILD_YEARS'),
     summary: false,
     help: false,
   };
@@ -127,6 +177,34 @@ export function parseCliArgs(argv, env = process.env) {
         break;
       case '--known-boards':
         parsed.knownBoards = csv(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--within-one-step':
+        parsed.withinOneStepPct = numeric(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--worse-than-start':
+        parsed.worseThanStartEpsPct = numeric(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--dedup-gap':
+        parsed.dedupGapMinutes = numeric(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--exclude-firmware':
+        parsed.excludeFirmware = integerList(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--exclude-before':
+        parsed.excludeReceivedBefore = instantOrNone(readValue(argv, index, flag));
+        index += 1;
+        break;
+      case '--known-firmware':
+        parsed.knownFirmware = integerList(readValue(argv, index, flag), flag);
+        index += 1;
+        break;
+      case '--build-years':
+        parsed.firmwareBuildYears = buildYears(readValue(argv, index, flag), flag);
         index += 1;
         break;
       case '--summary':

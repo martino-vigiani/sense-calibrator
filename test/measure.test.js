@@ -68,11 +68,20 @@ test('analyzeDrift reports median offset, p95 noise and per-axis direction in pe
   assert.deepEqual([r.left.x, r.left.y, r.right.x, r.right.y], [0.03, 0.04, 0, -0.1]);
 });
 
-test('verdictFor draws the public thresholds at 1.2% and 3.5%', () => {
-  assert.deepEqual(verdictFor({ offset: 1.19 }), { cls: 'v-ok', label: 'Centered · 1.2%' });
-  assert.equal(verdictFor({ offset: DRIFT_OK_MAX }).cls, 'v-mild');
+test('verdictFor draws the public thresholds at 1.2% and 3.5% through GRID_TABLE', () => {
+  assert.deepEqual(verdictFor({ offset: 0.555 }), { cls: 'v-ok', label: 'Centered · 0.6% · at floor', tier: 'centered' });
+  // 1.24 non è "centrato" (KPI v1 invariato) ma è entro un passo del reticolo.
+  assert.deepEqual(verdictFor({ offset: 1.24 }), { cls: 'v-ok', label: 'Within 1 step · 1.2% · 1 step', tier: 'within-1-step' });
+  assert.equal(verdictFor({ offset: DRIFT_OK_MAX }).tier, 'within-1-step');
+  assert.equal(verdictFor({ offset: 2 }).cls, 'v-mild');
   assert.equal(verdictFor({ offset: 3.49 }).cls, 'v-mild');
-  assert.deepEqual(verdictFor({ offset: DRIFT_MILD_MAX }), { cls: 'v-bad', label: 'Marked drift · 3.5%' });
+  assert.deepEqual(verdictFor({ offset: DRIFT_MILD_MAX }), { cls: 'v-bad', label: 'Marked drift · 3.5%', tier: 'marked' });
+  assert.equal(verdictFor({ offset: 15 }).tier, 'guided-only');
+});
+
+test('verdictFor shows no percentage for a pinned axis or a moving signal', () => {
+  assert.deepEqual(verdictFor({ offset: 100.001, x: 1, y: 0.0039, noise: 0 }), { cls: 'v-bad', label: 'Pinned', tier: 'pinned' });
+  assert.deepEqual(verdictFor({ offset: 2, x: 0.02, y: 0, noise: 4, unstable: true }), { cls: 'v-bad', label: 'Moving', tier: 'moving' });
 });
 
 test('summarizeResult rounds to three decimals and keeps per-axis xy in percent', () => {
