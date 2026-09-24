@@ -12,7 +12,7 @@ import {
 import { measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
 import { createOpGate } from './calib/ops.js';
-import { formatOffset } from './calib/lattice.js';
+import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, quickOutcomeView, rangeOutcomeView,
   revertAdvice, writeLockFor,
@@ -64,22 +64,57 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function toast(msg, ms = 3200) {
+// `alert: true` per gli errori: il toast visibile resta nella stessa pila, ma
+// il testo va anche nella regione role="alert" (#alerts), annunciata subito;
+// il toast è allora aria-hidden, così lo screen reader non lo legge due volte.
+function toast(msg, ms = 3200, { alert = false } = {}) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
+  if (alert) {
+    el.setAttribute('aria-hidden', 'true');
+    $('alerts').textContent = msg;
+  }
   $('toasts').appendChild(el);
   setTimeout(() => {
+    if (alert && $('alerts').textContent === msg) $('alerts').textContent = '';
     el.classList.add('out');
     setTimeout(() => el.remove(), 350);
   }, ms);
+}
+
+// Le regioni live (role="status") vanno riscritte solo quando il testo cambia:
+// riassegnare lo stesso testo produce comunque una mutazione, e uno screen
+// reader può rileggerla. Il range lo farebbe ogni 120 ms e la quick a ogni
+// evento di progresso. Il confronto è con il DOM, non con una cache: se altro
+// codice scrive l'elemento, il valore di riferimento resta quello vero. Per
+// l'HTML si serializza il nuovo valore con lo stesso parser del browser, così
+// entità e spazi non producono falsi "cambiato".
+function setLive(el, value, { html = false } = {}) {
+  if (!el) return;
+  if (!html) {
+    if (el.textContent !== value) el.textContent = value;
+    return;
+  }
+  const probe = document.createElement('template');
+  probe.innerHTML = value;
+  const normalized = probe.innerHTML ?? value;
+  if (el.innerHTML !== normalized) el.innerHTML = value;
 }
 
 /* ============================== dial canvas ============================== */
 
 const INK = '#0a0a0a';
 const GRID = '#e4e4e0';
-const MID = '#c9c9c5';
+// Anello di riferimento e punti del reticolo: 3.25:1 su bianco (WCAG 1.4.11),
+// lo stesso valore di --edge in style.css. Il vecchio #c9c9c5 era 1.66:1, ed è
+// proprio l'anello con cui l'utente confronta il punto.
+const MID = '#8f8f8a';
+// Zoom ×10 sul centro: a scala piena 1 LSB (0.784%) è meno di un pixel, e il
+// passo tra "centrato" (0.555%) e "1 passo" (1.240%) non si vede. A ×10 il
+// bordo del quadrante vale il 10% e il reticolo del byte diventa visibile.
+const DIAL_ZOOM = 10;
+const LSB = LSB_PCT / 100; // un passo del byte, in unità normalizzate
 
 class StickDial {
   constructor(canvas, { traceMode = false, dotRadius = 5 } = {}) {
@@ -130,6 +165,7 @@ class StickDial {
     const c = size / 2;
     const R = size / 2 - 14;
     ctx.clearRect(0, 0, size, size);
+    if (this.zoom > 1) { this.drawZoomed(c, R); return; }
 
     // griglia
     ctx.strokeStyle = GRID;
@@ -194,6 +230,70 @@ class StickDial {
     ctx.arc(c + this.x * R, c + this.y * R, this.dotRadius, 0, 2 * Math.PI);
     ctx.fill();
   }
+
+  // Vista ×10 (solo quadranti principali): bordo = 10% di offset, anello
+  // tratteggiato = CENTERED_MAX (il confine del verdetto "Centered"), punti =
+  // i valori che il byte può davvero assumere vicino al centro. Il punto a
+  // riposo cade su uno dei quattro punti interni (0.555%) o su un gradino
+  // fuori dall'anello (1.240%): è la quantizzazione che il numero nasconde.
+  drawZoomed(c, R) {
+    const { ctx } = this;
+    const k = DIAL_ZOOM * R; // px per unità normalizzata
+    ctx.strokeStyle = GRID;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(c, c, R, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(c, c, R / 2, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(c - R, c); ctx.lineTo(c + R, c);
+    ctx.moveTo(c, c - R); ctx.lineTo(c, c + R);
+    ctx.stroke();
+
+    ctx.fillStyle = MID;
+    for (let i = -4; i < 4; i++) {
+      for (let j = -4; j < 4; j++) {
+        ctx.beginPath();
+        ctx.arc(c + (i + 0.5) * LSB * k, c + (j + 0.5) * LSB * k, 1.3, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+    ctx.strokeStyle = MID;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.arc(c, c, (CENTERED_MAX / 100) * k, 0, 2 * Math.PI); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fuori scala il punto resta sul bordo, nella sua direzione: si vede da
+    // che parte è, non dove. La scia è ritagliata al cerchio.
+    const clampToRim = (x, y) => {
+      const r = Math.hypot(x, y) * DIAL_ZOOM;
+      const f = r > 1 ? 1 / r : 1;
+      return [c + x * k * f, c + y * k * f];
+    };
+    ctx.save();
+    ctx.beginPath(); ctx.arc(c, c, R, 0, 2 * Math.PI); ctx.clip();
+    for (let i = 1; i < this.trail.length; i++) {
+      const a = this.trail[i - 1];
+      const b = this.trail[i];
+      ctx.strokeStyle = `rgba(10,10,10,${(i / this.trail.length) * 0.35})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(c + a.x * k, c + a.y * k);
+      ctx.lineTo(c + b.x * k, c + b.y * k);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const [px, py] = clampToRim(this.x, this.y);
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.arc(px, py, this.dotRadius, 0, 2 * Math.PI);
+    ctx.fill();
+
+    ctx.fillStyle = INK;
+    ctx.font = '600 10px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('×10 · edge 10%', c + R, 10);
+    ctx.textAlign = 'start';
+  }
 }
 
 const dialL = new StickDial($('dial-l'));
@@ -203,6 +303,20 @@ const dialRangeR = new StickDial($('dial-range-r'), { traceMode: true });
 const dialWizL = new StickDial($('dial-wiz-l'), { dotRadius: 4 });
 const dialWizR = new StickDial($('dial-wiz-r'), { dotRadius: 4 });
 const allDials = [dialL, dialR, dialRangeL, dialRangeR, dialWizL, dialWizR];
+
+// Zoom ×10, per quadrante: è solo disegno, non tocca misure né verdetti.
+for (const [side, dial, name] of [['l', dialL, 'Left'], ['r', dialR, 'Right']]) {
+  const btn = $(`btn-zoom-${side}`);
+  const canvas = $(`dial-${side}`);
+  btn.addEventListener('click', () => {
+    const on = btn.getAttribute('aria-pressed') !== 'true';
+    dial.zoom = on ? DIAL_ZOOM : 1;
+    btn.setAttribute('aria-pressed', String(on));
+    canvas.setAttribute('aria-label', on
+      ? `${name} stick position, center zoomed ×10: edge 10%, dashed ring ${CENTERED_MAX}%`
+      : `${name} stick position`);
+  });
+}
 
 // Il DPR non ha un evento dedicato: si osserva con una media query costruita
 // sul valore corrente, che scatta appena quel valore smette di essere vero.
@@ -450,7 +564,7 @@ function onControllerPoisoned(controller, error) {
   log(`Controller not responding: ${error.message}.`);
   // Durante il flash il messaggio giusto è quello sullo stato della memoria,
   // mostrato da doFlash.
-  if (!flashing) toast(POISONED_MESSAGE, 8000);
+  if (!flashing) toast(POISONED_MESSAGE, 8000, { alert: true });
 }
 
 const CONNECT_LABEL = 'Connect DualSense';
@@ -840,6 +954,10 @@ function evaluateDriftTest() {
 
 let lastDriftResult = null;
 
+// Segno esplicito e meno tipografico (−, non -): +0.0% e −0.0% restano
+// distinguibili, e lo screen reader legge "meno".
+const signedPct = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`;
+
 function finishDriftTest(result) {
   const auto = driftTest?.auto === true;
   stopDriftLoop();
@@ -860,7 +978,9 @@ function finishDriftTest(result) {
     const badge = $(el);
     badge.className = `verdict ${v.cls}`;
     badge.textContent = v.label;
-    badge.title = `x ${(r.x * 100).toFixed(1)}% · y ${(r.y * 100).toFixed(1)}% · noise ${r.noise.toFixed(1)}%`;
+    // Dettaglio come testo visibile, non `title`: tastiera e touch non
+    // raggiungono un tooltip. Il CSS lo nasconde insieme al badge.
+    $(`${el}-detail`).textContent = `x ${signedPct(r.x * 100)} · y ${signedPct(r.y * 100)} · noise ${r.noise.toFixed(1)}%`;
     badge.classList.remove('hidden');
   }
 
@@ -1050,7 +1170,7 @@ async function doFlash() {
     log(`NVS status after flash: ${nv?.status ?? 'n/a'} (raw ${raw}).`);
     if (nv?.status === 'unlocked') {
       recordEvent('flash', { ok: false, nv: nv.status });
-      toast(`Save not confirmed: ${NV_UNLOCKED_MESSAGE}`, 8000);
+      toast(`Save not confirmed: ${NV_UNLOCKED_MESSAGE}`, 8000, { alert: true });
       log('Flash not confirmed: NVS still unlocked.');
       return;
     }
@@ -1068,8 +1188,8 @@ async function doFlash() {
     // fallito lascia la NVS aperta, e il chip deve dirlo (e bloccare Quick).
     const nv = await refreshNv();
     recordEvent('flash', { ok: false, nv: nv?.status ?? null, err: String(error.message || error).slice(0, 120) });
-    if (error.nvUnknown) toast(NV_UNKNOWN_MESSAGE, 8000);
-    else toast(`Error while saving: ${error.message}`, 5000);
+    if (error.nvUnknown) toast(NV_UNKNOWN_MESSAGE, 8000, { alert: true });
+    else toast(`Error while saving: ${error.message}`, 5000, { alert: true });
     log(`Flash error: ${error.message}`);
   } finally {
     flashing = false;
@@ -1364,7 +1484,7 @@ async function quickCalibrate() {
         // Durante lo stallo il prompt "lascia gli stick" resta visibile.
         if (quickStallCancelable && event.phase === 'unstable') return;
         const html = quickProgressHtml(event);
-        if (html !== null) msg.innerHTML = html;
+        if (html !== null) setLive(msg, html, { html: true });
       },
       log,
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
@@ -1934,7 +2054,7 @@ function updateRangeUI(ts) {
           ? 'To leave without changes, turn the controller off (hold PS for 10 s).'
           : 'The only other way out is to turn the controller off (hold PS for 10 s).');
     } else hint = `Missing: ${st.missing.join(', ')}`;
-    $('range-hint').textContent = hint;
+    setLive($('range-hint'), hint);
   }
 
   const done = $('btn-range-done');
@@ -2090,6 +2210,76 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const closeTimers = new Map();
 const modalReturnFocus = new Map();
 
+// Un elemento conta come focalizzabile solo se è davvero visibile: il filtro
+// sulla sola classe `.hidden` dell'elemento lasciava passare i bottoni con un
+// antenato nascosto (#game-intro, #game-report-actions), e il primo/ultimo
+// elemento della trappola poteva essere invisibile.
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+function isShown(el) {
+  if (typeof el.checkVisibility === 'function') return el.checkVisibility({ visibilityProperty: true });
+  // Senza checkVisibility (browser vecchi, DOM finto dei test): risale gli
+  // antenati cercando `.hidden` o l'attributo `hidden`.
+  for (let node = el; node && node.classList; node = node.parentNode) {
+    if (node.classList.contains('hidden') || node.hidden) return false;
+  }
+  return true;
+}
+
+function visibleFocusables(root) {
+  return [...root.querySelectorAll(FOCUSABLE)].filter(el => !el.disabled && isShown(el));
+}
+
+function activeModalEl() {
+  return [...document.querySelectorAll('.modal[aria-modal="true"]')]
+    .find(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing')) ?? null;
+}
+
+// Ripiego del fuoco: il pannello ha tabindex=-1. Serve quando nel modale non
+// c'è nulla di attivo (range all'apertura, con Done disabilitato) o quando il
+// bottone che aveva il fuoco viene disabilitato o nascosto (rapida e wizard in
+// corsa, Start del gioco): senza, il fuoco cadeva su BODY, fuori dal modale.
+function focusPanel(modal) {
+  const panel = modal.querySelector('.modal-panel');
+  (panel ?? modal).focus?.({ preventScroll: true });
+}
+
+function focusInitial(modal) {
+  // `data-autofocus` vince sul primo elemento: WS5 lo mette su Cancel quando
+  // il risultato è a rischio e su Close per una partenza già centrata, e
+  // quando è su più elementi vince il primo visibile nell'ordine del DOM
+  // (Cancel viene prima di "Calibrate now"). Così la rapida non apre più sul
+  // checkbox della telemetria, dove Spazio spegneva la condivisione.
+  const preferred = [...modal.querySelectorAll('[data-autofocus]')]
+    .find(el => !el.disabled && isShown(el));
+  const target = preferred ?? visibleFocusables(modal)[0];
+  if (target) target.focus({ preventScroll: true });
+  else focusPanel(modal);
+}
+
+// Riporta il fuoco nel modale se l'elemento attivo non è più raggiungibile:
+// disabilitato, nascosto, o fuori dal modale (BODY dopo un disable).
+function keepFocusInModal(modal) {
+  const active = document.activeElement;
+  const panel = modal.querySelector('.modal-panel');
+  if (active && active !== document.body && modal.contains?.(active)
+      && (active === panel || (!active.disabled && isShown(active)))) return;
+  focusPanel(modal);
+}
+
+let focusWatch = null;
+function watchModalFocus(modal) {
+  focusWatch?.disconnect();
+  focusWatch = null;
+  if (!modal || typeof MutationObserver !== 'function') return;
+  // Il disable del bottone attivo non genera eventi di fuoco affidabili:
+  // si osservano gli attributi che lo tolgono di mezzo.
+  focusWatch = new MutationObserver(() => {
+    if (activeModalEl() === modal) keepFocusInModal(modal);
+  });
+  focusWatch.observe(modal, { subtree: true, attributes: true, attributeFilter: ['disabled', 'class', 'hidden'] });
+}
+
 function updateBackgroundInert() {
   const hasModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
     .some(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
@@ -2107,15 +2297,15 @@ function openModal(id) {
   clearTimeout(closeTimers.get(el));
   closeTimers.delete(el);
   el.classList.remove('closing', 'hidden');
-  modalReturnFocus.set(el, document.activeElement);
+  // Riaprire un modale già aperto non deve sovrascrivere il punto di ritorno
+  // con un elemento del modale stesso.
+  if (!modalReturnFocus.has(el)) modalReturnFocus.set(el, document.activeElement);
   updateBackgroundInert();
+  watchModalFocus(el);
+  // Un frame dopo: il layout del modale appena mostrato deve esistere, o
+  // checkVisibility vedrebbe ancora tutto nascosto.
   requestAnimationFrame(() => {
-    // `data-autofocus` (WS5 lo mette su Cancel quando il risultato è a
-    // rischio, e su Close per una partenza già centrata) vince sul primo
-    // elemento focalizzabile. Il meccanismo completo del fuoco è di WS6.
-    const target = el.querySelector('[data-autofocus]:not([disabled]):not(.hidden)')
-      ?? el.querySelector('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])');
-    target?.focus({ preventScroll: true });
+    if (activeModalEl() === el) focusInitial(el);
   });
 }
 
@@ -2130,9 +2320,9 @@ function closeModal(id) {
     updateBackgroundInert();
     const previous = modalReturnFocus.get(el);
     modalReturnFocus.delete(el);
-    const anotherModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
-      .some(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
-    if (!anotherModal) previous?.focus?.({ preventScroll: true });
+    const another = activeModalEl();
+    watchModalFocus(another);
+    if (!another) previous?.focus?.({ preventScroll: true });
   }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
 }
 
@@ -2147,9 +2337,49 @@ function closeAllModals() {
     closeTimers.delete(m);
     m.classList.remove('closing');
     m.classList.add('hidden');
+    modalReturnFocus.delete(m);
   }
+  watchModalFocus(null);
   updateBackgroundInert();
 }
+
+/* ============================== accessibilità ============================== */
+
+// Stato annunciabile derivato dal DOM visivo, in un punto solo: chi aggiorna
+// le barre (rapida, range, gioco) e i pallini del wizard continua a scrivere
+// solo `style.width` e le classi, e non deve ricordarsi l'ARIA. Un osservatore
+// per elemento, nessun lavoro per frame: scatta solo quando cambia qualcosa.
+function syncProgressBar(bar) {
+  const fill = bar.querySelector('i');
+  const pct = Math.round(Number.parseFloat(fill?.style.width) || 0);
+  const now = String(Math.max(0, Math.min(100, pct)));
+  if (bar.getAttribute('aria-valuenow') !== now) bar.setAttribute('aria-valuenow', now);
+}
+
+// I pallini sono aria-hidden: il passo arriva come testo. Pallino 0 = intro,
+// 1..5 = i cinque passi della procedura.
+const WIZARD_STEPS = 5;
+function syncWizardStep() {
+  const dots = [...$('wizard-dots').children];
+  const active = dots.findIndex(dot => dot.classList.contains('active'));
+  const text = active <= 0 ? 'Not started' : `Step ${Math.min(active, WIZARD_STEPS)} of ${WIZARD_STEPS}`;
+  const el = $('wizard-step');
+  if (el.textContent !== text) el.textContent = text;
+}
+
+function watchA11yState() {
+  if (typeof MutationObserver !== 'function') return;
+  for (const bar of document.querySelectorAll('.progress[role="progressbar"]')) {
+    const fill = bar.querySelector('i');
+    if (!fill) continue;
+    new MutationObserver(() => syncProgressBar(bar)).observe(fill, { attributes: true, attributeFilter: ['style'] });
+    syncProgressBar(bar);
+  }
+  new MutationObserver(syncWizardStep)
+    .observe($('wizard-dots'), { subtree: true, attributes: true, attributeFilter: ['class'] });
+  syncWizardStep();
+}
+watchA11yState();
 
 /* ============================== reboot ============================== */
 
@@ -2361,16 +2591,19 @@ const ESC_DISMISS = {
 };
 
 document.addEventListener('keydown', e => {
-  const activeModal = [...document.querySelectorAll('.modal[aria-modal="true"]')]
-    .find(modal => !modal.classList.contains('hidden') && !modal.classList.contains('closing'));
+  const activeModal = activeModalEl();
   if (e.key === 'Tab' && activeModal) {
-    const focusable = [...activeModal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-      .filter(el => !el.classList.contains('hidden'));
-    if (!focusable.length) return;
+    // Trappola completa: con zero elementi, o con il fuoco sul pannello o
+    // fuori dal modale, Tab non esce mai verso header, avviso o BODY.
+    const focusable = visibleFocusables(activeModal);
+    const active = document.activeElement;
+    const index = focusable.indexOf(active);
+    if (!focusable.length) { e.preventDefault(); focusPanel(activeModal); return; }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    if (index === -1) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
     return;
   }
   if (e.key !== 'Escape' || ops.busy) return;

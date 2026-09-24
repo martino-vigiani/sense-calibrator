@@ -3,6 +3,9 @@
    ============================================================ */
 
 :root {
+  /* Solo tema chiaro: senza dichiararlo, l'auto-dark del browser invertiva i
+     quadranti monocromi del canvas e il testo #fff hard-coded. */
+  color-scheme: light;
   --bg: #f7f7f5;
   --surface: #ffffff;
   --ink: #0a0a0a;
@@ -10,6 +13,10 @@
   --ink-3: #6d6d68;
   --line: #e7e7e3;
   --line-2: #d6d6d2;
+  /* Bordo dei componenti (WCAG 1.4.11): 3.25:1 su bianco, 3.03:1 su --bg.
+     --line e --line-2 restano per le superfici, che non devono raggiungerlo.
+     Il canvas non legge le variabili CSS: MID in app.js è lo stesso valore. */
+  --edge: #8f8f8a;
   --radius: 8px;
   --radius-sm: 5px;
   --shadow: none;
@@ -273,7 +280,8 @@ main {
 
 .steps-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* 4 passi: con repeat(5) restava una quinta colonna vuota (20% della riga) */
+  grid-template-columns: repeat(4, 1fr);
   gap: 0;
   list-style: none;
   padding: 0;
@@ -403,7 +411,7 @@ main {
 .btn-secondary {
   background: var(--surface);
   color: var(--ink);
-  border-color: var(--line-2);
+  border-color: var(--edge);
 }
 
 .btn-signal {
@@ -555,6 +563,30 @@ main {
   color: var(--ink-3);
   font-weight: 700;
 }
+/* Titolo al centro e zoom a destra: la colonna sinistra vuota bilancia
+   quella del bottone, così il titolo resta centrato sul quadrante. */
+.stick-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.stick-head h3 { grid-column: 2; margin: 0; }
+.dial-zoom {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  border-color: var(--edge);
+}
+.dial-zoom[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .dial-zoom[aria-pressed="true"]:hover:not(:disabled) { color: #fff; }
+}
+
 /* Il canvas non supera mai la dimensione dichiarata nel markup (240px):
    il backing store è 240*DPR, quindi si rimpicciolisce ma non sfoca mai. */
 .stick-card canvas {
@@ -612,6 +644,16 @@ main {
   color: var(--ink);
 }
 .verdict.v-bad { background: var(--ink); border-color: var(--ink); color: #fff; }
+/* Il dettaglio (x, y, rumore) stava solo nel `title` del badge: tastiera e
+   touch non lo raggiungevano. Segue il badge: sparisce con lui. */
+.verdict-detail {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.verdict.hidden + .verdict-detail,
+.verdict-detail:empty { display: none; }
 
 /* actions */
 
@@ -674,6 +716,11 @@ main {
   color: var(--ink);
   flex-shrink: 0;
 }
+/* Anello di fuoco bianco sulle superfici scure: quello nero di .btn su un
+   fondo nero aveva contrasto 1:1, e il fuoco su "Write to memory" spariva. */
+.banner .btn:focus-visible,
+.action-sensitivity .btn:focus-visible,
+.action-playtest .btn:focus-visible { outline-color: #fff; }
 
 /* log */
 
@@ -733,6 +780,8 @@ main {
   width: 0%;
   border-radius: inherit;
   background: var(--ink);
+  /* la barra della rapida avanza a salti del 3–25%: la transizione li lega */
+  transition: width 0.25s linear;
 }
 
 /* ---------------- modali ---------------- */
@@ -774,7 +823,9 @@ main {
   background: var(--surface);
   border: 0;
   border-radius: 8px;
-  box-shadow: 0 28px 70px -24px rgba(0, 0, 0, 0.32);
+  /* L'anello da 1px separa il bordo superiore dallo scrim (1.07:1 senza):
+     l'ombra cade solo verso il basso. */
+  box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.08), 0 28px 70px -24px rgba(0, 0, 0, 0.32);
   padding: 28px 30px;
   /* modals stay centered: transform-origin center is correct here */
   animation: panelIn 0.28s var(--ease-out);
@@ -784,6 +835,9 @@ main {
   to { opacity: 1; transform: none; }
 }
 .modal-narrow { max-width: 460px; }
+/* Il pannello riceve il fuoco solo da codice (nessun elemento attivo nel
+   modale, o bottone appena disabilitato): nessun anello. */
+.modal-panel:focus { outline: none; }
 
 .modal-panel h3 {
   margin: 0 0 12px;
@@ -811,11 +865,13 @@ main {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--line-2);
+  /* in attesa: anello a 3:1 invece del pieno --line-2 (1.46:1, invisibile) */
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--edge);
   transition: background 0.3s var(--ease), transform 0.3s var(--ease-out);
 }
-.wizard-dots i.done { background: var(--ink-3); }
-.wizard-dots i.active { background: var(--ink); transform: scale(1.35); }
+.wizard-dots i.done { background: var(--ink-3); box-shadow: none; }
+.wizard-dots i.active { background: var(--ink); box-shadow: none; transform: scale(1.35); }
 
 .wizard-body {
   display: flex;
@@ -977,7 +1033,7 @@ main {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.25);
   padding: 18px 20px 16px;
   animation: noticeIn 0.36s var(--ease-out);
 }
@@ -1918,7 +1974,8 @@ a.btn { text-decoration: none; }
   transition: background-color 0.16s var(--ease);
 }
 .handsoff[data-level="green"]::before { background: #2b8a3e; }
-.handsoff[data-level="amber"]::before { background: #d48a00; }
+/* #d48a00 era 2.8:1 su bianco: sotto il 3:1 dei segnali grafici */
+.handsoff[data-level="amber"]::before { background: #b07300; }
 .handsoff[data-level="red"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
 .battery-hint { margin: 8px 0 0; }
 
@@ -1951,4 +2008,5 @@ a.btn { text-decoration: none; }
      verdetto non si muove: cambia colore, ed è ciò che rende leggibile il
      passaggio "prima/dopo". Toglierlo peggiora la comprensione. */
   .verdict { transition-duration: 0.26s !important; }
+  .progress i { transition: none !important; }
 }
