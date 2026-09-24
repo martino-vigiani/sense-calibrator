@@ -20,6 +20,8 @@ import * as quickModule from '../../js/calib/quick.js';
 import * as quickPolicyModule from '../../js/calib/quick-policy.js';
 import * as quickOutcomeCopyModule from '../../js/calib/quick-outcome-copy.js';
 import * as opsModule from '../../js/calib/ops.js';
+import * as wizardGateModule from '../../js/calib/wizard-gate.js';
+import * as rangeCoverageModule from '../../js/calib/range-coverage.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 
 const APP_SOURCE = fs.readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
@@ -233,7 +235,7 @@ const SCRIPT = new vm.Script(rewriteImports(APP_SOURCE), { filename: 'js/app.js 
 // successivi nello stesso contesto.
 const PEEK = new vm.Script(`({
   busy: ops.busy, epoch: ops.epoch, ds5, sticks, unsaved, deviceInfo, wizard, driftTest,
-  quickPreflightBlocked, lastDriftResult, rangeSession,
+  quickPreflightBlocked, lastDriftResult, rangeSession, rangeCheck, rangeWriteLock, lastWizardComparison,
 })`);
 
 export async function loadApp({ authorized = [], chooser = [], hidAvailable = true, search = '', hostname = 'sense.test', clock = new VClock(), storage = {}, telemetryNoticeSeen = true } = {}) {
@@ -293,6 +295,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './calib/quick-policy.js': quickPolicyModule,
       './calib/quick-outcome-copy.js': quickOutcomeCopyModule,
       './calib/ops.js': opsModule,
+      './calib/wizard-gate.js': wizardGateModule,
+      './calib/range-coverage.js': rangeCoverageModule,
       ...STUBS,
     },
   };
