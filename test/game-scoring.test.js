@@ -195,6 +195,57 @@ test('sampling is report-driven: frames alone never advance a check, a gap or a 
   assert.equal(hidden.phase, 'done');
 });
 
+test('Retry after an interrupted Return redoes the direction once: no stick records a flick twice', () => {
+  // Una leva chiude "up", l'altra no, poi un buco nei report: la riprova
+  // rifà "up" per entrambe e il flick già chiuso non va contato due volte.
+  const e = createPrecisionTest();
+  const rest = sticksOf(127, 128, 127, 128);
+  const DIR = { up: [0, -1], right: [1, 0], down: [0, 1], left: [-1, 0] };
+  let t = 0;
+  const feed = s => { e.feed(s, t); t += 4; };
+  e.start(t);
+  while (e.phase !== 'return') feed(rest);
+  const flick = (dir, keys) => {
+    const [x, y] = DIR[dir];
+    const out = { ...rest };
+    for (const k of keys) { out[`${k}x`] = x; out[`${k}y`] = y; }
+    for (let i = 0; i < 5; i++) feed(out);   // fuori e rilascio di molla, < 80 ms
+  };
+  const settle = () => { for (let i = 0; i < 90; i++) feed(rest); };
+
+  flick('up', ['l']);
+  settle();
+  assert.equal(e.phase, 'return', 'still waiting for the right stick on "up"');
+  e.tick(t + 150);
+  assert.equal(e.phase, 'interrupted');
+  assert.equal(e.retry(t + 200), true);
+  assert.equal(e.phase, 'return');
+  t += 200;
+  for (const dir of PRECISION_DEFAULTS.returnDirs) { flick(dir, ['l', 'r']); settle(); }
+  assert.equal(e.phase, 'range');
+  e.skip(t);
+  const res = e.result();
+  for (const k of ['L', 'R']) {
+    assert.equal(res[k].ret.n, 4, `${k}: four flicks, not five`);
+    assert.deepEqual(res[k].ret.dirs, ['up', 'right', 'down', 'left'], `${k}: one flick per direction`);
+    assert.match(returnText(res[k].ret, res.flicksPerStick), / 4 of 4 flicks$/);
+  }
+
+  // e dal modello (lo scenario del revisore): buchi di 150 ms sparsi in Return
+  for (let seed = 1; seed <= 12; seed++) {
+    for (let at = 5000; at <= 14000; at += 250) {
+      const r = simulateRun({ seed, scenario: { gap: { at, dur: 150 } } });
+      if (r.phase !== 'done') continue;
+      for (const k of ['L', 'R']) {
+        const ret = r.result[k].ret;
+        if (!ret) continue;
+        assert.ok(ret.n <= 4, `seed ${seed}, gap at ${at}: ${k} has ${ret.n} flicks`);
+        assert.equal(new Set(ret.dirs).size, ret.n, `seed ${seed}, gap at ${at}: ${k} repeats a direction`);
+      }
+    }
+  }
+});
+
 test('game.js samples from HID reports and uses the shared hands-off meter; no timers', async () => {
   const src = await readFile(new URL('../js/game.js', import.meta.url), 'utf8');
   const app = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');

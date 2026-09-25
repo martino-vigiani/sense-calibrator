@@ -57,7 +57,7 @@ Notable changes to Sense Calibrator. Dates are ISO 8601.
 - **A touch never scores.** Moving windows are dropped, a slowly pushed stick is caught too, and a run with too much movement restarts by itself (at most twice). A skipped or unfinished Return reads "Not measured", never 0.
 - **It feels like a game and explains every wait.** It starts as soon as you let go, lights the direction to flick, rejects a guided release, shows where each flick settled at ×8, fills the range rings as you roll, and says why whenever it waits. About 15 seconds in the simulator's model of a user.
 - **Before and after.** The previous result is kept per controller under a salted hash of the serial that never leaves the browser, and a change counts only when a stick moved by a full step.
-- Sampling follows the controller's input reports, not the screen refresh; a gap or a background tab interrupts the check with a Retry.
+- Sampling follows the controller's input reports, not the screen refresh; a gap or a background tab interrupts the check with a Retry, and retrying a Return flick redoes that direction for both sticks, so no flick is counted twice.
 
 ### Privacy
 

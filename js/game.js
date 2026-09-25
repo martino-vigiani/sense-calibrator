@@ -253,6 +253,7 @@ export function returnMetrics(flicks, ref) {
   }, 0) / flicks.length;
   return {
     n: flicks.length,
+    dirs: flicks.map(f => f.dir),
     H: medianOf(hs),
     maxH: Math.max(...hs),
     B: bias,
@@ -656,7 +657,15 @@ export function createPrecisionTest(params = {}) {
       const { of, index } = st;
       lastT = null;
       if (of === 'center') enterReady(t, null);
-      else if (of === 'return') { run.returnStart = null; enterReturn(t, index); }
+      else if (of === 'return') {
+        // La direzione interrotta si rifà da capo per entrambe le leve: se una
+        // l'aveva già chiusa, il suo flick va tolto, altrimenti la riprova lo
+        // registra due volte (5 di 4 flick, mediana, bias e assestamento
+        // falsati). Le direzioni sono in ordine: restano solo le prime `index`.
+        for (const m of STICKS) run.flicks[m.key].length = Math.min(run.flicks[m.key].length, index);
+        run.returnStart = null;
+        enterReturn(t, index);
+      }
       else enterRange(t);
       return true;
     }
