@@ -81,6 +81,29 @@ test('Start with a thumb on a stick sends nothing and can still be cancelled', a
   assert.equal(A.counts.begin, 1);
 });
 
+test('a touch during the start measurement is rejected before calibBegin, and Start works again once released', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
+  await h.click('btn-wizard');
+  const sent = A.commandLog.length;
+  // l'attesa di stick fermi dura ~300 ms, poi 1 s di misura: il pollice spinge
+  // lo stick sinistro di ~15% per 250 ms nel mezzo della misura
+  touch(A, { stick: 0, t0: h.clock.now() + 700, dur: 250, amp: [19, 19], tail: 1 });
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.begin, 0, 'no calibBegin');
+  assert.equal(A.commandLog.length, sent, 'nothing sent at all');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.peek().wizard.phase, 'intro');
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  assert.equal(h.$('btn-wizard-next').textContent, 'Start');
+  assert.match(h.$('wizard-msg').innerHTML, /moved while it was being measured[\s\S]*Nothing was sent/);
+  assert.equal(h.store.get('sense-power-cycle-in-tab') ?? null, null);
+  // lasciato lo stick, Start parte con una tolleranza normale
+  await h.advance(200);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.begin, 1);
+  assert.ok(h.peek().wizard.tol <= 0.08, `${h.peek().wizard.tol}`);
+});
+
 test('Continue without reaching the corner takes no sample and does not wait', async () => {
   const { h, A } = await setup();
   await startWizard(h);

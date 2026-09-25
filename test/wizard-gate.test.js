@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DRIFT_MOVE_SPREAD } from '../js/calib/measure.js';
-import { STICK_LSB } from '../js/calib/sampling.js';
+import { DRIFT_MOVE_SPREAD, summarizeResult } from '../js/calib/measure.js';
+import { STICK_LSB, measureOffset } from '../js/calib/sampling.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
+  WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
   sampleGateOptions, wizardComparison,
 } from '../js/calib/wizard-gate.js';
 
@@ -47,6 +47,126 @@ test('the rest tolerance is max(4 LSB, 3 × the start noise), from the noisier s
   assert.equal(restTolerance({ noise: [0, 0] }), 4 * STICK_LSB);
   assert.equal(restTolerance(null), 4 * STICK_LSB);
   assert.ok(Math.abs(restTolerance({ noise: [0.4, 2] }) - 0.06) < 1e-12);
+});
+
+test('the rest tolerance has a ceiling: DRIFT_MOVE_SPREAD per axis, whose diagonal stays inside the escape radius', () => {
+  assert.equal(WIZARD_DEFAULTS.maxTol, DRIFT_MOVE_SPREAD);
+  // la diagonale del controllo per asse non supera mai il raggio dell'uscita
+  assert.ok(Math.SQRT2 * WIZARD_DEFAULTS.maxTol < WIZARD_DEFAULTS.escapeLsb * STICK_LSB);
+  assert.equal(restTolerance({ noise: [21.2, 0.5] }), DRIFT_MOVE_SPREAD);
+  assert.equal(restTolerance({ noise: [Infinity, 1] }), 4 * STICK_LSB, 'non-finite noise is ignored');
+  // anche una tol passata a mano viene tagliata, e l'uscita resta 24 LSB
+  const opts = sampleGateOptions({ ref: REST, tol: 0.635 });
+  assert.equal(opts.tol, DRIFT_MOVE_SPREAD);
+  const esc = sampleGateOptions({ ref: REST, tol: 0.635, escaped: true });
+  assert.equal(esc.nearRadius, WIZARD_DEFAULTS.escapeLsb * STICK_LSB);
+  assert.equal(esc.tol, WIZARD_DEFAULTS.escapeLsb * STICK_LSB);
+});
+
+// Orologio con sleep sul tempo dei report, per measureOffset (vero modulo).
+function timedClock(source) {
+  const sleeps = [];
+  return {
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    sleep: ms => new Promise(resolve => sleeps.push({ until: source.t + ms, resolve })),
+    tick() {
+      for (let i = sleeps.length - 1; i >= 0; i--) {
+        if (source.t >= sleeps[i].until) sleeps.splice(i, 1)[0].resolve();
+      }
+    },
+  };
+}
+async function driveTimed(source, clock, at, promise, maxMs = 20_000) {
+  let settled = false;
+  promise.then(() => { settled = true; }, () => { settled = true; });
+  for (let n = 0; !settled && n < maxMs / 4; n++) {
+    source.t += 4;
+    source.sticks = at(source.t);
+    for (const fn of [...source.listeners]) fn();
+    clock.tick();
+    await Promise.resolve();
+  }
+  return promise;
+}
+// Misura di partenza del wizard (1000 ms, come la pagina) con i moduli veri.
+async function measureBefore(at) {
+  const source = scriptedSource(at);
+  const clock = timedClock(source);
+  return driveTimed(source, clock, at, measureOffset(source, clock, 1000));
+}
+// Rumore deterministico di ±1 LSB per asse, come uno stick a riposo.
+const jitter = (t, k) => STICK_LSB * Math.sin(t * 0.37 + k * 1.7);
+const restAt = t => ({ lx: REST.lx + jitter(t, 0), ly: REST.ly + jitter(t, 1), rx: REST.rx + jitter(t, 2), ry: REST.ry + jitter(t, 3) });
+
+test('WS7 regression: a touch during the start measurement no longer yields an 81-LSB tolerance that samples a thumb 57% away', async () => {
+  // Il pollice spinge lo stick sinistro di (15%, 15%) per 250 ms del secondo
+  // di misura, poi lo lascia.
+  const touched = t => {
+    const s = restAt(t);
+    return t >= 400 && t < 650 ? { ...s, lx: s.lx + 0.15, ly: s.ly + 0.15 } : s;
+  };
+  const raw = await measureBefore(touched);
+  const before = summarizeResult(raw);
+  // Senza tetto (il codice di prima): tolleranza ~81 LSB.
+  const uncapped = restTolerance(before, { maxTol: Infinity });
+  assert.ok(uncapped / STICK_LSB > 75 && uncapped / STICK_LSB < 90, `${(uncapped / STICK_LSB).toFixed(1)} LSB`);
+  // Pollice fermo a (40%, 40%) dal riferimento: 57% radiale.
+  const thumb = { ...REST, lx: REST.lx + 0.4, ly: REST.ly + 0.4 };
+  assert.ok(Math.abs(Math.hypot(0.4, 0.4) - 0.566) < 0.001);
+  const held = () => thumb;
+  let source = scriptedSource(held);
+  const old = await drive(source, held, gateWizardSample(source, idleClock, {
+    tracker: reachedTracker(), ref: REST, tol: uncapped, params: { maxTol: Infinity },
+  }));
+  assert.equal(old.ok, true, 'reproduces the defect: without the ceiling the held thumb is sampled');
+
+  // 1. La misura disturbata viene rifiutata prima di calibBegin.
+  assert.deepEqual(checkBefore(raw), { ok: false, reason: 'noisy' });
+  assert.equal(checkBefore(before).ok, false, 'the summarized result is rejected too');
+  // 2. E anche se passasse, la tolleranza ha il tetto e il pollice non si campiona.
+  const tol = restTolerance(before);
+  assert.equal(tol, DRIFT_MOVE_SPREAD);
+  source = scriptedSource(held);
+  const now = await drive(source, held, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol }));
+  assert.deepEqual(now, { ok: false, reason: 'timeout' });
+  // Nemmeno con l'uscita: 57% è ben oltre 18.8%.
+  source = scriptedSource(held);
+  const esc = await drive(source, held, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol, escaped: true }));
+  assert.deepEqual(esc, { ok: false, reason: 'timeout' });
+});
+
+test('a start measurement with normal noise is accepted, and its tolerance still samples a stick back at rest', async () => {
+  for (const lsb of [1, 2, 3]) {
+    const at = t => ({
+      lx: REST.lx + lsb * jitter(t, 0), ly: REST.ly + lsb * jitter(t, 1),
+      rx: REST.rx + lsb * jitter(t, 2), ry: REST.ry + lsb * jitter(t, 3),
+    });
+    const raw = await measureBefore(at);
+    assert.deepEqual(checkBefore(raw), { ok: true }, `±${lsb} LSB`);
+    const tol = restTolerance(summarizeResult(raw));
+    assert.ok(tol >= 4 * STICK_LSB && tol < DRIFT_MOVE_SPREAD, `±${lsb} LSB: ${(tol / STICK_LSB).toFixed(1)} LSB`);
+    // ±3 LSB (spread 6 LSB) supera già QUICK_STABLE_SPREAD: lì decide il gate
+    // di stabilità, non la posizione, come prima.
+    if (lsb === 3) continue;
+    const source = scriptedSource(at);
+    const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol }));
+    assert.equal(r.ok, true, `±${lsb} LSB`);
+  }
+  // un rumore da sensore consumato (3%, sotto la soglia del 4%) passa
+  assert.deepEqual(checkBefore({ noise: [3, 0.8] }), { ok: true });
+  assert.deepEqual(checkBefore({ noise: [4.01, 0.8] }), { ok: false, reason: 'noisy' });
+  assert.equal(WIZARD_DEFAULTS.beforeMaxNoise, (DRIFT_MOVE_SPREAD * 100) / 2);
+});
+
+test('a start measurement that is mostly movement or has no data is rejected', async () => {
+  assert.deepEqual(checkBefore(null), { ok: false, reason: 'no-data' });
+  assert.deepEqual(checkBefore({ noise: [NaN, 1] }), { ok: false, reason: 'no-data' });
+  assert.deepEqual(checkBefore({ left: { noise: 1 }, right: { noise: 1 }, stableFraction: 0.2 }), { ok: false, reason: 'moving' });
+  // una mano che muove lo stick per tutto il secondo (±6%, 5 Hz)
+  const moving = t => ({ ...restAt(t), rx: REST.rx + 0.06 * Math.sin(2 * Math.PI * t / 200) });
+  const raw = await measureBefore(moving);
+  assert.equal(checkBefore(raw).ok, false);
 });
 
 test('corner reach is the projection toward the corner, tracked as a maximum and reset per step', () => {

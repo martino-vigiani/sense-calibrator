@@ -36,7 +36,7 @@
 // differire ben oltre 4 LSB e ogni campione andrebbe in timeout. Il
 // riferimento resta fisso per tutta la procedura e non si allarga mai da solo.
 
-import { DRIFT_MOVE_SPREAD } from './measure.js';
+import { DRIFT_MIN_STABLE, DRIFT_MOVE_SPREAD } from './measure.js';
 import { QUICK_STABLE_SPREAD, STICK_LSB, waitForStable } from './sampling.js';
 import { CENTERED_MAX, formatOffset } from './lattice.js';
 
@@ -52,6 +52,24 @@ export const WIZARD_DEFAULTS = Object.freeze({
   timeoutMs: 5000,
   tolLsb: 4,
   noiseMult: 3,
+  // Tetto della tolleranza (per asse, unità normalizzate): DRIFT_MOVE_SPREAD,
+  // cioè 8% ≈ 10.2 LSB. Il controllo di posizione non accetta mai uno
+  // spostamento più grande di quello che l'app stessa chiama "movimento"; in
+  // diagonale (per asse, quindi √2 · 8% ≈ 11.3%) resta sotto il raggio
+  // dell'uscita (escapeLsb, 18.8%), così l'uscita resta sempre il controllo
+  // più largo. Senza tetto un tocco nella misura di partenza portava la
+  // tolleranza a ~81 LSB e un pollice fermo al 57% dal riferimento passava.
+  maxTol: DRIFT_MOVE_SPREAD,
+  // Misura di partenza disturbata (rifiutata PRIMA di calibBegin): rumore p95
+  // radiale oltre metà di DRIFT_MOVE_SPREAD (4%: attorno alla mediana, un
+  // segnale largo quanto la soglia del movimento; è anche lo 0 della
+  // Stability del test di precisione), o frazione stabile sotto
+  // DRIFT_MIN_STABLE (la regola con cui il test drift dice "in movimento").
+  // L'attesa prima della misura chiede già una finestra entro
+  // QUICK_STABLE_SPREAD, quindi uno stick che la supera non viene escluso da
+  // questa soglia: la supera solo un tocco nel secondo di misura.
+  beforeMaxNoise: (DRIFT_MOVE_SPREAD * 100) / 2,
+  beforeMinStable: DRIFT_MIN_STABLE,
   // Il riferimento in sessione deve avere entrambi gli stick entro il 50%
   // (plausibilità, come QUICK_DEFAULTS.refRadius): un pollice sul bordo non
   // diventa il "centro".
@@ -69,13 +87,34 @@ export const WIZARD_DEFAULTS = Object.freeze({
 export const wizardParams = params => ({ ...WIZARD_DEFAULTS, ...params });
 
 // Tolleranza (per asse, unità normalizzate) del punto di riposo: max(4 LSB,
-// 3·rumore). Il rumore è il p95 radiale in punti % della misura di partenza,
-// il più alto dei due stick (waitForStable accetta una sola tolleranza). Il
-// rumore non dipende dal frame, quindi usarlo qui non confronta frame diversi.
+// 3·rumore), mai oltre `maxTol`. Il rumore è il p95 radiale in punti % della
+// misura di partenza, il più alto dei due stick (waitForStable accetta una sola
+// tolleranza). Il rumore non dipende dal frame, quindi usarlo qui non
+// confronta frame diversi. Il tetto vale anche se la misura di partenza non è
+// stata controllata con `checkBefore`: è la seconda linea di difesa.
 export function restTolerance(before, params = {}) {
   const p = wizardParams(params);
   const noisePct = Math.max(0, ...(before?.noise ?? []).filter(Number.isFinite));
-  return Math.max(p.tolLsb * STICK_LSB, (p.noiseMult * noisePct) / 100);
+  return Math.min(p.maxTol, Math.max(p.tolLsb * STICK_LSB, (p.noiseMult * noisePct) / 100));
+}
+
+// La misura di partenza (measureOffset, prima di calibBegin) è pulita?
+// Accetta il risultato grezzo ({ left: { noise }, right: { noise },
+// stableFraction }) o quello di summarizeResult ({ noise: [l, r] }, senza
+// frazione stabile). → { ok: true } | { ok: false, reason }
+//   'no-data'  nessuna misura (troppi pochi report)
+//   'moving'   frazione stabile sotto beforeMinStable
+//   'noisy'    rumore oltre beforeMaxNoise su almeno uno stick
+// Un rifiuto qui non ha mandato nulla al controller: la pagina chiede di
+// lasciare gli stick e di ripartire.
+export function checkBefore(result, params = {}) {
+  const p = wizardParams(params);
+  if (!result) return { ok: false, reason: 'no-data' };
+  const noise = Array.isArray(result.noise) ? result.noise : [result.left?.noise, result.right?.noise];
+  if (noise.length < 2 || !noise.every(Number.isFinite)) return { ok: false, reason: 'no-data' };
+  if (Number.isFinite(result.stableFraction) && result.stableFraction < p.beforeMinStable) return { ok: false, reason: 'moving' };
+  if (Math.max(...noise) > p.beforeMaxNoise) return { ok: false, reason: 'noisy' };
+  return { ok: true };
 }
 
 // Proiezione di ciascuno stick sulla direzione dell'angolo (tx, ty qualsiasi,
@@ -122,13 +161,16 @@ export function createCornerTracker(corner) {
 // escapeSpread. Serve comunque una finestra stabile: mai un campione su timeout.
 export function sampleGateOptions({ ref, tol, escaped = false, params = {}, isCancelled = null } = {}) {
   const p = wizardParams(params);
-  const escapeRadius = Math.max(p.escapeLsb * STICK_LSB, tol ?? 0);
+  // Il tetto vale anche per una `tol` passata a mano: nessun chiamante può
+  // allargare il controllo normale oltre maxTol, né l'uscita oltre escapeLsb.
+  const capped = Math.min(p.maxTol, Number.isFinite(tol) ? tol : p.tolLsb * STICK_LSB);
+  const escapeRadius = Math.max(p.escapeLsb * STICK_LSB, capped);
   return {
     spread: escaped ? p.escapeSpread : p.spread,
     holdMs: p.holdMs,
     timeoutMs: p.timeoutMs,
     near: ref,
-    tol: escaped ? escapeRadius : tol,
+    tol: escaped ? escapeRadius : capped,
     nearRadius: escaped ? escapeRadius : null,
     isCancelled,
   };

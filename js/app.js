@@ -21,7 +21,7 @@ import {
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+  WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 
@@ -1997,8 +1997,27 @@ async function wizardNext() {
       // Misura di partenza: il wizard è il percorso per il drift ostinato, cioè
       // i casi più informativi. È anche il "prima" del confronto finale (stesso
       // frame calibrato del "dopo"), e il suo rumore fissa la tolleranza.
-      w.before = summarizeResult(await measureOffset(1000));
+      const measured = await measureOffset(1000);
       ensure();
+      // Un tocco nel secondo di misura fa esplodere il rumore, e con esso la
+      // tolleranza del riferimento: la misura disturbata si rifiuta qui, PRIMA
+      // di calibBegin, come uno stick non fermo all'avvio. Nessun comando è
+      // partito, la procedura si può ancora annullare.
+      const beforeCheck = checkBefore(measured);
+      if (!beforeCheck.ok) {
+        ops.endOp(w.op);
+        w.op = null;
+        w.controller = null;
+        $('btn-wizard-cancel').classList.remove('hidden');
+        btn.textContent = 'Start';
+        log(`Guided calibration: start measurement rejected (${beforeCheck.reason}); nothing sent.`);
+        $('wizard-msg').innerHTML = (beforeCheck.reason === 'no-data'
+          ? 'The controller stopped sending stick readings while they were being measured. Check the cable, then press '
+          : 'A stick moved while it was being measured. <b>Let go of both sticks</b>, then press ')
+          + '<b>Start</b> again. Nothing was sent to the controller.';
+        return;
+      }
+      w.before = summarizeResult(measured);
       w.tol = restTolerance(w.before);
       // Il segno di sessione in volo va scritto PRIMA del comando (vedi
       // openSessionGuard): un reload fra due angoli torna bloccato.
