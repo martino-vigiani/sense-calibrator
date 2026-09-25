@@ -426,9 +426,17 @@
 <div id="modal-range" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="range-title">
   <div class="modal-panel" tabindex="-1">
     <h3 id="range-title">Range calibration</h3>
-    <p id="range-msg">The controller is sampling. <b>Slowly rotate both sticks while pressing them all the way
+    <div id="range-intro">
+      <p>Range calibration teaches the controller how far each stick travels. You will <b>rotate both sticks
+        slowly, pressed all the way against the edge</b>, at least 2 turns one way and 2 the other.</p>
+      <p><b>Once it starts there is no Cancel.</b> It ends when both sticks have covered the whole edge. The only
+        way out without finishing is to turn the controller off (hold PS for 10 s).</p>
+      <p id="range-intro-pinned" class="hint hidden"></p>
+    </div>
+    <p id="range-msg" class="hidden">The controller is sampling. <b>Slowly rotate both sticks while pressing them all the way
       against the edge</b>, at least 2 turns one way and 2 the other. Keep working the areas where the trace
       stays short.</p>
+    <div id="range-live" class="hidden">
     <div class="range-dials">
       <canvas id="dial-range-l" role="img" width="200" height="200" aria-label="Left stick coverage"></canvas>
       <canvas id="dial-range-r" role="img" width="200" height="200" aria-label="Right stick coverage"></canvas>
@@ -441,9 +449,12 @@
       <span id="range-pct">Coverage 0%</span>
     </div>
     <div class="progress" role="progressbar" aria-label="Range coverage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="range-bar"></i></div>
-    <p class="hint">If you close without rotating the sticks the calibration will be incomplete and will have to be repeated.</p>
+    <p class="hint">There is no Cancel: this ends when both sticks have covered the whole edge, or when you turn the controller off (hold PS for 10 s).</p>
+    </div>
     <div class="modal-actions">
-      <button id="btn-range-done" class="btn btn-primary" disabled>Done</button>
+      <button id="btn-range-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-range-start" class="btn btn-primary" data-autofocus>Start</button>
+      <button id="btn-range-done" class="btn btn-primary hidden" disabled>Done</button>
     </div>
   </div>
 </div>

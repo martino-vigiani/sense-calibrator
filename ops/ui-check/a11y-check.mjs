@@ -218,8 +218,18 @@ try {
 
     await modalCase(width, height, { name: 'wizard', modalId: 'modal-wizard', open: clickId('btn-wizard'), expectFocus: ['#btn-wizard-next'] });
 
+    // Passo introduttivo del range: nessun comando, fuoco su Start, Cancel presente.
+    await modalCase(width, height, { name: 'range-intro', modalId: 'modal-range', open: clickId('btn-range'), expectFocus: ['#btn-range-start'] });
+
     await modalCase(width, height, {
-      name: 'range', modalId: 'modal-range', open: clickId('btn-range'), expectFocus: ['.modal-panel'],
+      name: 'range', modalId: 'modal-range',
+      open: async page => {
+        await clickId('btn-range')(page);
+        await page.waitForSelector('#modal-range:not(.hidden)');
+        await clickId('btn-range-start')(page);
+        await page.waitForSelector('#btn-range-start', { state: 'hidden' });
+      },
+      expectFocus: ['.modal-panel'],
       // #range-hint è role="status": ogni mutazione può essere riletta, quindi
       // il numero di mutazioni deve coincidere con i cambi di testo reali.
       after: async (page, label) => {

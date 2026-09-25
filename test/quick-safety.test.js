@@ -396,7 +396,7 @@ test('app: a stalled pass leaves unsaved set and blocks every command until the 
   await h.click('btn-quick');
   assert.equal(h.visible('modal-quick'), false, 'Quick does not open');
   await h.click('btn-wizard');
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await h.run(h.click('btn-flash-go'));
   assert.equal(dev.commandLog.length, sent, 'no command reaches the controller');
   assert.equal(h.peek().busy, false);

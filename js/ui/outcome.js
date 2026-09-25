@@ -126,7 +126,7 @@ const TIER_WORDS = {
   },
   pinned: {
     headline: 'Pinned at the edge',
-    advice: 'An axis reads at the very edge. That isn’t ordinary drift: try Range calibration first, then Guided if the center is still off. If it stays at the edge, the stick is likely faulty.',
+    advice: 'An axis reads at the very edge. That isn’t ordinary drift: try Range calibration first, then Guided if the center is still off. A stick that can’t leave the edge may never finish Range, which then can only be left by turning the controller off. If it stays at the edge, the stick is likely faulty.',
   },
 };
 

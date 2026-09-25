@@ -422,7 +422,7 @@ test('a good result opens the Write modal with the numbers and no warning', asyn
 
 test('an incomplete range disables Write until a complete range runs', async () => {
   const { h, dev } = await connectedApp();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   // Da WS7 un range a movimento zero non si chiude mai: un giro solo, in un
   // verso, basta per "Finish anyway" (manca il cambio di verso) dopo 15 s.
   const from = h.clock.now() + 10;

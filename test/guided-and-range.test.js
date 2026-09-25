@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
 import { buildCalibrationUpload } from '../js/telemetry.js';
 import { VClock } from '../ops/sim/vclock.mjs';
@@ -238,9 +239,54 @@ async function rotateBothWays(h, dev, opts = {}) {
   await h.advance(end2 - h.clock.now() + 100);
 }
 
+test('Range opens on an intro that sends nothing and says the only way out once started', async () => {
+  const { h, A } = await setup();
+  const sent = A.commandLog.length;
+  await h.run(h.click('btn-range'));
+  assert.equal(h.visible('modal-range'), true);
+  assert.equal(A.counts.range, 0, 'no rangeBegin before Start');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.visible('range-intro'), true);
+  assert.equal(h.visible('btn-range-done'), false);
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const intro = html.slice(html.indexOf('id="range-intro"'), html.indexOf('id="range-msg"')).replace(/\s+/g, ' ');
+  assert.match(intro, /no Cancel/);
+  assert.match(intro, /only way out without finishing is to turn the controller off/);
+  assert.doesNotMatch(html, /If you close without rotating/, 'no copy promises a close that does not exist');
+  assert.equal(h.visible('range-intro-pinned'), false);
+  // Cancel ed Esc chiudono senza comandi.
+  await h.click('btn-range-cancel');
+  await h.advance(400);
+  assert.equal(h.visible('modal-range'), false);
+  await h.run(h.click('btn-range'));
+  h.keydown('Escape');
+  await h.advance(400);
+  assert.equal(h.visible('modal-range'), false, 'Escape dismisses the intro');
+  assert.equal(A.commandLog.length, sent);
+  // Start apre la sessione: da lì niente Cancel né Esc.
+  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range-start'));
+  assert.equal(A.counts.range, 1);
+  assert.equal(h.peek().busy, true);
+  assert.equal(h.visible('btn-range-cancel'), false);
+  assert.equal(h.visible('btn-range-done'), true);
+  h.keydown('Escape');
+  assert.equal(h.visible('modal-range'), true);
+});
+
+test('a pinned stick is warned on the Range intro that the range may never complete', async () => {
+  const { h, A } = await setup();
+  h.eval('centerState = { outcome: "centered", worst: 1, pinned: true, committed: true }');
+  await h.run(h.click('btn-range'));
+  assert.equal(h.visible('range-intro-pinned'), true);
+  assert.match(h.$('range-intro-pinned').textContent, /may never reach the opposite side/);
+  assert.match(h.$('range-intro-pinned').textContent, /Guided/);
+  assert.equal(A.counts.range, 0);
+});
+
 test('zero motion never enables Done, not even as Finish anyway', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   for (let s = 0; s < 6; s++) {
     await h.advance(10_000);
     assert.equal(h.$('btn-range-done').disabled, true, `at ${(s + 1) * 10} s`);
@@ -254,7 +300,7 @@ test('zero motion never enables Done, not even as Finish anyway', async () => {
 
 test('a fast rotation both ways, fed from HID with rAF at 60 Hz, gives coverage 100% and a plain Done', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateBothWays(h, A, { secPerTurn: 0.3 });
   await h.advance(200);
   assert.equal(h.$('range-pct').textContent, 'Coverage 100%');
@@ -273,7 +319,7 @@ test('a fast rotation both ways, fed from HID with rAF at 60 Hz, gives coverage 
 
 test('a stored range 1.3× too narrow still reaches 100% coverage', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateBothWays(h, A, { amp: 1.3 * 127.5 });
   await h.advance(200);
   assert.equal(h.$('range-pct').textContent, 'Coverage 100%');
@@ -282,7 +328,7 @@ test('a stored range 1.3× too narrow still reaches 100% coverage', async () => 
 
 test('the check step measures circularity on the new range, then runs the drift test', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateBothWays(h, A);
   await h.run(h.click('btn-range-done'));
   assert.ok(h.peek().rangeCheck, 'the modal stays open on the check step');
@@ -304,7 +350,7 @@ test('the check step measures circularity on the new range, then runs the drift 
 
 test('Finish anyway names the missing directions, needs a confirmation and disables Write', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   // un giro solo, in un verso, e con lo stick destro corto a sinistra
   const end = rotate(h, A, { turns: 1, sticks: [0] });
   touch(A, { stick: 1, t0: h.clock.now() + 10, dur: 3000, tail: 1, at: (t, ax) => {
@@ -339,7 +385,7 @@ test('Finish anyway names the missing directions, needs a confirmation and disab
 
   // un range completo sostituisce quello incompleto e riabilita la scrittura
   await h.advance(4000);
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateBothWays(h, A);
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().rangeWriteLock, null);
@@ -350,7 +396,7 @@ test('a range already closed (code 3) disables Write without setting unsaved', a
   const { h, A } = await setup();
   const command = A.command.bind(A);
   A.command = (id, buf) => { command(id, buf); if (id === 0x82 && buf[2] === 2 && buf[0] === 2) A.response = [0x83, 1, 2, 3]; };
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateBothWays(h, A);
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().unsaved, false);
@@ -455,7 +501,7 @@ async function finishAnywayThenUnplug({ serial = null, backSerial = serial, mode
     await h.advance(2000);
     assert.equal(h.peek().ds5.device, dev);
   }
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   const end = rotate(h, dev, { turns: 1 });
   await h.advance(end - h.clock.now() + 15_500);
   assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');

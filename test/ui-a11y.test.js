@@ -96,7 +96,7 @@ function countWrites(el, prop) {
 
 test('#range-hint (role=status) is written only when its text changes', async () => {
   const h = await connected();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   const writes = countWrites(h.$('range-hint'), 'textContent');
   await h.advance(4000); // stick a riposo: il tick gira ogni 120 ms, il testo non cambia
   const distinctChanges = writes.filter((w, i) => i === 0 || w !== writes[i - 1]).length;
@@ -124,7 +124,7 @@ test('#range-hint on the range check step is written only when its text changes'
   const dev = makeDevice(clock, { seed: 21 });
   const h = await loadApp({ clock, authorized: [dev] });
   await h.advance(5000);
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   const e1 = rotate(h, dev, { turns: 2.2 });
   const e2 = rotate(h, dev, { turns: 1.2, dir: -1, from: e1 });
   await h.advance(e2 - h.clock.now() + 100);

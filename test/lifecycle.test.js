@@ -150,7 +150,7 @@ test('the guided wizard raises busy before its first await and releases it after
 
 test('Range keeps the controller busy until finishRange closes the session', async () => {
   const { h, A } = await setup();
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   assert.equal(h.peek().busy, true);
   assert.equal(h.visible('modal-range'), true);
   h.keydown('Escape');
@@ -313,7 +313,7 @@ test('a missing calibEnd reply rejects within 1.1 s, poisons the controller, rel
   await h.advance(300); // il modale Quick finisce di chiudersi
   await h.click('btn-quick');
   assert.equal(h.visible('modal-quick'), false);
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await h.advance(3000);
   assert.equal(A.commandLog.length, sent);
 });
@@ -392,7 +392,7 @@ test('Range code 3 (already closed) does not set unsaved', async () => {
   const { h, A } = await setup();
   const command = A.command.bind(A);
   A.command = (id, buf) => { command(id, buf); if (id === 0x82 && buf[2] === 2 && buf[0] === 2) A.response = [0x83, 1, 2, 3]; };
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   await rotateSticks(h, A);
   await h.run(h.click('btn-range-done'));
   assert.equal(h.peek().busy, false);
@@ -415,7 +415,7 @@ test('a confirmed unlocked NVS at connect blocks every calibration, but not the 
   assert.ok(h.toasts().some(t => t.startsWith('Memory unlocked: changes may be permanent')));
   await h.click('btn-quick');
   await h.click('btn-wizard');
-  await h.run(h.click('btn-range'));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   assert.equal(h.visible('modal-quick'), false);
   assert.equal(h.visible('modal-wizard'), false);
   assert.equal(h.visible('modal-range'), false);

@@ -15,7 +15,7 @@ import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, quickOutcomeView, rangeOutcomeView,
-  revertAdvice, writeLockFor,
+  revertAdvice, stickTier, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
@@ -711,6 +711,7 @@ function teardown(message = null) {
   oldFirmwareAck = false;
   rangeSession = null;
   rangeCheck = null;
+  rangeIntro = null;
   // Il blocco della scrittura NON decade allo scollegamento: vedi
   // rangeWriteLock. Resta la chiave del controller che l'ha prodotto.
   deviceKey = null;
@@ -2060,19 +2061,75 @@ function resetRangeReadouts(hint) {
   $('range-hint').textContent = hint;
 }
 
-async function openRange() {
+// Passo introduttivo prima di rangeBegin (come Start nel wizard): a sessione
+// aperta non c'è Cancel né Esc, e con zero movimento Done non si sblocca mai,
+// quindi l'utente deve saperlo PRIMA che parta qualunque comando. Qui Cancel ed
+// Esc chiudono senza aver inviato nulla. `rangeIntro` lega lo Start al
+// controller su cui il modale è stato aperto.
+let rangeIntro = null;
+function setRangeIntro(on) {
+  $('range-intro').classList.toggle('hidden', !on);
+  $('range-msg').classList.toggle('hidden', on);
+  $('range-live').classList.toggle('hidden', on);
+  $('btn-range-cancel').classList.toggle('hidden', !on);
+  $('btn-range-start').classList.toggle('hidden', !on);
+  $('btn-range-done').classList.toggle('hidden', on);
+  // Il fuoco iniziale va su Start nell'intro, sul pannello a sessione aperta.
+  $('btn-range-start').toggleAttribute('data-autofocus', on);
+}
+
+// Uno stick incollato al bordo su un asse non raggiunge mai il lato opposto:
+// il range non si completa e "Finish anyway" non si sblocca (minExtent).
+// Finché H12 non dice cosa fa il range a uno stick così, lo si dice prima.
+function knownPinned() {
+  if (centerState?.pinned) return true;
+  return !!lastDriftResult && ['left', 'right'].some(side => stickTier(lastDriftResult, side)?.id === 'pinned');
+}
+
+function openRange() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
+  rangeCheck = null;
+  rangeIntro = { controller: ds5 };
+  const pinned = $('range-intro-pinned');
+  pinned.textContent = knownPinned()
+    ? 'An axis reads at the very edge. A stick stuck there may never reach the opposite side, so this may be '
+      + 'impossible to finish, and turning the controller off would then be the only way out. We haven’t '
+      + 'confirmed yet whether Range helps a stick like this: if you are not sure, use Guided calibration instead.'
+    : '';
+  pinned.classList.toggle('hidden', !knownPinned());
+  setRangeIntro(true);
+  openModal('modal-range');
+}
+
+function cancelRangeIntro() {
+  if (!rangeIntro) return;
+  rangeIntro = null;
+  closeModal('modal-range');
+}
+
+async function startRange() {
+  const intro = rangeIntro;
+  if (!intro || !ds5 || ds5 !== intro.controller || ops.busy || blockedForPowerCycle()) return;
+  rangeIntro = null;
   const controller = ds5;
   const op = ops.beginOp();
   rangeOp = op;
   clearOutcome();
+  $('btn-range-start').disabled = true;
+  $('btn-range-cancel').disabled = true;
   try {
     await controller.rangeBegin();
   } catch (error) {
     ops.endOp(op);
-    if (ds5 === controller) toast(`Failed to start range calibration: ${error.message}`, 5000);
+    if (ds5 === controller) {
+      closeModal('modal-range');
+      toast(`Failed to start range calibration: ${error.message}`, 5000);
+    }
     return;
+  } finally {
+    $('btn-range-start').disabled = false;
+    $('btn-range-cancel').disabled = false;
   }
   if (ds5 !== controller) { ops.endOp(op); return; }
   rangeCheck = null;
@@ -2084,7 +2141,7 @@ async function openRange() {
   done.disabled = true;
   done.textContent = 'Done';
   resetRangeReadouts('Extremes not reached yet');
-  openModal('modal-range');
+  setRangeIntro(false);
 }
 
 let lastMinmax = 0;
@@ -2513,6 +2570,8 @@ $('btn-wizard-escape').addEventListener('click', wizardEscape);
 
 $('btn-range').addEventListener('click', () => (calibrationAllowed() ? openRange() : undefined));
 $('btn-range-done').addEventListener('click', finishRange);
+$('btn-range-start').addEventListener('click', startRange);
+$('btn-range-cancel').addEventListener('click', cancelRangeIntro);
 
 $('btn-flash').addEventListener('click', openFlashModal);
 // Seconda conferma per un risultato a rischio: Write si attiva solo spuntata.
@@ -2660,9 +2719,11 @@ if (navigator.hid && telemetryEnabled() && !noticeSeen()) {
 /* ============================== tastiera ============================== */
 
 // Esc chiude solo ciò che è annullabile senza lasciare il controller in uno
-// stato inconsistente: mai durante una calibrazione (`busy`), mai sul range
-// (una sessione aperta va chiusa con rangeEnd, non abbandonata).
+// stato inconsistente: mai durante una calibrazione (`busy`), e sul range solo
+// nel passo introduttivo, prima di rangeBegin (una sessione aperta va chiusa
+// con rangeEnd, non abbandonata: allora Cancel è nascosto ed Esc non fa nulla).
 const ESC_DISMISS = {
+  'modal-range': 'btn-range-cancel',
   'modal-quick': 'btn-quick-cancel',
   'modal-wizard': 'btn-wizard-cancel',
   'modal-flash': 'btn-flash-cancel',
