@@ -50,6 +50,15 @@ Notable changes to Sense Calibrator. Dates are ISO 8601.
 - Modals animate out as well as in, and `Escape` closes the ones that are safe to dismiss.
 - **The drift verdict morphs between states.** The before/after transition is the point of the tool, and it was a hard cut. Reduced motion keeps this colour transition, since it aids comprehension rather than decorating.
 
+### Precision test
+
+- **The precision test measures the controller, not the player, and a perfect stick now scores 100.** Center uses the same statistics as the drift test on hands-off windows, and its score comes from the same table as the drift labels: 100 at the measurement limit (bytes 127/128), 90 one step of 128 off. The old linear scale capped a perfect stick at 89.
+- **Two numbers instead of one blend.** Calibration (where each stick rests, which calibration can fix) and Hardware (how steady the reading is, which it can't), with one plain sentence. Return and Range are shown for information only until real data calibrates them.
+- **A touch never scores.** Moving windows are dropped, a slowly pushed stick is caught too, and a run with too much movement restarts by itself (at most twice). A skipped or unfinished Return reads "Not measured", never 0.
+- **It feels like a game and explains every wait.** It starts as soon as you let go, lights the direction to flick, rejects a guided release, shows where each flick settled at ×8, fills the range rings as you roll, and says why whenever it waits. About 15 seconds in the simulator's model of a user.
+- **Before and after.** The previous result is kept per controller under a salted hash of the serial that never leaves the browser, and a change counts only when a stick moved by a full step.
+- Sampling follows the controller's input reports, not the screen refresh; a gap or a background tab interrupts the check with a Retry.
+
 ### Privacy
 
 - **Nothing is uploaded before the first-launch notice has been seen.** The notice was a toast that scrolled away while uploads had already started. It is now a banner that must be answered: keeping sharing on sends what was recorded in the meantime, turning it off discards it. Sharing remains on by default.
