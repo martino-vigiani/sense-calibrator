@@ -342,7 +342,7 @@ test('the check step measures circularity on the new range, then runs the drift 
   const sent = A.commandLog.length;
   const end = rotate(h, A, { turns: 1.2 });
   await h.advance(end - h.clock.now() + 200);
-  assert.match(h.$('range-hint').textContent, /^Circularity error: L \d+\.\d% · R \d+\.\d% \(about 7–10% is normal\)$/);
+  assert.match(h.$('range-hint').textContent, /^Circularity error: L \d+% · R \d+% \(about 7–10% is normal\)$/);
   assert.equal(h.$('btn-range-done').textContent, 'Run drift test');
   await h.click('btn-range-done');
   assert.equal(A.commandLog.length, sent);

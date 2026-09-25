@@ -30,12 +30,20 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+/* --notice-space: altezza dell'avviso telemetria finché è a schermo (app.js,
+   syncNoticeSpace). Lo scroll (scrollIntoView del pannello dell'esito, il
+   fuoco da tastiera) non lascia niente sotto l'avviso, e il padding del body
+   permette di scorrere fino in fondo anche l'ultimo contenuto. */
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-bottom: var(--notice-space, 0px);
+}
 
 ::selection { background: #d8ff57; color: var(--ink); }
 
 body {
   margin: 0;
+  padding-bottom: var(--notice-space, 0px);
   font-family: var(--font);
   background: var(--bg);
   color: var(--ink);
@@ -1993,6 +2001,8 @@ a.btn { text-decoration: none; }
 .outcome-card {
   /* scrollIntoView non deve finire sotto la topbar fissa */
   scroll-margin-top: 80px;
+  /* sotto: html riserva già --notice-space, qui solo un po' d'aria */
+  scroll-margin-bottom: 16px;
   padding: 18px 24px;
   margin-bottom: 18px;
   border-color: var(--ink);

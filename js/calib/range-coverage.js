@@ -216,7 +216,9 @@ const DIR_NAMES = { left: 'left', right: 'right', up: 'up', down: 'down' };
 //   complete     → "Done" (range valido)
 //   canFinish    → "Finish anyway" ammesso (dopo unlockMs, e solo se ogni
 //                  direzione di ogni stick supera minExtent)
-//   missing      → elenco leggibile di ciò che manca ("L left", "R: 1 more turn")
+//   missing      → elenco leggibile di ciò che manca ("L left", "R: 1 more turn"),
+//                  a traguardi: cambia solo quando una direzione è raggiunta,
+//                  un giro intero è completato o il verso è stato invertito
 export function rangeStatus(tracker, elapsedMs = 0) {
   const L = stickStatus(tracker.left);
   const R = stickStatus(tracker.right);
@@ -229,8 +231,12 @@ export function rangeStatus(tracker, elapsedMs = 0) {
   missing.push(...missingDirs);
   for (const [tag, st] of [['L', L], ['R', R]]) {
     if (!st.enoughTurns) {
-      const left = Math.max(0.1, tracker.params.minTurns - st.turns);
-      missing.push(`${tag}: ${left.toFixed(1)} more ${left > 1 ? 'turns' : 'turn'}`);
+      // Giri interi, non decimi: il testo finisce in #range-hint (role=status)
+      // e cambia solo quando un giro è completato. Con i decimi cambiava a ogni
+      // tick da 120 ms mentre si ruota, e il lettore di schermo accodava decine
+      // di conteggi già superati.
+      const left = Math.max(1, Math.ceil(tracker.params.minTurns - st.turns - 1e-9));
+      missing.push(`${tag}: ${left} more ${left > 1 ? 'turns' : 'turn'}`);
     }
     if (!st.reversed) missing.push(`${tag}: turn the other way too`);
   }

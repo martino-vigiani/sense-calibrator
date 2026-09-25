@@ -1081,6 +1081,8 @@ function updateWriteLock() {
 
 // Pannello #calib-outcome: sostituisce i toast di 6-7 s, che il 26% degli esiti
 // affidava a un messaggio che spariva. Resta fino alla calibrazione successiva.
+// Uguale a scroll-margin-top di .outcome-card (la topbar fissa).
+const OUTCOME_TOP_MARGIN = 80;
 function showOutcome(view) {
   if (view.center) { centerState = view.center; lastCenterView = view; }
   if (view.range) rangeState = view.range;
@@ -1089,6 +1091,17 @@ function showOutcome(view) {
   el.innerHTML = outcomeHtml(view);
   el.classList.remove('hidden');
   el.scrollIntoView?.({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  // Un pannello più alto dello spazio libero (su telefono, con l'avviso
+  // telemetria aperto) veniva allineato dall'alto e lasciava le azioni, cioè
+  // le uscite (Guided, recovery), sotto l'avviso. Allora si porta in vista la
+  // riga delle azioni: il titolo resta a uno scroll di distanza.
+  const actions = el.querySelector?.('.outcome-actions');
+  if (actions && typeof getComputedStyle === 'function') {
+    const reserved = parseFloat(getComputedStyle(document.documentElement).scrollPaddingBottom) || 0;
+    const room = window.innerHeight - OUTCOME_TOP_MARGIN - reserved;
+    if (el.getBoundingClientRect().height > room)
+      actions.scrollIntoView({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  }
   updateWriteLock();
 }
 
@@ -2299,6 +2312,8 @@ async function startRange() {
 }
 
 let lastMinmax = 0;
+let lastRangeHint = -Infinity;
+const RANGE_HINT_MIN_MS = 1000;
 function updateRangeUI(ts) {
   if (rangeCheck) { updateRangeCheckUI(ts); return; }
   const st = rangeStatus(rangeSession.tracker, ts - rangeSession.startTs);
@@ -2335,7 +2350,15 @@ function updateRangeUI(ts) {
           ? 'To leave without changes, turn the controller off (hold PS for 10 s).'
           : 'The only other way out is to turn the controller off (hold PS for 10 s).');
     } else hint = `Missing: ${st.missing.join(', ')}`;
-    setLive($('range-hint'), hint);
+    // #range-hint è role="status": solo traguardi (rangeStatus conta giri
+    // interi) e al massimo un cambio al secondo, salvo il completamento. Nel
+    // primo giro le quattro direzioni arrivano a ~0.4 s l'una dall'altra: il
+    // testo intermedio si fonde nel successivo invece di accodare annunci.
+    const el = $('range-hint');
+    if (el.textContent !== hint && (st.complete || ts - lastRangeHint >= RANGE_HINT_MIN_MS)) {
+      lastRangeHint = ts;
+      setLive(el, hint);
+    }
   }
 
   const done = $('btn-range-done');
@@ -2467,9 +2490,9 @@ function startRangeCheck() {
 }
 
 // Chiamata a ogni rAF. #range-hint è role="status": come il suggerimento della
-// sessione range passa da setLive (scrive solo se il testo cambia) e dal
-// cancello di 120 ms, altrimenti la riga di circolarità verrebbe riannunciata
-// ~60 volte al secondo mentre i numeri si muovono.
+// sessione range passa da setLive (scrive solo se il testo cambia) e da un
+// cancello di un secondo, altrimenti la riga di circolarità verrebbe
+// riannunciata a ogni tick mentre i numeri si muovono.
 let lastCheckHint = 0;
 function updateRangeCheckUI(ts = performance.now()) {
   const { tracker } = rangeCheck;
@@ -2480,10 +2503,13 @@ function updateRangeCheckUI(ts = performance.now()) {
   const r = circularityRms(tracker.right);
   if (l === null || r === null) return;
   rangeCheck.result = [+l.toFixed(1), +r.toFixed(1)];
-  if (ts - lastCheckHint <= 120) return;
+  if (ts - lastCheckHint < RANGE_HINT_MIN_MS) return;
   lastCheckHint = ts;
   const { min, max } = CIRCULARITY_NORMAL;
-  setLive($('range-hint'), `Circularity error: L ${l.toFixed(1)}% · R ${r.toFixed(1)}% (about ${min}–${max}% is normal)`);
+  // Percentuali intere nella regione live: con i decimi il testo cambiava a
+  // ogni tick mentre i settori si riempiono. Il dato preciso resta in
+  // rangeCheck.result.
+  setLive($('range-hint'), `Circularity error: L ${Math.round(l)}% · R ${Math.round(r)}% (about ${min}–${max}% is normal)`);
   setLive($('btn-range-done'), 'Run drift test');
 }
 
@@ -2884,6 +2910,20 @@ for (const box of consentBoxes) {
   box.addEventListener('change', () => setConsent(box.checked));
 }
 
+// Spazio che l'avviso telemetria occupa in basso, in --notice-space: il CSS lo
+// riserva come scroll-padding-bottom della pagina e come padding in fondo al
+// body. Senza, su telefono il pannello dell'esito scorreva in vista con i suoi
+// bottoni (Guided, recovery) sotto l'avviso, un foglio fisso di ~250 px.
+function syncNoticeSpace() {
+  const el = $('telemetry-notice');
+  const root = document.documentElement;
+  if (!el || !root?.style?.setProperty) return;
+  let space = 0;
+  if (!el.classList.contains('hidden') && typeof getComputedStyle === 'function')
+    space = Math.ceil((el.offsetHeight || 0) + (parseFloat(getComputedStyle(el).bottom) || 0));
+  root.style.setProperty('--notice-space', `${space}px`);
+}
+
 // Avviso una tantum al primo avvio. Banner persistente, non un toast che
 // scompare: è una scelta da fare, e finché non è fatta niente lascia il browser.
 function resolveNotice(keepSharing) {
@@ -2901,6 +2941,7 @@ function resolveNotice(keepSharing) {
   setTimeout(() => {
     el.classList.remove('closing');
     el.classList.add('hidden');
+    syncNoticeSpace();
   }, reduceMotion.matches ? 0 : 180);
 }
 
@@ -2911,6 +2952,11 @@ function resolveNotice(keepSharing) {
 // usare il tool. L'opt-out nel footer resta comunque visibile e funzionante.
 if (navigator.hid && telemetryEnabled() && !noticeSeen()) {
   $('telemetry-notice').classList.remove('hidden');
+  syncNoticeSpace();
+  // L'altezza cambia con la larghezza (testo che va a capo, bottom sheet sotto
+  // i 560 px): si rimisura a ogni cambio di dimensione dell'avviso.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(syncNoticeSpace).observe($('telemetry-notice'));
+  else window.addEventListener('resize', syncNoticeSpace);
   $('btn-notice-ok').addEventListener('click', () => resolveNotice(true));
   $('btn-notice-optout').addEventListener('click', () => resolveNotice(false));
   requestAnimationFrame(() => $('btn-notice-optout').focus());

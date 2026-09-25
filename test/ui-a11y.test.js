@@ -141,6 +141,29 @@ test('#range-hint on the range check step is written only when its text changes'
   assert.ok(resting.length <= 1, `a resting stick keeps the same check hint, got ${resting.length} writes`);
 });
 
+// Review 2: mentre si ruotano gli stick #range-hint annuncia solo traguardi
+// (direzione raggiunta, giro intero, verso invertito, completo), non un
+// contatore di decimi di giro a ogni tick. Model-verified.
+test('#range-hint announces milestones only while the sticks rotate (at most about one change per second)', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { seed: 21 });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  const writes = countWrites(h.$('range-hint'), 'textContent');
+  const t0 = h.clock.now();
+  const e1 = rotate(h, dev, { turns: 2.2, secPerTurn: 1.5 });
+  const e2 = rotate(h, dev, { turns: 1.2, secPerTurn: 1.5, dir: -1, from: e1 });
+  await h.advance(e2 - h.clock.now() + 300);
+  const seconds = (h.clock.now() - t0) / 1000;
+  const changes = writes.filter((w, i) => i === 0 || w !== writes[i - 1]);
+  assert.equal(writes.length, changes.length, 'no identical rewrite');
+  assert.ok(changes.length <= Math.ceil(seconds), `${changes.length} announcements in ${seconds.toFixed(1)} s: ${JSON.stringify(changes)}`);
+  assert.ok(!changes.some(c => /\d\.\d more turn/.test(c)), 'no tenth-of-a-turn counter in the live region');
+  assert.match(h.$('range-hint').textContent, /All extremes reached/);
+  await h.run(h.click('btn-range-done'));
+});
+
 test('setLive skips identical text and identical HTML', async () => {
   const h = await connected();
   const el = h.$('quick-msg');

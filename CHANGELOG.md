@@ -19,11 +19,14 @@ Simulator figures in this section are **model-verified**: the real calibration c
 - **Unsaved changes are tracked from the moment they happen.** The unsaved banner and the "may still be active" reminder are raised as soon as a pass writes to the controller, so unplugging in the middle of a later pass still warns you.
 - **Calibration is blocked when the controller reports its memory as unlocked**, where a "temporary" calibration could become permanent. Firmware built in 2020–2021 asks for confirmation once per connection.
 
+- **A calibration pass left open is caught in more cases.** The page marks a pass as open before it starts it, so reloading or closing the tab in the middle of a pass (or between Guided corners) comes back blocked until the controller is restarted, and never closes the half-finished pass into the controller. A start command that got no reply counts as an open pass too. Restart re-enables calibration only once the controller actually disconnects; if the restart command doesn't reach it, the page says so and keeps Write off.
+
 ### Results and saving
 
 - **The result stays on the page.** A persistent panel shows each stick before → after, in the same terms as the drift test (for example "0.6% · at floor", "1.2% · 1 step"), and what to do next.
 - **Write is disabled** after a result of 15% or more, a stick pinned at the edge, an abandoned pass, an unresponsive controller, or an incomplete or unknown range. **It asks for a second confirmation** (with Cancel focused) after a result worse than the start, worse than an earlier pass, or not verified.
 - **Advice to turn the controller off to discard a calibration appears only when its memory reads "locked", and says it "should" discard it** (H10 not run yet). Whether unplugging the cable alone discards it has not been checked (H11), and the copy says so instead of recommending it.
+- **The drift test no longer says "No calibration needed" while a calibration is waiting to be saved.** A centered retest after calibrating says the result is still temporary and should be written to memory, or, if it isn't better than before, points to the result panel.
 - **A "may still be active" banner after a reload.** If this tab calibrated without saving, a reload says that a temporary calibration may still be on the controller. It stores no device identifier.
 
 ### Guided and Range calibration
@@ -42,7 +45,8 @@ Simulator figures in this section are **model-verified**: the real calibration c
 ### Accessibility
 
 - Modals keep keyboard focus inside them, start on the right control, and never drop focus when the active button is disabled mid-run.
-- Status messages are announced once per change, not on every refresh; errors go to an alert region.
+- Status messages are announced once per change, not on every refresh; errors go to an alert region. While you rotate the sticks in Range, the status line announces milestones (a direction reached, a whole turn, the change of direction) at most about once a second instead of a running turn counter.
+- On a phone, the first-launch sharing notice no longer covers the result panel's buttons: the page keeps room for it at the bottom and scrolls the panel's actions into view.
 - Progress bars expose their value, the guided steps are announced as text, and verdict details are visible text.
 - Text meets 4.5:1 contrast and component edges 3:1.
 

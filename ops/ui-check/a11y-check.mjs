@@ -5,7 +5,8 @@
 //   PLAYWRIGHT=/path/to/node_modules/playwright/index.mjs \
 //     node ops/ui-check/a11y-check.mjs http://localhost:8793 [cartella-screenshot]
 //
-// Per ogni larghezza (375, 1280, 1440), in un Chromium headless con un
+// Per ogni dimensione (375×740, 375×667, 1280, 1440; A11Y_WIDTHS per
+// sceglierne altre), in un Chromium headless con un
 // navigator.hid finto sostenuto da ops/sim/fake-dualsense.mjs e l'avviso
 // telemetria visibile (localStorage vuoto):
 // 1. nessun bottone principale di un modale è coperto dall'avviso
@@ -27,13 +28,16 @@ const fs = await import('node:fs');
 const path = await import('node:path');
 if (shotDir) fs.mkdirSync(shotDir, { recursive: true });
 
-const WIDTHS = [[375, 740], [1280, 800], [1440, 900]];
+const WIDTHS = (process.env.A11Y_WIDTHS ? JSON.parse(process.env.A11Y_WIDTHS) : [[375, 740], [375, 667], [1280, 800], [1440, 900]]);
 const failures = [];
 const check = (cond, what) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`); if (!cond) failures.push(what); };
 
 const browser = await chromium.launch();
 
-function fakeHid() {
+// `bias`: errore di cattura (LSB) dello stick sinistro sull'asse x. Con 25 LSB
+// la prima passata finisce oltre il 15% e la rapida si ferma su 'catastrophic'.
+// Il fake è esposto come window.__fakeDev per muovere gli stick dal test.
+function fakeHid({ bias = 0 } = {}) {
   const listeners = new Map();
   let dev = null;
   const make = async () => {
@@ -41,9 +45,10 @@ function fakeHid() {
     const clock = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id), now: () => performance.now() };
     dev = new FakeDualSense({
       clock, seed: 5,
-      sticks: [{ drift: [2.4, -1.3], noise: 0.3, bias: { axis: 0, B: 0 } }, { drift: [-0.6, 2.9], noise: 0.3, bias: { axis: 0, B: 0 } }],
+      sticks: [{ drift: [2.4, -1.3], noise: 0.3, bias: { axis: 0, B: bias } }, { drift: [-0.6, 2.9], noise: 0.3, bias: { axis: 0, B: 0 } }],
       fw: { sf: 0, cmdMs: [2, 6] }, timing: { period: 4, jitter: 0.3, gapProb: 0, gapMs: [30, 200] },
     });
+    window.__fakeDev = dev;
     return dev;
   };
   const hid = {
@@ -55,7 +60,7 @@ function fakeHid() {
   Object.defineProperty(Navigator.prototype, 'hid', { get: () => hid, configurable: true });
 }
 
-async function freshPage(width, height) {
+async function freshPage(width, height, hidOptions = {}) {
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: 'no-preference' });
   await context.route('**/*', route => {
     const host = new URL(route.request().url()).hostname;
@@ -66,7 +71,7 @@ async function freshPage(width, height) {
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('dialog', d => d.accept());
-  await page.addInitScript(fakeHid);
+  await page.addInitScript(fakeHid, hidOptions);
   await page.goto(base + '/');
   // Hero, prima della connessione: colonne risolte della striscia dei passi e
   // spazio vuoto a destra dell'ultimo passo.
@@ -113,6 +118,21 @@ async function coveredButtons(page, modalId) {
     }
     return out;
   }, modalId);
+}
+
+// Bottoni del pannello dell'esito subito dopo il suo scroll automatico, SENZA
+// riscorrere: con l'avviso a schermo nessuno deve finire sotto l'avviso.
+async function coveredOutcomeButtons(page) {
+  return page.evaluate(() => {
+    const out = [];
+    const buttons = [...document.querySelectorAll('#calib-outcome button')].filter(b => b.checkVisibility());
+    for (const btn of buttons) {
+      const r = btn.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!(hit === btn || btn.contains(hit))) out.push(`${btn.textContent.trim()} ← ${hit?.closest('[id]')?.id || hit?.tagName}`);
+    }
+    return { count: buttons.length, out };
+  });
 }
 
 async function tabCycle(page, modalId, label) {
@@ -193,6 +213,8 @@ try {
         await page.waitForSelector('#banner-unsaved:not(.hidden)', { timeout: 60000 });
         await page.waitForSelector('#modal-quick.hidden', { timeout: 60000 }).catch(() => {});
         await page.waitForTimeout(400);
+        const outcome = await coveredOutcomeButtons(page);
+        check(outcome.out.length === 0, `${label}: outcome panel buttons clear of the notice after the auto-scroll (${outcome.count} buttons${outcome.out.length ? '; ' + outcome.out.join('; ') : ''})`);
         // anello di fuoco bianco sul banner scuro
         await page.keyboard.press('Tab');
         await page.evaluate(() => document.getElementById('btn-flash').focus({ focusVisible: true }));
@@ -245,6 +267,33 @@ try {
           setTimeout(() => { obs.disconnect(); resolve({ mutations, changes, distinct: seen.size }); }, 4000);
         }));
         check(m.mutations === m.changes, `${label}: #range-hint mutated only on real changes (${m.mutations} mutations, ${m.changes} changes, ${m.distinct} distinct strings in 4 s)`);
+        // Stick in rotazione (1.5 s a giro, 2.2 giri e poi 1.2 nell'altro
+        // verso): la regione live annuncia solo traguardi, al più ~1 al secondo.
+        const r = await page.evaluate(() => new Promise(resolve => {
+          const dev = window.__fakeDev;
+          const el = document.getElementById('range-hint');
+          const secPerTurn = 1.5;
+          const spin = (turns, dir, from) => {
+            const dur = turns * secPerTurn * 1000;
+            for (const stick of [0, 1]) {
+              dev.touches.push({
+                stick, t0: from, dur, tail: 1,
+                at: (t, ax) => { const a = dir * 2 * Math.PI * (t - from) / (secPerTurn * 1000); return 127.5 * (ax === 0 ? Math.cos(a) : Math.sin(a)); },
+              });
+            }
+            return from + dur;
+          };
+          const t0 = performance.now() + 10;
+          const end = spin(1.2, -1, spin(2.2, 1, t0));
+          const texts = [];
+          const obs = new MutationObserver(() => { if (texts.at(-1) !== el.textContent) texts.push(el.textContent); });
+          obs.observe(el, { childList: true, characterData: true, subtree: true });
+          setTimeout(() => { obs.disconnect(); resolve({ texts, seconds: (performance.now() - t0) / 1000, final: el.textContent }); }, end - t0 + 600);
+        }));
+        const limit = Math.ceil(r.seconds);
+        check(r.texts.length <= limit, `${label}: #range-hint changed ${r.texts.length} times in ${r.seconds.toFixed(1)} s of rotation (limit ${limit})`);
+        check(!r.texts.some(t => /\d\.\d more turn/.test(t)), `${label}: no tenth-of-a-turn counter in #range-hint`);
+        check(/All extremes reached/.test(r.final), `${label}: rotation completes the range (${r.final})`);
       },
     });
 
@@ -260,6 +309,30 @@ try {
         await shot(page, `${width}-game-running.png`);
       },
     });
+
+    // Rapida catastrofica (≥15%) con l'avviso ancora aperto: le due uscite
+    // (Guided, recovery) non devono finire sotto l'avviso dopo lo scroll.
+    {
+      const { page, context, errors } = await freshPage(width, height, { bias: 25 });
+      const label = `${width}px catastrophic outcome`;
+      try {
+        check(await page.isVisible('#telemetry-notice'), `${label}: telemetry notice is showing`);
+        await page.evaluate(() => document.getElementById('btn-quick').click());
+        await page.waitForSelector('#modal-quick:not(.hidden)');
+        await page.evaluate(() => document.getElementById('btn-quick-go').click());
+        await page.waitForSelector('#calib-outcome:not(.hidden) button', { timeout: 60000 });
+        await page.waitForSelector('#modal-quick.hidden', { state: 'attached', timeout: 60000 });
+        await page.waitForTimeout(800); // scroll smooth
+        const title = await page.textContent('#calib-outcome .outcome-title');
+        check(/Don.t save/i.test(title), `${label}: the run ended catastrophic (${title})`);
+        const outcome = await coveredOutcomeButtons(page);
+        check(outcome.count >= 2 && outcome.out.length === 0, `${label}: ${outcome.count} outcome buttons clear of the notice after the auto-scroll${outcome.out.length ? ' (' + outcome.out.join('; ') + ')' : ''}`);
+        await shot(page, `${width}-catastrophic-outcome.png`);
+        check(errors.length === 0, `${label}: no page errors${errors.length ? ' (' + errors.join(' | ') + ')' : ''}`);
+      } finally {
+        await context.close();
+      }
+    }
   }
 } finally {
   await browser.close();
