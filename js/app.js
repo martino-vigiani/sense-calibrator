@@ -1032,6 +1032,87 @@ function setUnsaved(v) {
   // un salvataggio riuscito: uno scollegamento non prova che sia stata persa.
   if (v) markTabUnsaved(true);
   updateWriteLock();
+  if (v) {
+    // Ogni nuovo commit riporta l'attenzione sul passo di salvataggio, ma al
+    // frame dopo: showOutcome, chiamato subito dopo, deve aver già scritto
+    // l'esito sopra, e con un modale aperto si aspetta la sua chiusura.
+    saveRevealPending = true;
+    requestAnimationFrame(revealSaveStep);
+  } else {
+    saveRevealPending = false;
+    saveAnnounced = false;
+    setLive($('save-step-live'), '');
+  }
+  syncSaveReminder();
+}
+
+/* --------- ultimo passo: Write, dove l'utente sta guardando --------- */
+
+// Dal test con un DualSense vero: dopo la rapida l'unico invito a salvare era
+// un banner in fondo alla pagina, sotto tutte le azioni, e veniva mancato. Ora
+// il blocco sta subito sotto l'esito e, quando compare, scorre in vista, fa un
+// solo impulso e si annuncia una volta; un promemoria fisso resta finché non
+// si salva. Nessuna di queste cose apre il modale di Write da sola.
+let saveRevealPending = false;
+let saveAnnounced = false;
+let saveStepInView = false;
+
+function revealSaveStep() {
+  // Con un modale aperto (wizard su "Done", passo di verifica del range) il
+  // blocco è dietro il backdrop: ci pensa closeModal alla chiusura.
+  if (!saveRevealPending || !unsaved || activeModalEl()) return;
+  saveRevealPending = false;
+  const el = $('banner-unsaved');
+  const lock = currentWriteLock();
+  // Con Write spento non si scorre né si richiama l'occhio: il pannello
+  // dell'esito spiega cosa fare (e le sue uscite, Guided e recovery, restano
+  // in vista), e il blocco sotto dice perché non si può salvare.
+  if (lock.mode !== 'disabled') {
+    // Esito e passo insieme, se ci stanno: il passo da solo in cima nasconde
+    // sotto la topbar il risultato che dà senso al salvataggio.
+    const behavior = reduceMotion.matches ? 'auto' : 'smooth';
+    const outcome = $('calib-outcome');
+    const both = !outcome.classList.contains('hidden') && el.getBoundingClientRect && typeof getComputedStyle === 'function'
+      ? el.getBoundingClientRect().bottom - outcome.getBoundingClientRect().top
+      : Infinity;
+    const reserved = typeof getComputedStyle === 'function'
+      ? parseFloat(getComputedStyle(document.documentElement).scrollPaddingBottom) || 0 : 0;
+    if (both <= window.innerHeight - OUTCOME_TOP_MARGIN - reserved - 16) outcome.scrollIntoView?.({ block: 'start', behavior });
+    else el.scrollIntoView?.({ block: 'nearest', behavior });
+    if (!reduceMotion.matches) {
+      el.classList.remove('save-step-cue');
+      void el.offsetWidth; // riavvia l'animazione se era già stata applicata
+      el.classList.add('save-step-cue');
+    }
+  }
+  if (!saveAnnounced) {
+    saveAnnounced = true;
+    setLive($('save-step-live'), lock.mode === 'disabled'
+      ? 'Calibration not saved. Write is off for this result.'
+      : 'Last step: write the calibration to the controller memory. Until you save, it should be lost when the controller turns off.');
+  }
+}
+
+function syncSaveReminder() {
+  const show = unsaved && !saveStepInView && !activeModalEl();
+  $('save-reminder').classList.toggle('hidden', !show);
+}
+
+function goToSaveStep() {
+  const el = $('banner-unsaved');
+  el.scrollIntoView?.({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  const btn = $('btn-flash');
+  (btn.disabled ? el : btn).focus?.({ preventScroll: true });
+}
+
+// Il promemoria compare solo quando il blocco è fuori vista. Senza
+// IntersectionObserver (DOM finto dei test) resta visibile finché si è in
+// `unsaved`: meglio un promemoria di troppo che nessuno.
+if (typeof IntersectionObserver === 'function') {
+  new IntersectionObserver(entries => {
+    saveStepInView = entries[entries.length - 1].isIntersecting;
+    syncSaveReminder();
+  }, { rootMargin: '-64px 0px 0px 0px' }).observe($('banner-unsaved'));
 }
 
 /* --------- esito persistente e blocco di Write (js/ui/outcome.js) --------- */
@@ -1069,6 +1150,23 @@ function currentWriteLock() {
 function updateWriteLock() {
   const lock = currentWriteLock();
   $('btn-flash').disabled = lock.mode === 'disabled';
+  // Il blocco di salvataggio segue il blocco di Write: spento, cambia aspetto
+  // (chiaro, bordo tratteggiato) e titolo, così la sua evidenza non fa mai
+  // sembrare cliccabile un Write bloccato; il motivo resta in #banner-lock.
+  $('banner-unsaved').dataset.lock = lock.mode;
+  $('save-step-kicker').textContent = lock.mode === 'disabled' ? 'Not ready to save' : 'Last step';
+  $('save-step-title').textContent = lock.mode === 'disabled' ? 'Saving is off for this result' : 'Save it to the controller';
+  // Prima → dopo in forma corta (solo la percentuale): il dettaglio dei passi
+  // del reticolo è già nel pannello dell'esito subito sopra.
+  const pct = text => String(text).split(' · ')[0];
+  const numbers = (lastCenterView?.sticks ?? []).filter(r => r.after)
+    .map(r => `${r.side} ${r.before ? `${pct(r.before)} → ` : ''}${pct(r.after)}`);
+  $('save-step-numbers').textContent = numbers.join('   ·   ');
+  $('save-step-numbers').classList.toggle('hidden', numbers.length === 0);
+  $('save-reminder-text').textContent = lock.mode === 'disabled'
+    ? 'Not saved · Write is off'
+    : lock.mode === 'guarded' ? 'Not saved yet · check the result first' : 'Calibration not saved yet';
+  $('btn-save-reminder').textContent = lock.mode === 'disabled' ? 'See why' : 'Write to memory';
   const note = $('banner-lock');
   const shown = lock.reasons.filter(r => r.mode === lock.mode);
   if (lock.mode === 'allowed' || !shown.length) {
@@ -2735,6 +2833,8 @@ function updateBackgroundInert() {
   document.querySelector('main')?.toggleAttribute('inert', hasModal);
   document.querySelector('footer')?.toggleAttribute('inert', hasModal);
   $('telemetry-notice')?.toggleAttribute('inert', hasModal);
+  // Il promemoria non resta sopra il backdrop di un modale.
+  syncSaveReminder();
 }
 
 function openModal(id) {
@@ -2769,6 +2869,8 @@ function closeModal(id) {
     const another = activeModalEl();
     watchModalFocus(another);
     if (!another) previous?.focus?.({ preventScroll: true });
+    // Un commit arrivato a modale aperto: il passo di salvataggio si mostra ora.
+    if (!another) revealSaveStep();
   }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
 }
 
@@ -2924,6 +3026,15 @@ $('btn-range-start').addEventListener('click', startRange);
 $('btn-range-cancel').addEventListener('click', cancelRangeIntro);
 
 $('btn-flash').addEventListener('click', openFlashModal);
+// Dal promemoria: con Write spento porta al blocco che spiega perché, e
+// altrimenti apre lo stesso modale di Write, con le stesse guardie.
+$('btn-save-reminder').addEventListener('click', () => {
+  if (currentWriteLock().mode === 'disabled') goToSaveStep();
+  else openFlashModal();
+});
+$('banner-unsaved').addEventListener('animationend', event => {
+  if (event.animationName === 'saveCue') $('banner-unsaved').classList.remove('save-step-cue');
+});
 // Seconda conferma per un risultato a rischio: Write si attiva solo spuntata.
 $('flash-ack').addEventListener('change', () => {
   if (!$('flash-warning').classList.contains('hidden')) $('btn-flash-go').disabled = !$('flash-ack').checked;

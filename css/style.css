@@ -2035,6 +2035,98 @@ a.btn { text-decoration: none; }
 .banner-lock { display: block; margin-top: 4px; font-weight: 600; opacity: 1 !important; }
 .banner .btn-primary:disabled { opacity: 0.45; }
 
+/* Ultimo passo: salvare. Sotto l'esito, un gradino più grande del banner di
+   prima, con il bottone come azione principale della pagina in quel momento. */
+.save-step {
+  align-items: center;
+  gap: 16px 28px;
+  padding: 22px 24px;
+  scroll-margin-top: 80px;
+  scroll-margin-bottom: 16px;
+}
+.save-step:focus { outline: none; }
+.save-step:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.save-step-body { flex: 1 1 320px; min-width: 0; }
+.save-step-kicker {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+.save-step-title { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.save-step-text { margin: 0; font-size: 14px; opacity: 0.8; max-width: 560px; }
+.save-step-numbers { margin: 10px 0 0; font-family: var(--mono); font-size: 13px; }
+.save-step .banner-lock { font-size: 13.5px; margin-top: 10px; }
+.btn-save { padding: 15px 30px; font-size: 15.5px; }
+/* Un solo impulso quando compare: una leggera scala e un anello che si
+   allarga e svanisce. Niente ripetizioni (il reduced-motion lo spegne). */
+.save-step-cue { animation: saveCue 0.7s var(--ease-out) 1; }
+@keyframes saveCue {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(10, 10, 10, 0.35); }
+  35% { transform: scale(1.015); box-shadow: 0 0 0 5px rgba(10, 10, 10, 0.2); }
+  100% { transform: none; box-shadow: 0 0 0 14px rgba(10, 10, 10, 0); }
+}
+/* Write spento: superficie chiara e bordo tratteggiato, bottone a contorno.
+   Il blocco resta visibile per dire perché, ma niente lo fa sembrare
+   un'azione pronta. */
+.save-step[data-lock="disabled"] {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px dashed var(--edge);
+}
+.save-step[data-lock="disabled"] .btn-primary:disabled {
+  background: transparent;
+  color: var(--ink-3);
+  border-color: var(--edge);
+  opacity: 1;
+  cursor: not-allowed;
+}
+.save-step[data-lock="disabled"] .btn:focus-visible { outline-color: var(--ink); }
+@media (max-width: 720px) {
+  .save-step { padding: 18px; }
+  .save-step-title { font-size: 18px; }
+  .save-step .btn-save { width: 100%; }
+}
+
+/* Promemoria fisso finché la calibrazione non è scritta e il blocco sopra è
+   fuori vista; sopra l'avviso telemetria quando c'è, sotto i modali (50). */
+.save-reminder {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--notice-space, 0px) + max(16px, env(safe-area-inset-bottom)));
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(560px, calc(100vw - 32px));
+  padding: 10px 10px 10px 18px;
+  background: var(--ink);
+  color: #fff;
+  border-radius: var(--radius);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45);
+  font-size: 14px;
+  font-weight: 600;
+  animation: reminderIn 0.28s var(--ease-out);
+}
+@keyframes reminderIn {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.save-reminder-text { flex: 1; min-width: 0; }
+/* Hover su fondo scuro: quello generico di .btn-primary (#292929) spegneva il
+   bottone bianco proprio sotto il puntatore appena chiuso il modale. */
+@media (hover: hover) and (pointer: fine) {
+  .banner .btn-primary:hover:not(:disabled),
+  .save-reminder .btn:hover:not(:disabled) { background: #e9e9e6; color: var(--ink); }
+}
+.save-reminder .btn { flex-shrink: 0; background: #fff; color: var(--ink); }
+.save-reminder .btn:focus-visible { outline-color: #fff; }
+/* Il promemoria non deve coprire l'ultimo contenuto della pagina. */
+#view-device:has(> .save-reminder:not(.hidden)) { padding-bottom: 104px; }
+
 /* Misuratore: pallino colorato più testo, così chi non distingue i colori
    legge comunque lo stato. */
 .handsoff {
@@ -2093,4 +2185,5 @@ a.btn { text-decoration: none; }
      passaggio "prima/dopo". Toglierlo peggiora la comprensione. */
   .verdict { transition-duration: 0.26s !important; }
   .progress i { transition: none !important; }
+  .save-step-cue { animation: none !important; }
 }

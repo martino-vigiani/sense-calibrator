@@ -262,6 +262,22 @@
          finché non parte la calibrazione successiva, al posto dei toast. -->
     <div id="calib-outcome" class="card outcome-card hidden" role="status" aria-live="polite" data-tone="ok"></div>
 
+    <!-- Ultimo passo: la calibrazione resta nella RAM del controller finché non
+         viene scritta. Sta subito sotto l'esito, dove l'utente sta guardando;
+         in fondo alla pagina (dov'era) veniva mancato. #save-reminder la
+         richiama quando è fuori vista. -->
+    <section id="banner-unsaved" class="banner save-step hidden" data-lock="allowed" tabindex="-1" aria-labelledby="save-step-title">
+      <div class="save-step-body">
+        <p id="save-step-kicker" class="save-step-kicker">Last step</p>
+        <h3 id="save-step-title" class="save-step-title">Save it to the controller</h3>
+        <p class="save-step-text">Until you save, the calibration should be lost when the controller turns off.</p>
+        <p id="save-step-numbers" class="save-step-numbers hidden"></p>
+        <span id="banner-lock" class="banner-lock hidden"></span>
+      </div>
+      <button id="btn-flash" class="btn btn-primary btn-save" aria-describedby="banner-lock">Write to memory</button>
+    </section>
+    <p id="save-step-live" class="sr-only" role="status"></p>
+
     <div class="grid-sticks">
       <div class="card stick-card">
         <div class="stick-head">
@@ -338,13 +354,11 @@
       </div>
     </div>
 
-    <div id="banner-unsaved" class="banner hidden">
-      <div>
-        <b>Calibration active but temporary.</b>
-        <span>It's lost when the controller powers off: write it to memory to make it permanent.</span>
-        <span id="banner-lock" class="banner-lock hidden"></span>
-      </div>
-      <button id="btn-flash" class="btn btn-primary">Write to memory</button>
+    <!-- Promemoria compatto finché la calibrazione non è scritta e il blocco
+         sopra è fuori vista (app.js, syncSaveReminder). -->
+    <div id="save-reminder" class="save-reminder hidden" role="region" aria-label="Unsaved calibration">
+      <span id="save-reminder-text" class="save-reminder-text">Calibration not saved yet</span>
+      <button id="btn-save-reminder" class="btn btn-sm" type="button">Write to memory</button>
     </div>
 
     <details class="log-panel">
