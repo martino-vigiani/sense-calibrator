@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runQuick, QUICK_DEFAULTS } from '../js/calib/quick.js';
+import { DS5 } from '../js/ds5.js';
 import { decideBeforeStart } from '../js/calib/quick-policy.js';
 import { STICK_LSB, measureOffset, waitForStable } from '../js/calib/sampling.js';
 import { DRIFT_MOVE_SPREAD } from '../js/calib/measure.js';
@@ -399,4 +400,131 @@ test('app: a stalled pass leaves unsaved set and blocks every command until the 
   await h.run(h.click('btn-flash-go'));
   assert.equal(dev.commandLog.length, sent, 'no command reaches the controller');
   assert.equal(h.peek().busy, false);
+});
+
+// ------------------------------------------- sessione aperta e commit (review)
+
+// Dispositivo WebHID sceneggiato per il VERO DS5: `reply(op)` dà i 4 byte di
+// 0x83 per l'ultimo comando 0x82 (op 1 begin, 2 end, 3 sample).
+class ScriptedHid {
+  constructor(clock, reply) {
+    this.clock = clock;
+    this.opened = true;
+    this.collections = [{ inputReports: [{ reportId: 1 }], featureReports: [] }];
+    this.sent = [];
+    this.reply = reply;
+  }
+  sendFeatureReport(id, buf) { this.sent.push({ id, bytes: [...buf] }); return new Promise(r => this.clock.setTimeout(r, 2)); }
+  receiveFeatureReport() {
+    const b = new Uint8Array(63);
+    b.set(this.reply(this.sent.at(-1).bytes[0]));
+    return new Promise(r => this.clock.setTimeout(() => r(new DataView(b.buffer)), 3));
+  }
+}
+const REST = { center: { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } } };
+const DRIFTING_RESULT = { left: { offset: 5, noise: 0.2, x: 0.05, y: 0 }, right: { offset: 0.6, noise: 0.2, x: 0.006, y: 0 } };
+async function scriptedRun(reply) {
+  const clock = new VClock();
+  const dev = new ScriptedHid(clock, reply);
+  const ds5 = new DS5(dev, null, { timers: clock });
+  const phasesSeen = [];
+  const res = await clock.run(runQuick({
+    controller: ds5,
+    clock: { sleep: ms => new Promise(r => clock.setTimeout(r, ms)) },
+    onProgress: e => { if (e.phase) phasesSeen.push(e.phase); },
+    sampler: { waitForStable: async () => REST, measureOffset: async () => DRIFTING_RESULT },
+  }));
+  const ends = dev.sent.filter(s => s.id === 0x82 && s.bytes[0] === 2).length;
+  return { res, ends, phasesSeen };
+}
+
+test('a calibBegin repair that committed makes a later in-pass error committed, with a power cycle', async () => {
+  let begins = 0;
+  const { res, ends, phasesSeen } = await scriptedRun(op => {
+    if (op === 1) return ++begins === 1 ? [0x83, 0, 0, 0] : [0x83, 1, 1, 1]; // sessione rimasta aperta
+    if (op === 2) return [0x83, 1, 1, 2]; // calibEnd di riparazione: COMMIT
+    return [0x83, 1, 1, 3]; // calibSample rifiutato
+  });
+  assert.equal(ends, 1, 'only the repair calibEnd');
+  assert.equal(res.outcome, 'error');
+  assert.equal(res.committed, true, 'the repair calibEnd wrote RAM');
+  assert.equal(res.needsPowerCycle, true, 'the second session is still open');
+  assert.ok(phasesSeen.includes('committed'), 'the page is told at once');
+});
+
+test('an HID error inside an open session needs a power cycle but is not a commit', async () => {
+  const { res, ends } = await scriptedRun(op => (op === 1 ? [0x83, 1, 1, 1] : [0x83, 1, 1, 3]));
+  assert.equal(ends, 0);
+  assert.equal(res.outcome, 'error');
+  assert.equal(res.committed, false);
+  assert.equal(res.needsPowerCycle, true);
+});
+
+test('an error before calibBegin succeeds leaves no session open', async () => {
+  const { res } = await scriptedRun(() => [0x83, 0, 0, 0]); // begin rifiutato due volte, riparazione rifiutata
+  assert.equal(res.outcome, 'error');
+  assert.equal(res.committed, false);
+  assert.equal(res.needsPowerCycle, undefined);
+});
+
+test('app: an HID error mid-pass blocks every command until a power cycle and never says nothing changed', async () => {
+  const clock = new VClock();
+  let n = 0;
+  const faults = [({ op }) => (op === 'sample' && ++n === 5 ? new Error('NotAllowedError: Failed to write the feature report.') : null)];
+  const dev = makeDevice(clock, { drift: [[6, -3], [-0.1, 0.4]], faults });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  await h.advance(1500);
+  assert.deepEqual([dev.counts.begin, dev.counts.sample, dev.counts.end], [1, 4, 0]);
+  assert.equal(h.peek().unsaved, false, 'an open session is not a commit');
+  assert.equal(h.$('btn-flash').disabled, true);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.doesNotMatch(panel, /Nothing was changed/);
+  assert.match(panel, /left mid-calibration/);
+  const sent = dev.commandLog.length;
+  await h.click('btn-quick');
+  assert.equal(h.visible('modal-quick'), false, 'Quick refuses until the controller is power-cycled');
+  await h.click('btn-wizard');
+  assert.equal(h.visible('modal-wizard'), false);
+  assert.equal(dev.commandLog.length, sent);
+});
+
+test('app: unsaved is raised as soon as a Quick pass commits, so an unplug in pass 2 still warns', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[6, -3], [-0.1, 0.4]], sf: 1.5 });
+  const session = new Map();
+  const h = await loadApp({ clock, authorized: [dev], session });
+  await h.advance(5000);
+  let unsavedInPass2 = null;
+  onCommand(dev, 'begin', 2, () => {
+    unsavedInPass2 = h.peek().unsaved;
+    clock.setTimeout(() => { dev.unplug(); h.hid.fire('disconnect', dev); }, 50);
+  });
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  await h.advance(2000);
+  assert.equal(dev.counts.end, 1);
+  assert.equal(unsavedInPass2, true, 'unsaved during pass 2');
+  assert.equal(session.get('sense-unsaved-in-tab'), '1', 'the tab flag survives a reload');
+  assert.ok(h.toasts().some(t => /never written to memory/.test(t)), 'the unsaved-on-exit notice is shown');
+});
+
+test('app: a calibEnd that never answers shows the poisoned copy, not an earlier pass or a raw HID message', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[6, -3], [-0.1, 0.4]] });
+  const send = dev.sendFeatureReport.bind(dev);
+  dev.sendFeatureReport = (id, buf) => (id === 0x82 && buf[0] === 2 && buf[2] === 1 ? new Promise(() => {}) : send(id, buf));
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  await h.advance(1500);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.match(panel, /stopped responding/);
+  assert.match(panel, /may or may not have been applied/);
+  assert.doesNotMatch(panel, /earlier pass|sendFeatureReport|timed out|Restart|save/i);
+  assert.equal(h.peek().unsaved, true, 'a timed-out commit may have landed');
+  assert.equal(h.$('btn-flash').disabled, true);
 });

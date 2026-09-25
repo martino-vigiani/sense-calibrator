@@ -247,6 +247,41 @@ test('an incomplete or already-closed range disables Write; a complete one does 
   assert.match(rangeOutcomeView({ incomplete: true }).title, /Range incomplete/);
 });
 
+test('a timed-out (poisoned) controller gets its own copy: no earlier pass, no save, no Restart, no raw HID text', () => {
+  const timeout = Object.assign(new Error('Controller not responding (sendFeatureReport 0x82 timed out)'), { timeout: true });
+  const poisoned = Object.assign(new Error('The controller stopped responding.'), { poisoned: true });
+  const views = [
+    quickOutcomeView({ outcome: 'error', error: timeout, committed: true, worst: null }),
+    quickOutcomeView({ outcome: 'error', error: timeout, committed: false, worst: null }),
+    quickOutcomeView({ outcome: 'error', error: poisoned, committed: false, worst: null }),
+    guidedOutcomeView({ before: summary([6, 0.555]), error: timeout, committed: true }),
+    rangeOutcomeView({ error: timeout, committed: true }),
+  ];
+  for (const view of views) {
+    const text = textOf(view);
+    assert.equal(view.title, 'The controller stopped responding');
+    assert.match(text, /may or may not have been applied/);
+    assert.match(text, /hold PS for 10 s/);
+    assert.doesNotMatch(text, /earlier pass|sav(e|ing)|Restart|Nothing was changed|timed out|sendFeatureReport/i);
+    assert.equal(view.tone, 'bad');
+  }
+});
+
+test('an error that left the session open never says nothing changed and asks for a power cycle', () => {
+  const error = new Error('Sampling failed (0x83010103).');
+  const quick = quickOutcomeView({ outcome: 'error', error, committed: false, needsPowerCycle: true, worst: null });
+  assert.doesNotMatch(textOf(quick), /Nothing was changed/);
+  assert.match(textOf(quick), /left mid-calibration/);
+  assert.match(textOf(quick), /0x83010103\)\.(?!\.)/, 'one full stop after the controller message');
+  assert.ok(quick.center, 'the page keeps a center state for the Write lock');
+  const guided = guidedOutcomeView({ before: summary([6, 0.555]), error, committed: false, leftOpen: true });
+  assert.doesNotMatch(textOf(guided), /Nothing was changed/);
+  assert.match(textOf(guided), /left mid-calibration/);
+  const repaired = quickOutcomeView({ outcome: 'error', error, committed: true, worst: null });
+  assert.doesNotMatch(textOf(repaired), /earlier pass|Nothing was changed/);
+  assert.equal(writeLockFor({ center: repaired.center }).mode, 'guarded');
+});
+
 test('the panel HTML escapes controller and browser text', () => {
   const view = quickOutcomeView({ outcome: 'error', error: new Error('<img src=x onerror=alert(1)>'), committed: false, worst: null });
   const html = outcomeHtml(view);

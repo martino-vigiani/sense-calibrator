@@ -197,6 +197,24 @@ const ACTION = {
   recovery: { id: 'recovery', label: 'Try one recovery pass' },
 };
 
+// Il controller ha smesso di rispondere (timeout HID, DS5 avvelenato): la
+// risposta del comando appeso non è mai arrivata, quindi non si sa se una
+// calibrazione sia stata applicata. Nessuna "passata precedente", nessun
+// salvataggio (Write è spento) e nessun Restart (rifiuta un DS5 avvelenato):
+// l'unica uscita è spegnere e ricollegare. Il messaggio HID grezzo resta nel
+// log, non nel pannello.
+export const POISONED_OUTCOME = Object.freeze({
+  title: 'The controller stopped responding',
+  lines: Object.freeze([
+    'The controller stopped responding. A calibration may or may not have been applied. Turn it off (hold PS for 10 s) and reconnect it, then run the drift test.',
+  ]),
+});
+export const isPoisonError = error => error?.timeout === true || error?.poisoned === true;
+
+// Sessione di calibrazione lasciata aperta da un errore a metà passata: come
+// dopo uno stallo, il controller va spento prima di qualunque altro comando.
+const LEFT_OPEN = 'The controller was left mid-calibration. Turn it off (hold PS for 10 s) and reconnect it before calibrating or saving again.';
+
 function routeFor(worst, pinned) {
   if (pinned) return [ACTION.range, ACTION.guided];
   if (isNum(worst) && worst >= GUIDED_ONLY_MIN) return [ACTION.guided];
@@ -229,13 +247,18 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
       'Turn the controller off (hold PS for 10 s) and reconnect it before calibrating or saving again.',
     ]);
   }
+  if (outcome === 'error' && isPoisonError(run.error)) {
+    return view('bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines], [], { center: { ...center, committed: true }, poisoned: true });
+  }
   if (outcome === 'error') {
     const message = run.error?.message ? String(run.error.message) : 'unknown error';
-    return view(committed ? 'bad' : 'warn', 'Calibration failed', [
-      `The controller reported: ${message}.`,
-      committed ? 'An earlier pass was already applied and its result wasn’t verified. Run the drift test before deciding to save.' : 'Nothing was changed on the controller.',
-      'If it keeps failing, restart the controller.',
-    ], [ACTION.retest], { center: committed ? center : null });
+    const leftOpen = run.needsPowerCycle === true;
+    return view(committed || leftOpen ? 'bad' : 'warn', 'Calibration failed', [
+      `The controller reported: ${message.replace(/\.+$/, '')}.`,
+      committed ? 'A calibration was already applied to the controller and its result wasn’t verified. Run the drift test before deciding to save.'
+        : (leftOpen ? null : 'Nothing was changed on the controller.'),
+      leftOpen ? LEFT_OPEN : 'If it keeps failing, restart the controller.',
+    ], leftOpen ? [] : [ACTION.retest], { center: committed || leftOpen ? { ...center, committed: true } : null });
   }
   // Rete di sicurezza indipendente dall'esito: 15% o più non è mai un successo.
   if (outcome === 'catastrophic' || (isNum(worst) && worst >= QUICK_CATASTROPHIC_PCT)) {
@@ -311,7 +334,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
 // Esito della procedura guidata: prima e dopo misurati dal wizard, stessa
 // classificazione (e stessi margini) della rapida, con la partenza come unico
 // riferimento. `error` se la procedura è fallita dopo un commit.
-export function guidedOutcomeView({ before = null, after = null, error = null, committed = true } = {}, { nvStatus = null } = {}) {
+export function guidedOutcomeView({ before = null, after = null, error = null, committed = true, leftOpen = false } = {}, { nvStatus = null } = {}) {
   const beforeWorst = worstOfSummary(before);
   const worst = worstOfSummary(after);
   const pinned = pinnedFromSummary(after);
@@ -321,12 +344,17 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   const view = (outcome, tone, title, lines, actions = [], extra = {}) => ({
     kind: 'guided', outcome, tone, title, lines: lines.filter(Boolean), sticks, actions, center: { ...center, outcome }, repair: false, ...extra,
   });
+  if (error && isPoisonError(error)) {
+    return view('error', 'bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines], [],
+      { center: { ...center, outcome: 'error', worst: null, committed: true }, poisoned: true });
+  }
   if (error) {
-    return view('error', committed ? 'bad' : 'warn', 'Guided calibration failed', [
-      `The controller reported: ${error.message ?? error}.`,
-      committed ? 'Part of it may have been applied. Run the drift test before deciding to save.' : 'Nothing was changed on the controller.',
-      'If it keeps failing, restart the controller.',
-    ], [ACTION.retest], { center: committed ? { ...center, outcome: 'error', worst: null } : null });
+    return view('error', committed || leftOpen ? 'bad' : 'warn', 'Guided calibration failed', [
+      `The controller reported: ${String(error.message ?? error).replace(/\.+$/, '')}.`,
+      committed ? 'Part of it may have been applied. Run the drift test before deciding to save.'
+        : (leftOpen ? null : 'Nothing was changed on the controller.'),
+      leftOpen ? LEFT_OPEN : 'If it keeps failing, restart the controller.',
+    ], leftOpen ? [] : [ACTION.retest], { center: committed || leftOpen ? { ...center, outcome: 'error', worst: null, committed: true } : null });
   }
   if (!isNum(worst)) {
     return view('unverified', 'warn', 'Guided calibration applied, not verified', [
@@ -371,9 +399,10 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
 export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, error = null, committed = false } = {}) {
   const range = { incomplete, alreadyClosed: alreadyClosed || (!!error && committed) };
   const view = (tone, title, lines, actions = []) => ({ kind: 'range', outcome: 'range', tone, title, lines, sticks: [], actions, range, repair: false });
+  if (error && isPoisonError(error)) return view('bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines]);
   if (error) {
     return view(committed ? 'bad' : 'warn', 'Range calibration failed', [
-      `The controller reported: ${error.message ?? error}.`,
+      `The controller reported: ${String(error.message ?? error).replace(/\.+$/, '')}.`,
       committed ? 'Its result is unknown, so Write is off until you run Range calibration again.' : 'Nothing was changed on the controller.',
     ], [ACTION.range]);
   }

@@ -1451,18 +1451,28 @@ async function quickCalibrate() {
   $('btn-quick-cancel').disabled = true;
   let blockedMessage = null;
   let run = null;
-  const fail = (session, error, committed) => {
+  // Vero appena la pagina ha alzato `unsaved` per un commit di QUESTA corsa
+  // (evento 'committed' di runQuick): il teardown di uno scollegamento
+  // successivo lo vede e avvisa da solo.
+  let committedShown = false;
+  const fail = (session, error, committed, needsPowerCycle = false) => {
+    // Sessione lasciata aperta a metà passata: il controller va spento prima di
+    // qualunque altro comando, come dopo uno stallo (il prossimo calibBegin
+    // sarebbe rifiutato e la riparazione committerebbe il parziale).
+    if (needsPowerCycle && ds5 === controller) powerCycleController = controller;
     if (!ops.isCurrent(op)) { recordSessionOnce(session); return; }
     ops.endOp(op);
     // La RAM del controller è cambiata se una passata precedente ha già chiuso
     // con calibEnd (un errore alla passata 2 non la annulla), oppure se la
     // riparazione di calibBegin ha committato prima che la calibrazione partisse.
+    // Una sessione solo aperta non ha cambiato la RAM: niente `unsaved`, ma
+    // Write e ogni comando restano bloccati (showOutcome → updateWriteLock).
     if (committed) setUnsaved(true);
     session.aborted = 'error';
     session.err = String(error.message || error).slice(0, 120);
     recordSessionOnce(session);
     closeModal('modal-quick');
-    showOutcome(quickOutcomeView({ outcome: 'error', error, committed, worst: null, session }, { nvStatus: lastNvStatus }));
+    showOutcome(quickOutcomeView({ outcome: 'error', error, committed, needsPowerCycle, worst: null, session }, { nvStatus: lastNvStatus }));
     log(`Quick calibration error: ${error.message}`);
   };
   try {
@@ -1475,6 +1485,17 @@ async function quickCalibrate() {
       force,
       params: recovery ? { maxPasses: 1 } : {},
       onProgress: event => {
+        if (event.phase === 'committed') {
+          // La RAM è appena cambiata (calibEnd, o riparazione di calibBegin):
+          // `unsaved` si alza ORA, non a fine ciclo, così uno scollegamento
+          // nella passata successiva trova lo stato giusto (avviso all'uscita,
+          // segno della scheda). Un ciclo orfano segna almeno la scheda.
+          if (ops.isCurrent(op) && ds5 === controller) {
+            setUnsaved(true);
+            committedShown = true;
+          } else markTabUnsaved(true);
+          return;
+        }
         if (!ops.isCurrent(op)) return; // ciclo orfano: la UI è di un'altra operazione
         if (event.bar !== undefined) bar.style.width = event.bar + '%';
         if (event.phase === 'stalled' || event.phase === 'resumed') {
@@ -1492,8 +1513,15 @@ async function quickCalibrate() {
     const { session, outcome } = run;
     if (outcome === 'disconnected') {
       // Il teardown ha già chiuso i modali e avvisato: la UI ora può essere di
-      // un altro controller, quindi qui si registra soltanto.
+      // un altro controller, quindi qui si registra soltanto. Se però la RAM
+      // del controller scollegato è cambiata senza che la pagina lo sapesse
+      // (commit segnalato solo dall'errore), il segno della scheda e l'avviso
+      // all'uscita mancano: li si dà qui. Che lo scollegamento la scarti è H11.
       recordSessionOnce(session);
+      if (run.committed && !committedShown) {
+        markTabUnsaved(true);
+        toast(unsavedOnExitMessage(lastNvStatus), 10000);
+      }
       log('Quick calibration interrupted: controller disconnected.');
       return;
     }
@@ -1521,7 +1549,7 @@ async function quickCalibrate() {
       return;
     }
     if (outcome === 'error') {
-      fail(session, run.error, run.committed);
+      fail(session, run.error, run.committed, run.needsPowerCycle === true);
       return;
     }
     recordSessionOnce(session);
@@ -1820,10 +1848,18 @@ async function wizardNext() {
     // Scollegato: il teardown ha già chiuso tutto e il controller nuovo non
     // eredita né il modale né lo stato "non salvato" di questo.
     if (gone) return;
+    // Errore dopo un calibBegin riuscito e prima del calibEnd: la sessione
+    // resta aperta nel firmware con 1–3 angoli. Come per lo stallo della
+    // rapida, niente altri comandi finché il controller non viene spento: il
+    // prossimo calibBegin sarebbe rifiutato e la sua riparazione (calibEnd)
+    // committerebbe quel parziale.
+    const leftOpen = w.sessionOpen === true;
+    if (leftOpen && ds5 === w.controller) powerCycleController = w.controller;
+    // Una sessione solo aperta non ha cambiato la RAM: il blocco basta.
     if (error.committed || w.committed) setUnsaved(true);
     closeModal('modal-wizard');
     showOutcome(guidedOutcomeView(
-      { before: w.before ?? null, error, committed: error.committed === true || !!w.committed },
+      { before: w.before ?? null, error, committed: error.committed === true || !!w.committed, leftOpen },
       { nvStatus: lastNvStatus },
     ));
     log(`Wizard error: ${error.message}`);

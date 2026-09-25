@@ -149,17 +149,20 @@ export const QUICK_DEFAULTS = Object.freeze({
 //               passa comunque dalla tenuta entro il 15%.
 //   onProgress  riceve { phase, pass?, worst?, noise? } e { bar } per la UI.
 //               Fasi: preflight, noisy, held, pass, unstable, stalled,
-//               resumed, verify, next
+//               resumed, verify, next, committed (la RAM è appena cambiata:
+//               un calibEnd riuscito o una riparazione di calibBegin)
 //   log         messaggi per il pannello log
 //   params      override di QUICK_DEFAULTS
 //   meta        { board, fw } per la sessione di telemetria
 //   sampler     { waitForStable, measureOffset } già legati a source/clock:
 //               solo per i test che vogliono sceneggiare le attese
 //
-// Non lancia: un errore HID diventa { outcome: 'error', error, committed }.
-// `committed` è vero se la RAM del controller può essere cambiata (almeno un
-// calibEnd riuscito, una riparazione di calibBegin che ha committato, o una
-// sessione lasciata aperta da uno stallo).
+// Non lancia: un errore HID diventa { outcome: 'error', error, committed,
+// needsPowerCycle? }. `committed` è vero se la RAM del controller può essere
+// cambiata (almeno un calibEnd riuscito, una riparazione di calibBegin che ha
+// committato, o una sessione lasciata aperta da uno stallo). `needsPowerCycle`
+// è vero quando il ciclo esce con una sessione aperta (stallo, oppure errore o
+// scollegamento fra calibBegin e calibEnd).
 export async function runQuick({
   controller,
   source,
@@ -182,9 +185,17 @@ export async function runQuick({
   // verifica e la tenuta fra le due.
   const reserveMs = p.endDelayMs + p.verifyAttempts * p.verifyMs + p.holdTimeoutMs;
   const samplingDeadline = sessionStart + p.maxSessionMs - reserveMs;
-  // Vero dal primo calibEnd riuscito: da lì la RAM del controller contiene una
-  // calibrazione nuova, e un errore in una passata successiva non la annulla.
+  // Vero dal primo calibEnd riuscito (o da una riparazione di calibBegin che ha
+  // committato): da lì la RAM del controller contiene una calibrazione nuova, e
+  // un errore in una passata successiva non la annulla.
   let committedAny = false;
+  // Vero fra un calibBegin riuscito e il calibEnd riuscito della stessa
+  // passata. Se il ciclo esce in questo intervallo (errore HID, scollegamento)
+  // la sessione resta aperta nel firmware come dopo uno stallo: il prossimo
+  // calibBegin sarebbe rifiutato e la riparazione in DS5.calibBegin
+  // committerebbe il parziale con meno di samplesPerPass campioni. Quindi
+  // `needsPowerCycle`, come per 'stalled'.
+  let sessionOpen = false;
   const session = {
     kind: 'quick',
     t: new Date().toISOString(),
@@ -319,7 +330,14 @@ export async function runQuick({
       onProgress({ phase: 'pass', pass });
       onProgress({ bar: base + 3 });
 
-      await controller.calibBegin();
+      // DS5.calibBegin ripara una sessione rimasta aperta con un calibEnd, che
+      // committa: la RAM è cambiata anche se questa passata poi fallisce.
+      const begun = await controller.calibBegin();
+      sessionOpen = true;
+      if (begun?.committed) {
+        committedAny = true;
+        onProgress({ phase: 'committed', pass });
+      }
       ensureCurrent();
       // (2) Campioni in sessione. Riferimento = la prima finestra stabile presa
       // DOPO calibBegin; ogni campione richiede stabilità E centro entro
@@ -397,7 +415,11 @@ export async function runQuick({
       await clock.sleep(p.endDelayMs);
       ensureCurrent();
       await controller.calibEnd();
+      sessionOpen = false;
       committedAny = true;
+      // Subito, non a fine ciclo: se la passata successiva si interrompe
+      // (scollegamento, errore) la pagina deve già sapere che la RAM è cambiata.
+      onProgress({ phase: 'committed', pass });
       ensureCurrent();
 
       // (4) Verifica nel frame calibrato (la sessione è chiusa): una misura
@@ -513,15 +535,20 @@ export async function runQuick({
     // con calibEnd (un errore alla passata 2 non la annulla), oppure se la
     // riparazione di calibBegin ha committato prima che la calibrazione partisse.
     const committed = committedAny || error?.committed === true;
+    // Sessione lasciata aperta (errore fra calibBegin e calibEnd, compreso un
+    // calibEnd fallito): come uno stallo, il controller va spento prima di
+    // qualunque altro comando. `committed` resta quello vero: aprire una
+    // sessione non cambia la RAM.
+    const extra = sessionOpen ? { needsPowerCycle: true } : {};
     // Un controller scollegato (o sostituito) non è un errore dell'algoritmo:
     // l'errore HID del cavo staccato arriva spesso prima dell'evento
     // `disconnect`, quindi si guarda anche isCurrent().
     if (error?.disconnected || !isCurrent()) {
       session.aborted = 'disconnected';
-      return { session, outcome: 'disconnected', error, committed };
+      return { session, outcome: 'disconnected', error, committed, ...extra };
     }
     session.aborted = 'error';
     session.err = String(error?.message || error).slice(0, 120);
-    return { session, outcome: 'error', error, committed };
+    return { session, outcome: 'error', error, committed, ...extra };
   }
 }

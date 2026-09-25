@@ -174,6 +174,31 @@ test('a calibBegin repair that committed keeps unsaved raised when a later step 
   assert.match(h.$('calib-outcome').innerHTML, /Guided calibration failed/);
 });
 
+test('an HID error inside the open wizard session requires a power cycle before any other command', async () => {
+  const { h, A } = await setup();
+  let n = 0;
+  A.faults.push(({ op }) => (op === 'sample' && ++n === 2 ? new Error('sample refused') : null));
+  await startWizard(h);
+  for (const c of CORNERS.slice(0, 2)) {
+    await moveToCorner(h, A, c);
+    await h.run(h.click('btn-wizard-next'));
+  }
+  assert.deepEqual([A.counts.begin, A.counts.end], [1, 0], 'session left open, nothing committed');
+  assert.equal(h.peek().unsaved, false, 'an open session is not a commit');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.$('btn-flash').disabled, true);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.doesNotMatch(panel, /Nothing was changed/);
+  assert.match(panel, /left mid-calibration/);
+  await h.advance(1000);
+  const sent = A.commandLog.length;
+  await h.click('btn-quick');
+  assert.equal(h.visible('modal-quick'), false);
+  await h.click('btn-wizard');
+  assert.equal(h.visible('modal-wizard'), false);
+  assert.equal(A.commandLog.length, sent, 'the partial session is never committed by a repair');
+});
+
 test('an unplug during the wizard wait sends nothing to the next controller and shows no failure toast', async () => {
   const { h, A, B } = await setup({ devices: 2 });
   await startWizard(h);
