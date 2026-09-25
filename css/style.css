@@ -2049,6 +2049,8 @@ a.btn { text-decoration: none; }
 /* #d48a00 era 2.8:1 su bianco: sotto il 3:1 dei segnali grafici */
 .handsoff[data-level="amber"]::before { background: #b07300; }
 .handsoff[data-level="red"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
+/* Tenuta nota alla pagina (il misuratore vede solo il movimento): come il rosso. */
+.handsoff[data-level="held"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
 .battery-hint { margin: 8px 0 0; }
 
 .flash-numbers { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13.5px; }

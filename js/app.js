@@ -9,7 +9,7 @@ import {
   DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
 } from './calib/measure.js';
-import { measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
+import { STICK_LSB, measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
@@ -20,7 +20,7 @@ import {
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+  WIZARD_DEFAULTS, captureRestReference, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 
@@ -827,18 +827,42 @@ function onInputReport(event) {
 
 // Misuratore nei modali Quick e Guided (js/ui/hands-off.js), alimentato dagli
 // input report come ogni altra misura: niente timer, niente rAF.
+// Il misuratore vede solo il movimento: un pollice fermo è "Not moving". Quando
+// la pagina SA già di una tenuta il livello diventa `held` ("Stick held: let
+// go"), così il misuratore non contraddice il messaggio del modale.
 const handsOff = createHandsOffMeter();
+// Rapida: vero dalle fasi held/stalled/unstable (e dal preflight fallito) fino
+// al prossimo segno che gli stick sono stati lasciati (pass, resumed, verify,
+// next, un campione preso).
+let quickHoldKnown = false;
 function handsOffTarget() {
-  if (!$('modal-quick').classList.contains('hidden')) return ['quick-handsoff', HANDS_OFF_LABELS.quick];
-  if (!$('modal-wizard').classList.contains('hidden')) return ['wizard-handsoff', HANDS_OFF_LABELS.guided];
+  if (!$('modal-quick').classList.contains('hidden')) return ['quick-handsoff', HANDS_OFF_LABELS.quick, () => quickHoldKnown];
+  if (!$('modal-wizard').classList.contains('hidden')) return ['wizard-handsoff', HANDS_OFF_LABELS.guided, () => wizardHoldKnown(wizard)];
   return null;
+}
+// Wizard: (1) nella fase degli angoli uno stick è ancora sull'angolo (stessa
+// proiezione e stessa soglia del tracker, `cornerDot`); (2) dopo un timeout
+// del gate, uno stick è fuori dalla tolleranza del riferimento in sessione
+// (o, senza riferimento, oltre il raggio di plausibilità). Nessuna soglia nuova.
+function wizardHoldKnown(w) {
+  if (!w) return false;
+  if (w.phase === 'corner') {
+    const p = cornerProjection(sticks, WIZARD_CORNERS[w.corner]);
+    if (Math.max(p.left, p.right) >= WIZARD_DEFAULTS.cornerDot) return true;
+  }
+  if (!w.gateTimedOut) return false;
+  if (!w.ref) return Math.hypot(sticks.lx, sticks.ly) > WIZARD_DEFAULTS.refRadius || Math.hypot(sticks.rx, sticks.ry) > WIZARD_DEFAULTS.refRadius;
+  const tol = w.escaped ? Math.max(WIZARD_DEFAULTS.escapeLsb * STICK_LSB, w.tol ?? 0) : w.tol;
+  return ['lx', 'ly', 'rx', 'ry'].some(a => Math.abs(sticks[a] - w.ref[a]) > tol);
 }
 function feedHandsOff(now) {
   const target = handsOffTarget();
   if (!target) return;
-  renderHandsOff($(target[0]), handsOff.push(sticks, now), target[1]);
+  const level = handsOff.push(sticks, now);
+  renderHandsOff($(target[0]), target[2]() ? 'held' : level, target[1]);
 }
 function resetHandsOff() {
+  quickHoldKnown = false;
   handsOff.reset();
   renderHandsOff($('quick-handsoff'), 'unknown', HANDS_OFF_LABELS.quick);
   renderHandsOff($('wizard-handsoff'), 'unknown', HANDS_OFF_LABELS.guided);
@@ -1446,6 +1470,7 @@ async function quickCalibrate() {
   resetQuickModal();
   quickStallCancelable = false;
   quickCancelRequested = false;
+  quickHoldKnown = false;
   const msg = $('quick-msg');
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
@@ -1485,6 +1510,10 @@ async function quickCalibrate() {
       force,
       params: recovery ? { maxPasses: 1 } : {},
       onProgress: event => {
+        if (ops.isCurrent(op)) {
+          if (event.phase === 'held' || event.phase === 'stalled' || event.phase === 'unstable') quickHoldKnown = true;
+          else if (event.bar !== undefined || ['pass', 'resumed', 'verify', 'next'].includes(event.phase)) quickHoldKnown = false;
+        }
         if (event.phase === 'committed') {
           // La RAM è appena cambiata (calibEnd, o riparazione di calibBegin):
           // `unsaved` si alza ORA, non a fine ciclo, così uno scollegamento
@@ -1543,6 +1572,8 @@ async function quickCalibrate() {
     }
     if (outcome === 'preflight') {
       quickPreflightBlocked = true;
+      // Il modale dice "Release both sticks": il misuratore non deve dire il contrario.
+      if (ops.isCurrent(op)) quickHoldKnown = true;
       recordSessionOnce(session);
       blockedMessage = 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
       log('Quick calibration not started: centered, stable stick readings are required.');
@@ -1648,6 +1679,7 @@ const wizardGone = () => Object.assign(new Error('Controller disconnected'), { g
 // dopo `escapeAfter` timeout compare l'uscita esplicita.
 function wizardTimeout(w, why) {
   w.timeouts += 1;
+  w.gateTimedOut = true;
   const offerEscape = !w.escaped && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
   $('btn-wizard-escape').classList.toggle('hidden', !offerEscape);
   const escapeHint = offerEscape
@@ -1672,6 +1704,7 @@ async function wizardCaptureRef(w, ensure, isCancelled) {
     return;
   }
   w.ref = ref;
+  w.gateTimedOut = false;
   w.phase = 'corner';
   w.corner = 0;
   w.step = 1;
@@ -1709,6 +1742,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   await w.controller.calibSample();
   ensure();
   w.samples += 1;
+  w.gateTimedOut = false;
   $('btn-wizard-escape').classList.add('hidden');
   if (i < WIZARD_CORNERS.length - 1) {
     w.corner = i + 1;

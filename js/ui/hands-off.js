@@ -1,8 +1,9 @@
 'use strict';
 
-// Misuratore "mani lontane" per i modali Quick e Guided (e per il minigioco
+// Misuratore di movimento per i modali Quick e Guided (e per il minigioco
 // di WS8): verde, ambra o rosso a seconda di quanto si muovono gli stick
-// negli ultimi HANDS_OFF_WINDOW_MS.
+// negli ultimi HANDS_OFF_WINDOW_MS. Non sa se una mano tiene lo stick fermo:
+// per questo la pagina può imporre il livello `held` (vedi HANDS_OFF_LABELS).
 //
 // Il nucleo è puro: riceve i campioni dagli input report HID (mai da timer o
 // rAF, vedi CLAUDE.md) con il loro timestamp, e decide il livello. Il
@@ -91,21 +92,30 @@ export function createHandsOffMeter({
   };
 }
 
-// Testo per livello. Due varianti: in Quick gli stick non vanno mai toccati;
-// nel wizard si muovono di proposito, quindi il misuratore dice solo se sono
-// tornati fermi prima di premere Continue.
+// Testo per livello. Il misuratore vede SOLO il movimento: un pollice che
+// tiene lo stick fermo ha spread 0 ed è "verde". Quindi i testi descrivono il
+// movimento ("Not moving"), mai "mani lontane" o "a riposo", che
+// rassicurerebbero proprio durante l'abuso che il misuratore deve segnalare.
+// Il livello `held` non viene dal misuratore: lo impone la pagina quando SA
+// già di una tenuta (fasi held/stalled/unstable della rapida, preflight
+// fallito, stick ancora sull'angolo o timeout del gate nel wizard). Due
+// varianti: in Quick gli stick non vanno mai toccati; nel wizard si muovono di
+// proposito, quindi il misuratore dice solo se si sono fermati.
+export const HANDS_OFF_HELD = 'Stick held: let go';
 export const HANDS_OFF_LABELS = Object.freeze({
   quick: Object.freeze({
     unknown: 'Waiting for the controller…',
-    green: 'Hands off: steady',
-    amber: 'Slight movement: keep still',
-    red: 'Movement detected: let go of the sticks',
+    green: 'Not moving',
+    amber: 'Moving a little: keep still',
+    red: 'Moving: let go of the sticks',
+    held: HANDS_OFF_HELD,
   }),
   guided: Object.freeze({
     unknown: 'Waiting for the controller…',
-    green: 'Sticks at rest',
-    amber: 'Settling…',
-    red: 'Sticks moving',
+    green: 'Not moving',
+    amber: 'Moving a little…',
+    red: 'Moving',
+    held: HANDS_OFF_HELD,
   }),
 });
 

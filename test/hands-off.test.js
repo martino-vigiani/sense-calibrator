@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HANDS_OFF_AMBER_MAX, HANDS_OFF_GREEN_MAX, HANDS_OFF_LABELS, HANDS_OFF_RED_HOLD_MS, createHandsOffMeter, renderHandsOff,
+  HANDS_OFF_AMBER_MAX, HANDS_OFF_GREEN_MAX, HANDS_OFF_HELD, HANDS_OFF_LABELS, HANDS_OFF_RED_HOLD_MS, createHandsOffMeter, renderHandsOff,
 } from '../js/ui/hands-off.js';
 import { DRIFT_MOVE_SPREAD } from '../js/calib/measure.js';
 import { QUICK_STABLE_SPREAD } from '../js/calib/sampling.js';
@@ -93,7 +93,7 @@ test('the renderer touches the DOM only when the level changes', () => {
   assert.equal(renderHandsOff(el, 'green'), false);
   assert.equal(renderHandsOff(el, 'red', HANDS_OFF_LABELS.guided), true);
   assert.equal(el.dataset.level, 'red');
-  assert.equal(el.textContent, 'Sticks moving');
+  assert.equal(el.textContent, 'Moving');
 });
 
 test('in the page, a touch during Quick turns the meter red from the HID reports', async () => {
@@ -115,4 +115,84 @@ test('in the page, a touch during Quick turns the meter red from the HID reports
   assert.match(h.$('quick-handsoff').textContent, /let go of the sticks/);
   await h.advance(2000);
   assert.equal(h.$('quick-handsoff').dataset.level, 'green', 'back to green once released');
+});
+
+// ------------------------------------------------ tenuta nota alla pagina
+
+test('the labels describe movement only, never "hands off" or "at rest"', () => {
+  for (const labels of Object.values(HANDS_OFF_LABELS)) {
+    for (const text of Object.values(labels)) assert.doesNotMatch(text, /hands? off|at rest|steady/i, text);
+    assert.equal(labels.held, HANDS_OFF_HELD);
+  }
+});
+
+test('Quick: a held stick that blocks the preflight turns the meter to "Stick held", not green', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[6, -3], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.click('btn-quick');
+  dev.touches.push({ stick: 0, t0: clock.now(), dur: 120_000, tail: 50, amp: [40, 0] }); // pollice fermo al 31%
+  await h.advance(600);
+  assert.equal(h.$('quick-handsoff').dataset.level, 'green', 'a still thumb is "Not moving" for the meter alone');
+  assert.equal(h.$('quick-handsoff').textContent, 'Not moving');
+  await h.run(h.click('btn-quick-go'));
+  assert.equal(h.peek().quickPreflightBlocked, true);
+  assert.match(h.$('quick-msg').innerHTML, /Release both sticks/);
+  await h.advance(100);
+  assert.equal(h.$('quick-handsoff').dataset.level, 'held');
+  assert.equal(h.$('quick-handsoff').textContent, HANDS_OFF_HELD);
+});
+
+test('Quick: a thumb held still in pass 1 turns the meter to "Stick held" once the page sees it', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[6, -3], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  let touch = null;
+  const command = dev.command.bind(dev);
+  let samples = 0;
+  dev.command = (id, buf) => {
+    command(id, buf);
+    if (id === 0x82 && buf[0] === 3 && ++samples === 2) {
+      touch = { stick: 0, t0: clock.now() + 10, dur: 120_000, tail: 50, amp: [30, 0] };
+      dev.touches.push(touch);
+    }
+  };
+  await h.click('btn-quick');
+  const running = h.click('btn-quick-go');
+  let held = false;
+  for (let i = 0; i < 200 && !held; i++) {
+    await h.advance(100);
+    held = h.$('quick-handsoff').dataset.level === 'held';
+  }
+  assert.ok(touch, 'the thumb went on during pass 1');
+  assert.ok(held, 'the meter says the stick is held');
+  assert.equal(h.$('quick-handsoff').textContent, HANDS_OFF_HELD);
+  touch.dur = Math.max(0, clock.now() - touch.t0); // lascia lo stick
+  await h.advance(3000);
+  assert.notEqual(h.$('quick-handsoff').dataset.level, 'held', 'cleared once a sample is taken again');
+  await h.run(running);
+});
+
+test('Guided: sticks still held at the corner never read as at rest', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { seed: 21 });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.click('btn-wizard');
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.peek().wizard.phase, 'corner');
+  const t0 = clock.now() + 20;
+  for (const stick of [0, 1]) dev.touches.push({ stick, t0, dur: 120_000, tail: 40, amp: [-0.7 * 120, -0.7 * 120] });
+  await h.advance(800);
+  const waiting = h.click('btn-wizard-next');
+  await h.advance(1000);
+  assert.match(h.$('wizard-msg').innerHTML, /Waiting for both sticks to rest/);
+  assert.equal(h.$('wizard-handsoff').dataset.level, 'held');
+  assert.equal(h.$('wizard-handsoff').textContent, HANDS_OFF_HELD);
+  await h.advance(6000); // timeout del gate: nessun campione
+  assert.equal(dev.counts.sample, 0);
+  assert.equal(h.$('wizard-handsoff').dataset.level, 'held');
+  await h.run(waiting);
 });
