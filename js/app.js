@@ -2446,8 +2446,12 @@ $('btn-flash-cancel').addEventListener('click', () => closeModal('modal-flash'))
 $('btn-flash-go').addEventListener('click', doFlash);
 
 // Test di precisione: il gioco legge solo gli stick (deps), nessun comando HID.
+// I campioni arrivano per input report (stickSource), mai per frame; il
+// seriale serve solo alla chiave locale salata di "Previous" (game.js).
 const game = initGame({
   getSticks: () => sticks,
+  subscribe: fn => stickSource.subscribe(() => fn(sticks, performance.now())),
+  getSerial: () => deviceInfo?.serial ?? null,
   isAvailable: () => !!ds5 && !ops.busy,
   onReport: res => recordEvent('game', res),
   showModal: () => openModal('modal-game'),

@@ -36,7 +36,7 @@ Before Quick calibration sends any command, both sticks must stay within 15% of 
 | **Quick calibration** | Automatically corrects a stable center offset | Temporary until saved |
 | **Guided calibration** | Recalibrates the center with a four-corner procedure | Temporary until saved |
 | **Range calibration** | Recalibrates the full travel of both sticks | Temporary until saved |
-| **Precision test** | Compares center hold, edge reach and snap back before and after | No |
+| **Precision test** | About 15 seconds: a calibration score (where each stick rests) and a hardware score (how steady it is), plus return and range for information, compared with the same controller's previous result | No |
 
 The public tool stays focused on testing and calibration. Sensitivity Finder and Gameplay Lab are experimental and remain hidden behind the local preview mode while they are developed and tested.
 

@@ -74,17 +74,16 @@ test('the telemetry notice sits below modals and goes inert while one is open', 
 
 test('the precision test intro lists the phases the game actually runs', async () => {
   const html = await readFile(indexPath, 'utf8');
-  const game = await readFile(new URL('../js/game.js', import.meta.url), 'utf8');
+  const { GAME_PHASES } = await import('../js/game.js');
   const intro = html.match(/<ol class="game-trials">([\s\S]*?)<\/ol>/)?.[1];
   assert.ok(intro, 'game intro list should exist');
 
   const listed = [...intro.matchAll(/<b>([^<:]+):<\/b>/g)].map(match => match[1]);
-  // L'ultimo titolo ('Precision test') è quello di reset, non una prova.
-  const phases = [...game.matchAll(/elPhase\.textContent = '([^']+)'/g)]
-    .map(match => match[1])
-    .filter(title => title !== 'Precision test');
-  assert.deepEqual(listed, ['Center', 'Reach', 'Snap-back']);
-  assert.deepEqual(listed, phases);
+  assert.deepEqual(listed, ['Center', 'Return', 'Range']);
+  assert.deepEqual(listed, [...GAME_PHASES]);
+  // anche il segnapassi in alto usa gli stessi nomi, nello stesso ordine
+  const steps = html.match(/<ol id="game-steps"[^>]*>([\s\S]*?)<\/ol>/)?.[1];
+  assert.deepEqual([...steps.matchAll(/<li[^>]*>([^<]+)<\/li>/g)].map(m => m[1]), [...GAME_PHASES]);
 });
 
 /* ---------------- WS6: accessibilità (WCAG AA) ---------------- */
@@ -174,7 +173,7 @@ test('the precision test dialog has a stable name and focuses the result', async
   // #game-phase cambia testo a ogni prova: il nome del dialogo no.
   assert.match(tagOf(html, 'modal-game'), /aria-labelledby="game-dialog-title"/);
   assert.match(html, /<h2 id="game-dialog-title" class="sr-only">Precision test<\/h2>/);
-  assert.match(game, /<div class="game-overall" tabindex="-1">/);
+  assert.match(game, /<div class="game-overall" tabindex="-1"[^>]*>/);
   assert.match(game, /elReport\.querySelector\('\.game-overall'\)\?\.focus\(/);
 });
 

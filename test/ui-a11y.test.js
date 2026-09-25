@@ -121,10 +121,12 @@ test('setLive skips identical text and identical HTML', async () => {
   assert.deepEqual(html, ['Pass <b>1</b>', 'Pass <b>2</b>']);
 });
 
-test('game.js rewrites #game-instr during the flick phase only when the count changes', async () => {
+test('game.js writes its live regions only when the text changes', async () => {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../js/game.js', import.meta.url), 'utf8');
-  const body = src.slice(src.indexOf('function tickSnap('), src.indexOf('function tickSnap(') + 1200);
-  assert.match(body, /if \(elInstr\.textContent !== instr\) elInstr\.textContent = instr;/);
-  assert.doesNotMatch(body, /elInstr\.textContent = `/);
+  // La vista del test è ricalcolata a ogni frame: #game-instr e #game-why
+  // (role="status") passano solo dal writer con il confronto.
+  assert.match(src, /const setText = \(el, value\) => \{ if \(el && el\.textContent !== value\) el\.textContent = value; \};/);
+  assert.doesNotMatch(src, /elInstr\.textContent\s*=/);
+  assert.doesNotMatch(src, /elWhy\.textContent\s*=/);
 });

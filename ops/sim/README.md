@@ -32,6 +32,8 @@ input reports use while a calibration session is open).
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
 | `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them |
 | `range-sweep.mjs` | WS7: range coverage of one synthetic turn (8-bit quantized, stored range 0.8–1.4× off, 60/250 Hz), old rule against `js/calib/range-coverage.js`. No telemetry |
+| `precision-user.mjs` | WS8: a model controller (8-bit lattice, noise, spring return, square-ish gate) and a model user who reacts to the precision test's view (lets go, flicks toward the lit mark, rolls the sticks, presses Retry/Skip) driving the real `createPrecisionTest` at ~250 Hz. Scenarios: brush, slow push, endless hold, report gap, hidden tab, no flicks. It also runs the dead-wait instrument (a stall over 2 s without a `why`). Reaction times are assumptions: durations are model-verified |
+| `precision-discrimination.mjs` | WS8: Center score medians per drift tier and the 1-LSB sensitivity, on the real "before" values (`SENSE_TELEMETRY`); prints aggregates only |
 | `legacy/load-app.mjs` | The pre-refactor harness: extracts the monolithic `quickCalibrate` from `git show 40a08ed:js/app.js` |
 
 ## Data
