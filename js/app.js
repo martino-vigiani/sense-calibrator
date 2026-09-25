@@ -715,7 +715,7 @@ function teardown(message = null) {
   rangeCheck = null;
   rangeIntro = null;
   // Il blocco della scrittura NON decade allo scollegamento: vedi
-  // rangeWriteLock. Resta la chiave del controller che l'ha prodotto.
+  // rangeWriteLocks. Resta la chiave del controller che l'ha prodotto.
   deviceKey = null;
   if (adopting) adopting.aborted = true;
   clearTimeout(autoDriftTimer);
@@ -1041,15 +1041,17 @@ function setUnsaved(v) {
 // Quick riuscito non ripara un range incompleto, e viceversa.
 let centerState = null;
 let rangeState = null;
-// Blocco del range (WS7, vedi setRangeWriteLock): motivo e chiave del controller.
-let rangeWriteLock = null;
-let rangeWriteLockKey = null;
+// Blocchi del range (WS7, vedi setRangeWriteLock): chiave del controller →
+// { reason, exempt }. Più di uno: il blocco di A resta sospeso mentre è
+// collegato B, e un blocco di B non sostituisce quello di A.
+const rangeWriteLocks = new Map();
 let lastCenterView = null;
 
 function currentWriteLock() {
   // Il blocco del range (WS7) sopravvive allo scollegamento e segue il
   // controller; `rangeState` invece è l'esito mostrato e decade col teardown.
   // Si sommano: basta uno dei due per tenere Write spento.
+  const rangeWriteLock = rangeLockFor(deviceKey);
   const range = rangeWriteLock
     ? {
       incomplete: !!rangeState?.incomplete || rangeWriteLock === 'incomplete',
@@ -1259,7 +1261,7 @@ let quickCancelRequested = false;
 // Connect, un reload o un replug non lo spengono, la sessione resta aperta nel
 // firmware e il prossimo calibBegin, rifiutato, verrebbe "riparato" con un
 // calibEnd che committa il parziale (anche 0 campioni) senza consenso. Come
-// rangeWriteLock usa la chiave salata del seriale (un seriale illeggibile conta
+// rangeWriteLocks usa la chiave salata del seriale (un seriale illeggibile conta
 // come lo stesso controller). Il segno in sessionStorage non porta nessun
 // identificativo: dopo un reload il blocco vale per qualunque controller, e
 // l'utente lo toglie con Restart o confermando di averlo spento.
@@ -2148,14 +2150,18 @@ const RANGE_MSG_HTML = $('range-msg').innerHTML;
 // (aggirando H8). Neppure lo spegnimento lo toglie: l'app non distingue uno
 // spegnimento da uno stacco, e che lo spegnimento annulli il range è H10.
 // Per questo la UI non presenta mai il ricollegamento come via d'uscita.
-// Il blocco segue il controller che l'ha prodotto tramite `rangeWriteLockKey`,
-// hash salato del seriale (vedi localDeviceKey), mai il seriale in chiaro. Se
-// uno dei due seriali non è leggibile il controller che si collega è trattato
-// come lo stesso (prudente). Limite noto: vive solo in memoria, quindi un
-// reload della pagina lo perde; WS5 lo deve risolvere nel blocco generale della
-// scrittura (esiti Quick), di cui questo è il pezzo del range.
-// `rangeWriteLock` e `rangeWriteLockKey` sono dichiarati accanto a
-// `centerState`: currentWriteLock li legge.
+// Il blocco segue il controller che l'ha prodotto tramite la sua chiave in
+// `rangeWriteLocks`, hash salato del seriale (vedi localDeviceKey), mai il
+// seriale in chiaro. Se uno dei due seriali non è leggibile il controller che
+// si collega è trattato come lo stesso (prudente). Un controller diverso (due
+// seriali noti e diversi) non lo eredita, ma il blocco NON decade: resta
+// sospeso, come il blocco di power-cycle, e torna quando si ricollega il
+// controller che l'ha prodotto. Prima veniva cancellato, e A → B → A
+// riabilitava Write sul range incompleto di A. Limite noto: vive solo in
+// memoria, quindi un reload della pagina lo perde; WS5 lo deve risolvere nel
+// blocco generale della scrittura (esiti Quick), di cui questo è il pezzo del
+// range. `rangeWriteLocks` è dichiarato accanto a `centerState`:
+// currentWriteLock lo legge.
 // Chiave locale del controller collegato (null se il seriale non è leggibile).
 let deviceKey = null;
 
@@ -2193,35 +2199,65 @@ function rangeLockMessage(reason) {
   return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration.${off}`;
 }
 
+// Motivo del blocco che vale per il controller con chiave `key` (null se
+// nessuno). Un blocco vale se le chiavi coincidono o se una delle due manca
+// (seriale illeggibile: stesso controller, prudente), salvo che quel
+// controller abbia poi chiuso un range completo (`exempt`, solo per i blocchi
+// senza chiave: vedi setRangeWriteLock). Senza controller collegato
+// (deviceKey null) vale qualunque blocco.
+function rangeLockFor(key) {
+  let found = null;
+  for (const [lockKey, lock] of rangeWriteLocks) {
+    if (lockKey === key) return lock.reason;
+    if (lockKey !== null && key !== null) continue;
+    if (key !== null && lock.exempt.has(key)) continue;
+    found ??= lock.reason;
+  }
+  return found;
+}
+
 // `key`: il controller a cui il blocco appartiene. finishRange passa la chiave
 // letta PRIMA del rangeEnd: se il controller si stacca mentre il rangeEnd è in
 // volo, teardown ha già azzerato deviceKey, ma il blocco va registrato lo
 // stesso e deve seguire quel controller al ricollegamento.
+// `reason` null = un range completo visto su QUEL controller: toglie solo il
+// suo blocco. Un blocco senza chiave (range lasciato da un controller dal
+// seriale illeggibile, che potrebbe essere questo) smette di valere per questo
+// controller ma resta per gli altri. Un controller dal seriale illeggibile non
+// toglie i blocchi con chiave: potrebbe non essere il loro controller, e
+// toglierli riaprirebbe A → X → A.
 function setRangeWriteLock(reason, key = deviceKey) {
-  rangeWriteLock = reason;
-  rangeWriteLockKey = reason ? key : null;
-  $('btn-flash').title = reason ? rangeLockMessage(reason) : '';
+  if (reason) {
+    rangeWriteLocks.set(key, { reason, exempt: new Set() });
+  } else {
+    rangeWriteLocks.delete(key);
+    if (key !== null) rangeWriteLocks.get(null)?.exempt.add(key);
+  }
+  syncRangeLockTitle();
   // Il bottone lo decide il blocco generale di Write (WS5), che include questo:
   // togliere il blocco del range non deve riabilitare Write se un altro motivo
   // (esito catastrofico, asse incollato, sessione da spegnere) lo tiene spento.
   updateWriteLock();
 }
 
+function syncRangeLockTitle() {
+  const reason = rangeLockFor(deviceKey);
+  $('btn-flash').title = reason ? rangeLockMessage(reason) : '';
+}
+
 // Al collegamento: un blocco lasciato da un altro controller (entrambi i
-// seriali noti e diversi) decade; altrimenti resta e l'utente viene avvisato
-// che il range incompleto può essere ancora attivo.
+// seriali noti e diversi) non vale per questo, ma resta sospeso per il suo;
+// altrimenti vale e l'utente viene avvisato che il range incompleto può essere
+// ancora attivo.
 function reapplyRangeWriteLock(key) {
-  if (!rangeWriteLock) return;
-  if (key && rangeWriteLockKey && key !== rangeWriteLockKey) {
-    log('A different controller is connected: the range write lock of the previous one does not apply.');
-    setRangeWriteLock(null);
+  if (!rangeWriteLocks.size) return;
+  syncRangeLockTitle();
+  updateWriteLock();
+  const reason = rangeLockFor(key);
+  if (!reason) {
+    log('A different controller is connected: the range write lock of the previous one does not apply to it (it still applies to that controller).');
     return;
   }
-  const reason = rangeWriteLock;
-  const lockKey = rangeWriteLockKey;
-  setRangeWriteLock(reason);
-  // La chiave nota resta quella del controller che ha prodotto il blocco.
-  rangeWriteLockKey = lockKey ?? key;
   const msg = 'This controller may still have the incomplete range calibration from before it was disconnected. '
     + rangeLockMessage(reason);
   log(msg);
@@ -2229,8 +2265,9 @@ function reapplyRangeWriteLock(key) {
 }
 
 function blockedByRangeWriteLock() {
-  if (!rangeWriteLock) return false;
-  toast(rangeLockMessage(rangeWriteLock), 7000);
+  const reason = rangeLockFor(deviceKey);
+  if (!reason) return false;
+  toast(rangeLockMessage(reason), 7000);
   return true;
 }
 
@@ -2462,8 +2499,9 @@ async function finishRange() {
     if (gone) return;
     recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
     setUnsaved(true);
-    // Un range completo sostituisce in RAM quello incompleto: il blocco decade.
-    setRangeWriteLock(null);
+    // Un range completo sostituisce in RAM quello incompleto: il blocco di
+    // QUESTO controller decade (quelli sospesi di altri controller restano).
+    setRangeWriteLock(null, key);
     showOutcome(rangeOutcomeView({}));
     log('Range calibration complete.');
     ops.endOp(op);

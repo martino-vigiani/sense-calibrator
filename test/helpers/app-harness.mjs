@@ -239,7 +239,7 @@ const SCRIPT = new vm.Script(rewriteImports(APP_SOURCE), { filename: 'js/app.js 
 // successivi nello stesso contesto.
 const PEEK = new vm.Script(`({
   busy: ops.busy, epoch: ops.epoch, ds5, sticks, unsaved, deviceInfo, wizard, driftTest,
-  quickPreflightBlocked, lastDriftResult, rangeSession, rangeCheck, rangeWriteLock, lastWizardComparison,
+  quickPreflightBlocked, lastDriftResult, rangeSession, rangeCheck, rangeWriteLock: rangeLockFor(deviceKey), lastWizardComparison,
 })`);
 
 // `session`: una Map condivisa tra due loadApp simula un ricaricamento nella

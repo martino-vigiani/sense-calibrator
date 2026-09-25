@@ -493,9 +493,71 @@ test('a different controller (both serials known) does not inherit the range wri
   assert.equal(h.$('btn-flash').disabled, false);
 });
 
+// A → B → A: il blocco di A è sospeso mentre è collegato B (che scrive), e
+// torna con A. Prima veniva cancellato al collegamento di B.
+async function plug(h, clock, serial, seed) {
+  const dev = withSerial(makeDevice(clock, { seed }), serial);
+  h.hid.fire('connect', dev);
+  await h.advance(2000);
+  assert.equal(h.peek().ds5.device, dev);
+  return dev;
+}
+function unplug(h, dev) {
+  dev.unplug();
+  h.hid.fire('disconnect', dev);
+}
+
+for (const reason of ['incomplete', 'closed', 'error']) {
+  test(`A → B → A: the range write lock of A (${reason}) is suspended for B, not cleared, and returns with A`, async () => {
+    const { h, back: B } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'A1B2C3D4E5F6', reason });
+    assert.equal(h.peek().rangeWriteLock, null, 'B does not inherit it');
+    assert.equal(h.$('btn-flash').disabled, false, 'B can write');
+    unplug(h, B);
+    const A2 = await plug(h, h.clock, 'E8475C3A1B2F', 33);
+    assert.equal(h.peek().rangeWriteLock, reason);
+    assert.equal(h.$('btn-flash').disabled, true, 'Write disabled again for A');
+    assert.ok(h.toasts().some(t => /may still have the incomplete range calibration/.test(t)));
+    const nvs = A2.counts.nvs;
+    await h.run(h.ctx.doFlash());
+    assert.equal(A2.counts.nvs, nvs, 'no NVS write on A');
+  });
+}
+
+test('A → B → A: a lock set on B does not replace the suspended lock of A, and a complete range on B clears only B', async () => {
+  const { h, back: B } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'A1B2C3D4E5F6' });
+  h.ctx.setRangeWriteLock('closed');
+  assert.equal(h.peek().rangeWriteLock, 'closed');
+  // un range completo su B toglie solo il blocco di B
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await rotateBothWays(h, B);
+  await h.run(h.click('btn-range-done'));
+  assert.equal(h.peek().rangeWriteLock, null);
+  assert.equal(h.$('btn-flash').disabled, false);
+  await h.advance(4000);
+  unplug(h, B);
+  await plug(h, h.clock, 'E8475C3A1B2F', 33);
+  assert.equal(h.peek().rangeWriteLock, 'incomplete', 'A keeps its own lock');
+  assert.equal(h.$('btn-flash').disabled, true);
+});
+
+test('a range lock left by a controller with an unreadable serial applies to every controller until each completes a range', async () => {
+  const { h, back: B } = await lockThenReplug({ serialB: 'A1B2C3D4E5F6' });
+  assert.equal(h.peek().rangeWriteLock, 'incomplete', 'unreadable serial: may be the same controller');
+  await h.advance(4000);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await rotateBothWays(h, B);
+  await h.run(h.click('btn-range-done'));
+  assert.equal(h.peek().rangeWriteLock, null, 'B replaced its own range');
+  await h.advance(4000);
+  unplug(h, B);
+  await plug(h, h.clock, 'C0FFEE123456', 34);
+  assert.equal(h.peek().rangeWriteLock, 'incomplete', 'another known controller is still covered');
+  assert.equal(h.$('btn-flash').disabled, true);
+});
+
 test('the device key is a salted hash, never the raw serial', async () => {
   const { h } = await lockThenReplug({ serialA: 'E8475C3A1B2F', serialB: 'E8475C3A1B2F' });
-  const key = h.eval('rangeWriteLockKey');
+  const key = h.eval('[...rangeWriteLocks.keys()][0]');
   assert.match(key, /^[0-9a-f]{32}$/);
   assert.equal(h.eval('deviceKey'), key, 'same controller, same key');
   assert.ok(!key.toLowerCase().includes('e8475c3a1b2f'));
