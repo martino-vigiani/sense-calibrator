@@ -318,7 +318,7 @@
       <div class="action">
         <div>
           <h4>Precision test</h4>
-          <p>Three quick checks in about 40 seconds: center, reach and snap-back. Score 0 to 100 to compare before and after calibration.</p>
+          <p>Three short checks in about 15 seconds: center, return and range. A calibration score and a hardware score, compared with this controller&rsquo;s previous result.</p>
         </div>
         <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
@@ -478,28 +478,40 @@
       <h3 id="game-phase">Precision test</h3>
       <button id="btn-game-exit" class="btn btn-ghost btn-sm">Exit</button>
     </div>
-    <p id="game-instr" class="game-instr" role="status">Three quick checks, about 40 seconds. Press Start when you’re ready.</p>
+    <ol id="game-steps" class="game-steps hidden">
+      <li data-state="todo">Center</li>
+      <li data-state="todo">Return</li>
+      <li data-state="todo">Range</li>
+    </ol>
+    <p id="game-instr" class="game-instr" role="status">Three short checks, about 15 seconds. Press Start, then let go of the sticks.</p>
+    <p id="game-why" class="game-why" role="status"></p>
 
     <div id="game-dials" class="game-dials">
       <figure>
         <canvas id="game-dial-l" role="img" width="220" height="220" aria-label="Left stick game dial"></canvas>
         <figcaption>Left</figcaption>
       </figure>
-      <div id="game-countdown" class="game-countdown hidden" aria-hidden="true"></div>
       <figure>
         <canvas id="game-dial-r" role="img" width="220" height="220" aria-label="Right stick game dial"></canvas>
         <figcaption>Right</figcaption>
       </figure>
     </div>
 
-    <div id="game-progress" class="progress hidden" role="progressbar" aria-label="Test progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+    <p id="game-handsoff" class="handsoff game-handsoff hidden" data-level="unknown">Waiting for the controller…</p>
+    <div id="game-progress" class="progress hidden" role="progressbar" aria-label="Check progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+
+    <div id="game-run-actions" class="modal-actions game-run-actions hidden">
+      <button id="btn-game-resume" class="btn btn-primary btn-sm hidden">Retry</button>
+      <button id="btn-game-skip" class="btn btn-secondary btn-sm hidden">Skip this check</button>
+    </div>
 
     <div id="game-intro" class="game-intro">
       <ol class="game-trials">
-        <li><b>Center:</b> don't touch the sticks while the resting offset is measured.</li>
-        <li><b>Reach:</b> rotate both sticks along the edge to cover the whole perimeter.</li>
-        <li><b>Snap-back:</b> flick each stick to the edge and let it go, three times per stick.</li>
+        <li><b>Center:</b> hands off while each stick&rsquo;s resting point is measured. This is what calibration can fix.</li>
+        <li><b>Return:</b> flick both sticks toward the lit mark and let go, four times. For information.</li>
+        <li><b>Range:</b> roll both sticks around the edge until the rings are full. For information.</li>
       </ol>
+      <p id="game-last" class="game-last"></p>
       <div class="modal-actions">
         <button id="btn-game-start" class="btn btn-primary" data-autofocus>Start</button>
       </div>
