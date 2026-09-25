@@ -47,8 +47,10 @@ export const FIX_RATE_WORDS = 'about 3 in 4';
 // di summarizeResult, che non porta il rumore: qui basta l'asse al bordo.
 export const PINNED_AXIS_PCT = 99;
 
-// Testo della rimessa a posto. Solo con NVS `locked` (vedi sopra).
-export const POWER_OFF_ADVICE = 'Turn the controller off (hold PS for 10 s) before reconnecting it: that discards the temporary calibration.';
+// Testo della rimessa a posto. Solo con NVS `locked` (vedi sopra). "should":
+// che lo spegnimento riporti alla calibrazione salvata è H10, non ancora
+// verificato sull'hardware; il testo non lo presenta come un fatto.
+export const POWER_OFF_ADVICE = 'Turn the controller off (hold PS for 10 s) before reconnecting it: that should discard the temporary calibration (not yet confirmed on hardware).';
 export const UNPLUG_UNKNOWN = 'We haven’t confirmed whether unplugging the cable alone discards it, so don’t rely on that.';
 
 export function revertAdvice(nvStatus) {

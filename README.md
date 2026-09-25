@@ -22,7 +22,7 @@ You need a desktop computer, a USB data cable and a standard DualSense (`054C:0C
 6. Run the drift and precision tests again to compare the result.
 7. Select **Write to memory** only when you want to keep the calibration.
 
-Calibration is applied to controller RAM first. If you turn the controller off (hold PS for 10 s) before **Write to memory**, the temporary calibration is discarded. What unplugging the cable alone does has not been verified yet, so the tool never tells you to rely on it.
+Calibration is applied to controller RAM first. If you turn the controller off (hold PS for 10 s) before **Write to memory**, the temporary calibration should be discarded and the controller should go back to the calibration saved in its memory; that has not been confirmed on hardware yet (check H10). What unplugging the cable alone does has not been verified yet, so the tool never tells you to rely on it.
 
 After every calibration a result panel stays on screen with the before and after reading of each stick. **Write to memory** is switched off when a result must not be saved (15% or more off-center, a stick stuck at the edge, an incomplete range, a controller that stopped responding), and a result that is worse than where you started needs a second confirmation. If the controller doesn't appear in the browser prompt, the page lists what to check: a data cable, a standard DualSense, another port, apps that hold the controller, and Linux permissions.
 
@@ -51,7 +51,7 @@ A DualSense stores calibration values that describe where each stick rests and h
 
 Sense Calibrator measures the untouched sticks first. A stable offset can often be corrected by writing a new center or range calibration. A noisy or unstable signal usually points to dirt, wear or mechanical damage, which software cannot repair.
 
-The app applies calibration temporarily, runs the same measurements again and lets you decide whether to save it. For the protocol details, read [ARTICLE.md](ARTICLE.md) or the [SubraLabs technical write-up](https://subralabs.com/lab/sense-calibrator.html).
+The app applies calibration temporarily, runs the same measurements again and lets you decide whether to save it. For how this release behaves, read the [CHANGELOG](CHANGELOG.md) and the open [hardware checks](docs/hardware-checks.md). [ARTICLE.md](ARTICLE.md) is the original launch write-up and describes an earlier version of the tool; the [SubraLabs technical write-up](https://subralabs.com/lab/sense-calibrator.html) covers the protocol.
 
 ## Reading the numbers
 

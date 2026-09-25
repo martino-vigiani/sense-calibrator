@@ -1894,7 +1894,7 @@ function wizardResultHtml(cmp, escaped) {
   else if (cmp.worse) {
     // Il consiglio di spegnere solo con la memoria confermata `locked` (C0-11).
     tail = '<b>This is worse than before.</b> Don’t write it to memory'
-      + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s) to discard it.' : '.');
+      + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s), which should discard it.' : '.');
   } else tail = 'Check the result with the drift test.';
   const escapedNote = escaped ? '<br>The rest check was looser for some samples: the result may be less precise.' : '';
   return `Center calibration complete.<br>${rows}<br>${tail}${escapedNote}`;
@@ -2641,7 +2641,7 @@ async function rebootController() {
   // Il riavvio chiude la sessione lasciata aperta. Se non fosse avvenuto, il
   // prossimo calibBegin (senza riparazione, repairAllowed) verrebbe rifiutato
   // e il blocco tornerebbe: nessun parziale committato.
-  if (hadOpenSession) clearPowerCycle('Restart sent: the calibration pass left open is discarded by the restart.');
+  if (hadOpenSession) clearPowerCycle('Restart sent: the restart should close the calibration pass left open (a session still open would be refused, never committed).');
   toast('Controller restarted: reconnect it once it has powered off.', 5000);
   // la disconnessione fisica arriverà dall'evento hid
 }

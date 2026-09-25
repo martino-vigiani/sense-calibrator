@@ -4,7 +4,7 @@ Notable changes to Sense Calibrator. Dates are ISO 8601.
 
 ## Unreleased — 2026-09-25
 
-Simulator figures in this section are **model-verified**: the real calibration code run against a model of the controller fitted to the collected telemetry. They are not hardware measurements. Hardware checks H0, H10, H11 and H12 have not been run yet; the copy says so wherever it depends on them.
+Simulator figures in this section are **model-verified**: the real calibration code run against a model of the controller fitted to the collected telemetry. They are not hardware measurements. Hardware checks H0, H10, H11 and H12 have not been run yet. The copy says so wherever it depends on them: the power-off advice (H10) says the temporary calibration "should" be discarded, not that it is, and nothing presents unplugging (H11) as a way out.
 
 ### Calibration safety
 
@@ -22,7 +22,7 @@ Simulator figures in this section are **model-verified**: the real calibration c
 
 - **The result stays on the page.** A persistent panel shows each stick before → after, in the same terms as the drift test (for example "0.6% · at floor", "1.2% · 1 step"), and what to do next.
 - **Write is disabled** after a result of 15% or more, a stick pinned at the edge, an abandoned pass, an unresponsive controller, or an incomplete or unknown range. **It asks for a second confirmation** (with Cancel focused) after a result worse than the start, worse than an earlier pass, or not verified.
-- **Advice to turn the controller off to discard a calibration appears only when its memory reads "locked".** Whether unplugging the cable alone discards it has not been checked (H11), and the copy says so instead of recommending it.
+- **Advice to turn the controller off to discard a calibration appears only when its memory reads "locked", and says it "should" discard it** (H10 not run yet). Whether unplugging the cable alone discards it has not been checked (H11), and the copy says so instead of recommending it.
 - **A "may still be active" banner after a reload.** If this tab calibrated without saving, a reload says that a temporary calibration may still be on the controller. It stores no device identifier.
 
 ### Guided and Range calibration

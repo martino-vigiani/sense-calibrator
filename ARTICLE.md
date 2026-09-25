@@ -1,5 +1,12 @@
 # How the New SOTA Model [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5) Saved Me $60 in 30 Minutes
 
+> **Note (2026-09-25): this article describes an earlier version of Sense Calibrator.** It is kept as the original launch write-up; the [CHANGELOG](CHANGELOG.md) describes the current release. Several details below are out of date:
+>
+> - Quick calibration now runs **up to 4 passes of 12 samples** each, waits for released, centered sticks before *every* pass, and abandons (never commits) a pass that can't collect its 12 samples. Each pass is irreversible, and a pass can end worse than the start: the page then warns you, and results of 15% or more, abandoned passes and an unresponsive controller disable Write.
+> - Range calibration's Done needs real coverage (every direction, two turns and a change of direction on both sticks). The 15-second path is now a confirmed **Finish anyway**, which disables Write until a complete range replaces it.
+> - The precision test (v4) takes about 15 seconds and gives two scores, **Calibration** and **Hardware**, not one 0–100 score from a 60-second run.
+> - Turning the controller off before Write **should** take it back to the calibration last saved in its memory (not the factory calibration), but that has not been confirmed on hardware yet (check H10 in [docs/hardware-checks.md](docs/hardware-checks.md)). The "cannot brick the calibration" line below overstates the safety net.
+
 *Fixing my PS5 DualSense stick drift for good, with a browser tool I built instead of buying a new controller.*
 
 My DualSense developed stick drift, and the right stick was the giveaway. I play FC 26, and out of nowhere my players started pulling off skill moves I never asked for, wrecking the flow of every match. The right stick is what triggers skills, and it was reporting a small constant offset at rest, so the game read that phantom tilt as a deliberate flick. I tried the usual software fixes everyone recommends. None of them actually solved it for me. So I did the thing an 18-year-old developer with a Claude Max subscription does: I used [Fable 5](https://www.anthropic.com/news/claude-fable-5-mythos-5), Anthropic's new state-of-the-art model, to build my own tool. It is called Sense Calibrator, it runs entirely in a browser, and it writes a permanent fix directly into the controller.
