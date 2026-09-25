@@ -160,6 +160,10 @@ export const QUICK_DEFAULTS = Object.freeze({
 //               aperta da lei stessa (vedi DS5.calibBegin): un avvio rifiutato
 //               diventa un errore con needsPowerCycle invece di una
 //               riparazione che committerebbe il parziale
+//   onSession   riceve 'opening' in modo sincrono PRIMA di ogni calibBegin e
+//               'closed' dopo il suo calibEnd riuscito: la pagina scrive il
+//               segno di sessione aperta prima del comando (un reload a metà
+//               passata torna bloccato) e lo toglie solo a sessione chiusa
 //
 // Non lancia: un errore HID diventa { outcome: 'error', error, committed,
 // needsPowerCycle? }. `committed` è vero se la RAM del controller può essere
@@ -180,6 +184,7 @@ export async function runQuick({
   meta = {},
   sampler = null,
   repairStaleSession = true,
+  onSession = () => {},
 }) {
   const p = { ...QUICK_DEFAULTS, ...params };
   const waitForStable = sampler?.waitForStable ?? (opts => waitForStableFrom(source, clock, opts));
@@ -337,6 +342,7 @@ export async function runQuick({
 
       // DS5.calibBegin ripara una sessione rimasta aperta con un calibEnd, che
       // committa: la RAM è cambiata anche se questa passata poi fallisce.
+      onSession('opening');
       const begun = await controller.calibBegin({ repair: repairStaleSession });
       sessionOpen = true;
       if (begun?.committed) {
@@ -427,6 +433,7 @@ export async function runQuick({
       ensureCurrent();
       await controller.calibEnd();
       sessionOpen = false;
+      onSession('closed');
       committedAny = true;
       // Subito, non a fine ciclo: se la passata successiva si interrompe
       // (scollegamento, errore) la pagina deve già sapere che la RAM è cambiata.
@@ -556,6 +563,9 @@ export async function runQuick({
     // sessione non cambia la RAM.
     // Un avvio rifiutato senza riparazione (`openSession`, vedi
     // repairStaleSession) lascia la sessione di prima aperta: stesso blocco.
+    // Anche un calibBegin partito ma senza risposta (timeout, errore di
+    // ricezione): DS5.calibBegin lo marca `openSession`, perché il firmware
+    // può averlo eseguito e `sessionOpen` qui non si è mai alzato.
     const extra = sessionOpen || error?.openSession === true ? { needsPowerCycle: true } : {};
     // Un controller scollegato (o sostituito) non è un errore dell'algoritmo:
     // l'errore HID del cavo staccato arriva spesso prima dell'evento

@@ -187,7 +187,7 @@ function makeDocument() {
 
 /* ------------------------------ WebHID finto ------------------------------ */
 
-export function makeDevice(clock, { seed = 7, drift = [[0.2, -0.3], [-0.1, 0.4]], noise = 0.05, sf = 0, faults = [], schedule = [], name } = {}) {
+export function makeDevice(clock, { seed = 7, drift = [[0.2, -0.3], [-0.1, 0.4]], noise = 0.05, sf = 0, faults = [], schedule = [], name, module = {} } = {}) {
   return new FakeDualSense({
     clock,
     seed,
@@ -197,6 +197,7 @@ export function makeDevice(clock, { seed = 7, drift = [[0.2, -0.3], [-0.1, 0.4]]
     hand: { schedule },
     faults,
     name,
+    module,
   });
 }
 

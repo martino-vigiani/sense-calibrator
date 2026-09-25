@@ -199,7 +199,11 @@ export class DS5 {
   // Un errore dopo che il comando è partito (o un timeout, di cui non si sa se
   // il firmware l'abbia ricevuto) su un comando che committa va trattato come
   // commit: la RAM o la NVS possono essere cambiate. Ogni timeout avvelena.
+  // `maybeReceived`: il comando può essere arrivato al firmware (inviato, o
+  // scaduto senza sapere se sia partito). Serve a calibBegin: un avvio senza
+  // risposta può aver aperto la sessione.
   settleFailure(error, commits, sent) {
+    if (sent || error.timeout) error.maybeReceived = true;
     if (commits && (sent || error.timeout)) error.committed = true;
     if (error.timeout) {
       this.poison(error);
@@ -259,8 +263,13 @@ export class DS5 {
   // spegnimento dichiarato dall'utente ma non provato): allora niente calibEnd
   // di riparazione, che committerebbe quel parziale senza consenso. L'avvio
   // rifiutato lancia con `openSession: true` e nulla viene scritto.
+  // Un avvio che può essere arrivato al firmware ma di cui manca la risposta
+  // (timeout, errore di ricezione dopo l'invio) lancia con `openSession: true`:
+  // la sessione può essere aperta, e il chiamante la tratta come lasciata
+  // aperta (blocco di spegnimento), mai come "non è partito nulla". Solo un
+  // errore prima dell'invio (controller avvelenato) resta senza.
   async calibBegin({ repair = true } = {}) {
-    let r = await this.calibCommand([1, 1, 1], 0x83010101);
+    let r = await this.calibBeginCommand();
     let committed = false;
     if (!r.ok && !repair) {
       this.log('Center calibration refused: a calibration session may still be open. Not closing it (that would commit a partial calibration).');
@@ -273,7 +282,7 @@ export class DS5 {
       this.log('Center calibration refused: closing a possibly stale session and retrying.');
       committed = await this.calibEnd().then(() => true, error => error?.committed === true);
       try {
-        r = await this.calibCommand([1, 1, 1], 0x83010101);
+        r = await this.calibBeginCommand();
       } catch (error) {
         if (committed) error.committed = true;
         throw error;
@@ -285,6 +294,15 @@ export class DS5 {
       throw error;
     }
     return { committed };
+  }
+
+  async calibBeginCommand() {
+    try {
+      return await this.calibCommand([1, 1, 1], 0x83010101);
+    } catch (error) {
+      if (error?.maybeReceived) error.openSession = true;
+      throw error;
+    }
   }
 
   async calibSample() {
@@ -379,11 +397,16 @@ export class DS5 {
     }
   }
 
+  // Ritorna { sent }: vero se l'invio è riuscito, o se è fallito con il
+  // dispositivo ormai chiuso (il controller si disconnette subito: l'errore di
+  // I/O è atteso). Un invio rifiutato con il dispositivo ancora aperto non ha
+  // riavviato nulla, e chi chiama non deve dire il contrario.
   async reboot() {
     try {
       await this.exclusive(() => this.sendFeature(0x80, [1, 1]));
-    } catch {
-      // Il controller si disconnette subito: l'errore di I/O è atteso.
+      return { sent: true };
+    } catch (error) {
+      return { sent: !this.opened, error };
     }
   }
 

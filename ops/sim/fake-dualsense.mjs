@@ -44,6 +44,11 @@ export const MODULE_DEFAULTS = {
   zeroSampleEnd: 'keep',
   // Aggregazione dei calibSample: 0 = media di tutti; N > 0 = media degli ultimi N.
   lastN: 0,
+  // calibBegin con una sessione già aperta: 'reopen' (il fake storico riparte
+  // da capo) oppure 'refuse' (risposta con codice 3, sessione di prima intatta:
+  // il firmware come lo descrive DS5.calibBegin). Serve ai test del blocco di
+  // spegnimento: con 'reopen' una riparazione che committa un parziale non si vede.
+  beginWhileOpen: 'reopen',
 };
 
 export class FakeDualSense {
@@ -83,6 +88,8 @@ export class FakeDualSense {
     // spegnimento (powerCycle). Un ciclo unlock → lock la aggiorna.
     this.stored = this.snapshotCal();
     this.commandLog = [];
+    // Campioni di ogni sessione committata da un calibEnd (0 = riparazione).
+    this.committedSamples = [];
     this.schedule();
   }
   // posizione fisica (LSB, rispetto al centro fisico) di un asse al tempo t
@@ -155,13 +162,17 @@ export class FakeDualSense {
     // Range (target 2): solo lo stato di risposta, il modello non simula la corsa.
     if (tgt === 2) { this.response = op === 1 || op === 2 ? [0x83, 1, 2, op] : [0x83, 0, 0, 0]; return; }
     if (tgt !== 1) { this.response = [0x83, 0, 0, 0]; return; }
-    if (op === 1) { this.cal = this.sticks.map(() => [[], []]); this.response = [0x83, 1, 1, 1]; }
+    if (op === 1) {
+      if (this.cal && this.module.beginWhileOpen === 'refuse') { this.response = [0x83, 1, 1, 3]; return; }
+      this.cal = this.sticks.map(() => [[], []]); this.response = [0x83, 1, 1, 1];
+    }
     else if (op === 3) {
       if (!this.cal) { this.response = [0x83, 1, 1, 3]; return; }
       this.sticks.forEach((s, i) => { for (const ax of [0, 1]) this.cal[i][ax].push(this.pos(i, ax, t)); });
       this.response = [0x83, 1, 1, 1];
     } else if (op === 2) {
       if (this.cal) {
+        this.committedSamples.push(this.cal[0][0].length);
         this.sticks.forEach((s, i) => {
           for (const ax of [0, 1]) {
             let xs = this.cal[i][ax];

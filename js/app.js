@@ -1266,6 +1266,9 @@ let repairAllowed = !powerCycleLock;
 function markPowerCycle(controller, key) {
   powerCycleLock = { controller, key: key ?? null, reload: false };
   repairAllowed = false;
+  // Il blocco sostituisce il segno provvisorio della sessione in volo: il suo
+  // rilascio non deve più togliere nulla.
+  sessionGuard = null;
   try { tabStore()?.setItem(TAB_POWER_CYCLE_KEY, '1'); } catch { /* storage negato: resta il blocco in memoria */ }
   updateWriteLock();
 }
@@ -1276,6 +1279,34 @@ function clearPowerCycle(reason) {
   try { tabStore()?.removeItem(TAB_POWER_CYCLE_KEY); } catch { /* niente da togliere */ }
   log(reason);
   updateWriteLock();
+}
+
+// Segno provvisorio di sessione in volo. Si scrive in modo sincrono PRIMA di
+// ogni calibBegin (Quick e Guided), non dopo che il ciclo è uscito: un reload o
+// una chiusura della scheda a sessione aperta (fra due angoli del wizard, o a
+// metà campionamento di Quick) non passa da fail()/catch, e senza il segno la
+// pagina nuova partirebbe con repairAllowed = true, cioè con un calibBegin che
+// "ripara" il parziale committandolo. Con il segno la pagina nuova torna
+// bloccata (reload: true) e non ripara mai. In memoria cambia solo
+// repairAllowed: il blocco vero (powerCycleLock) lo mette chi vede la sessione
+// restare aperta. Il rilascio, dopo il calibEnd riuscito di quella sessione o a
+// ciclo finito senza blocco, rimette lo stato di prima; dopo un markPowerCycle
+// non fa nulla (il segno ora è del blocco).
+let sessionGuard = null;
+function openSessionGuard() {
+  const guard = { repairAllowed, hadFlag: tabPowerCycleFlag() };
+  sessionGuard = guard;
+  repairAllowed = false;
+  try { tabStore()?.setItem(TAB_POWER_CYCLE_KEY, '1'); } catch { /* storage negato: resta repairAllowed = false */ }
+  return guard;
+}
+function releaseSessionGuard(guard) {
+  if (!guard || sessionGuard !== guard) return;
+  sessionGuard = null;
+  repairAllowed = guard.repairAllowed;
+  if (!guard.hadFlag && !powerCycleLock) {
+    try { tabStore()?.removeItem(TAB_POWER_CYCLE_KEY); } catch { /* niente da togliere */ }
+  }
 }
 
 // Vale per il controller collegato: lo stesso oggetto DS5, oppure uno la cui
@@ -1564,6 +1595,8 @@ async function quickCalibrate() {
   // (evento 'committed' di runQuick): il teardown di uno scollegamento
   // successivo lo vede e avvisa da solo.
   let committedShown = false;
+  // Segno di sessione in volo di QUESTA corsa (openSessionGuard).
+  let guard = null;
   const fail = (session, error, committed, needsPowerCycle = false) => {
     // Sessione lasciata aperta a metà passata: il controller va spento prima di
     // qualunque altro comando, come dopo uno stallo (il prossimo calibBegin
@@ -1595,6 +1628,10 @@ async function quickCalibrate() {
       force,
       params: recovery ? { maxPasses: 1 } : {},
       repairStaleSession: repairAllowed,
+      onSession: state => {
+        if (state === 'opening') guard = openSessionGuard();
+        else { releaseSessionGuard(guard); guard = null; }
+      },
       onProgress: event => {
         if (ops.isCurrent(op)) {
           if (event.phase === 'held' || event.phase === 'stalled' || event.phase === 'unstable') quickHoldKnown = true;
@@ -1704,6 +1741,11 @@ async function quickCalibrate() {
     // chiusa e registrata, quindi `recordSessionOnce` non la duplica.
     fail(run?.session ?? { kind: 'quick' }, error, run?.committed === true);
   } finally {
+    // Ciclo finito senza sessione aperta (avvio rifiutato con certezza, esito
+    // normale): il segno provvisorio se ne va. Con una sessione aperta il
+    // blocco è già stato segnato e il rilascio non fa nulla; se non lo fosse
+    // (run.needsPowerCycle senza markPowerCycle) il segno resta, per prudenza.
+    if (!run?.needsPowerCycle) releaseSessionGuard(guard);
     quickStallCancelable = false;
     // Un ciclo orfano (controller scollegato e magari già sostituito) non tocca
     // né il flag busy né il modale dell'operazione nuova.
@@ -1861,6 +1903,8 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   ensure();
   await w.controller.calibEnd();
   w.sessionOpen = false;
+  releaseSessionGuard(w.guard);
+  w.guard = null;
   w.committed = true;
   setUnsaved(true);
   ensure();
@@ -1943,7 +1987,11 @@ async function wizardNext() {
       w.before = summarizeResult(await measureOffset(1000));
       ensure();
       w.tol = restTolerance(w.before);
-      const begun = await w.controller.calibBegin({ repair: repairAllowed });
+      // Il segno di sessione in volo va scritto PRIMA del comando (vedi
+      // openSessionGuard): un reload fra due angoli torna bloccato.
+      const repair = repairAllowed;
+      w.guard = openSessionGuard();
+      const begun = await w.controller.calibBegin({ repair });
       w.sessionOpen = true;
       // La riparazione di una sessione rimasta aperta può aver committato:
       // la RAM è già cambiata.
@@ -1991,6 +2039,7 @@ async function wizardNext() {
     // chiave e torna al ricollegamento.
     const leftOpen = w.sessionOpen === true || error.openSession === true;
     if (leftOpen) markPowerCycle(w.controller, w.key);
+    else releaseSessionGuard(w.guard);
     // Scollegato: il teardown ha già chiuso tutto e il controller nuovo non
     // eredita né il modale né lo stato "non salvato" di questo.
     if (gone) return;
@@ -2035,7 +2084,7 @@ function openWizard() {
   wizard = {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
-    samples: 0, timeouts: 0, cornerMisses: 0, escaped: false, committed: false, sessionOpen: false,
+    samples: 0, timeouts: 0, cornerMisses: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
     running: false, reported: false,
   };
   lastWizardComparison = null;
@@ -2636,14 +2685,38 @@ async function rebootController() {
   if (ds5.poisoned) { toast(POISONED_MESSAGE, 7000); return; }
   if (unsaved && !confirm('You have an unsaved calibration: restarting the controller will lose it. Continue?'))
     return;
-  const hadOpenSession = powerCycleApplies();
-  await ds5.reboot();
-  // Il riavvio chiude la sessione lasciata aperta. Se non fosse avvenuto, il
-  // prossimo calibBegin (senza riparazione, repairAllowed) verrebbe rifiutato
-  // e il blocco tornerebbe: nessun parziale committato.
-  if (hadOpenSession) clearPowerCycle('Restart sent: the restart should close the calibration pass left open (a session still open would be refused, never committed).');
-  toast('Controller restarted: reconnect it once it has powered off.', 5000);
+  const controller = ds5;
+  // Il blocco "sessione aperta" si toglie solo con una prova che il riavvio è
+  // avvenuto: la disconnessione HID di QUESTO controller entro pochi secondi
+  // dal comando (vedi il listener 'disconnect'). Un invio rifiutato a
+  // dispositivo aperto non ha riavviato nulla e il blocco resta. Il segno si
+  // mette prima dell'invio: la disconnessione può arrivare prima che reboot()
+  // ritorni. Se il riavvio c'è stato ma il blocco restasse per errore, il
+  // prossimo calibBegin (senza riparazione) verrebbe rifiutato: mai un commit.
+  rebootPending = { controller, at: performance.now() };
+  const { sent } = await controller.reboot();
+  if (ds5 !== controller) {
+    toast('Controller restarting: reconnect it once it has powered off.', 5000);
+    return;
+  }
+  if (!sent) {
+    rebootPending = null;
+    log('Restart not sent: the controller refused the command and is still connected.');
+    toast('The restart didn’t reach the controller. Hold PS for 10 s until the light goes out, then turn it on again.', 8000, { alert: true });
+    return;
+  }
+  toast('Restart sent: reconnect the controller once it has powered off.', 5000);
   // la disconnessione fisica arriverà dall'evento hid
+}
+
+// Finestra entro cui una disconnessione conta come prova del riavvio.
+const REBOOT_DISCONNECT_WINDOW_MS = 5000;
+let rebootPending = null; // { controller, at }
+function rebootConfirmedBy(controller) {
+  const pending = rebootPending;
+  if (!pending || pending.controller !== controller) return false;
+  rebootPending = null;
+  return performance.now() - pending.at <= REBOOT_DISCONNECT_WINDOW_MS;
 }
 
 /* ============================== eventi ============================== */
@@ -2903,6 +2976,10 @@ async function boot() {
   navigator.hid.addEventListener('disconnect', e => {
     if (adopting && e.device === adopting.device) adopting.aborted = true;
     if (ds5 && e.device === ds5.device) {
+      // Disconnessione subito dopo un Restart inviato: il riavvio è avvenuto e
+      // ha chiuso la sessione lasciata aperta.
+      if (rebootConfirmedBy(ds5) && powerCycleApplies())
+        clearPowerCycle('Restart confirmed by the disconnect: the restart should have closed the calibration pass left open (a session still open would be refused, never committed).');
       log('Controller disconnected.');
       teardown('Controller disconnected.');
     }

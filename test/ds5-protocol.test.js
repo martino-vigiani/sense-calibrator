@@ -171,6 +171,40 @@ test('calibBegin({ repair: false }) never sends the repair calibEnd: a refused b
   assert.equal(sent82.length, 1, 'only the begin went out: no calibEnd, no retry');
 });
 
+// Review 2: un calibBegin partito ma senza risposta può aver aperto la
+// sessione nel firmware. Chi chiama deve vederlo (`openSession`), altrimenti
+// dopo un replug la riparazione committerebbe una sessione da 0 campioni.
+test('a calibBegin that went out but got no answer is tagged openSession; one that never left is not', async () => {
+  for (const [name, options, expected] of [
+    ['reply timeout', { reply: healthy({ 0x83: () => ({ hang: true }) }) }, true],
+    ['receive error after the send', { reply: healthy({ 0x83: () => { throw new Error('device closed'); } }) }, true],
+    ['send timeout', { sendFails: () => 'hang' }, true],
+    ['send rejected', { sendFails: () => new Error('NotAllowedError') }, undefined],
+  ]) {
+    const { ds5, run } = setup(options);
+    const { error } = await run(ds5.calibBegin());
+    assert.ok(error, name);
+    assert.equal(error.openSession, expected, name);
+    assert.notEqual(error.committed, true, `${name}: opening a session commits nothing`);
+  }
+  // Controller avvelenato: nessun byte parte, quindi nessuna sessione.
+  const { ds5, run } = setup({ reply: healthy({ 0x83: () => ({ hang: true }) }) });
+  await run(ds5.calibSample().catch(() => {}));
+  const { error } = await run(ds5.calibBegin());
+  assert.equal(error.poisoned, true);
+  assert.equal(error.openSession, undefined);
+});
+
+test('reboot reports whether it went out: a rejection with the device still open is not a restart', async () => {
+  const ok = setup();
+  assert.deepEqual((await ok.run(ok.ds5.reboot())).ok, { sent: true });
+  const refused = setup({ sendFails: () => new Error('NotAllowedError') });
+  assert.equal((await refused.run(refused.ds5.reboot())).ok.sent, false);
+  const dropped = setup();
+  dropped.dev.sendFeatureReport = () => { dropped.dev.opened = false; return Promise.reject(new Error('device closed')); };
+  assert.equal((await dropped.run(dropped.ds5.reboot())).ok.sent, true, 'the controller went away mid-send: expected for a reboot');
+});
+
 // ------------------------------------------------------------ mutex
 
 test('request/response pairs never interleave', async () => {
