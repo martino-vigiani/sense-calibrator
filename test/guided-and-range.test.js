@@ -335,6 +335,10 @@ test('the check step measures circularity on the new range, then runs the drift 
   assert.equal(h.visible('modal-range'), true);
   assert.equal(h.peek().busy, false, 'the check sends nothing and holds no operation');
   assert.equal(h.$('btn-range-done').textContent, 'Skip check');
+  // La riga "There is no Cancel … turn the controller off" della sessione è
+  // falsa qui: c'è Skip check, e spegnere butterebbe il range appena applicato.
+  assert.doesNotMatch(h.$('range-exit-hint').textContent, /no Cancel|turn the controller off/);
+  assert.match(h.$('range-exit-hint').textContent, /Skip check/);
   const sent = A.commandLog.length;
   const end = rotate(h, A, { turns: 1.2 });
   await h.advance(end - h.clock.now() + 200);
@@ -605,4 +609,17 @@ test('with the escape confirmed, a thumb held still at the corner is never sampl
   assert.deepEqual([A.counts.sample, A.counts.end], [4, 1]);
   const cmp = h.peek().lastWizardComparison;
   assert.ok(cmp.measured && cmp.afterWorst < 2, `after ${cmp.afterWorst}%`);
+});
+
+test('a new range session restores the "no Cancel" hint after a previous check step', async () => {
+  const { h, A } = await setup();
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  assert.match(h.$('range-exit-hint').textContent, /There is no Cancel/);
+  await rotateBothWays(h, A);
+  await h.run(h.click('btn-range-done'));
+  assert.match(h.$('range-exit-hint').textContent, /Skip check/);
+  await h.click('btn-range-done'); // Skip check
+  await h.advance(6000);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  assert.match(h.$('range-exit-hint').textContent, /There is no Cancel/);
 });

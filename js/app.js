@@ -2221,6 +2221,7 @@ async function startRange() {
   done.disabled = true;
   done.textContent = 'Done';
   resetRangeReadouts('Extremes not reached yet');
+  $('range-exit-hint').textContent = RANGE_EXIT_HINT_SESSION;
   setRangeIntro(false);
 }
 
@@ -2372,7 +2373,15 @@ async function finishRange() {
 // calibrazione nuova, dà l'errore di circolarità RMS sui 36 settori. Nessun
 // comando al controller; poi il test drift (il range potrebbe spostare il
 // centro: H12, non ancora verificato).
+// Riga fissa sotto la barra: durante la sessione dice che non c'è Cancel e
+// che l'unica uscita è spegnere il controller. Nel controllo successivo è
+// falsa due volte (c'è "Skip check", e spegnere ora butterebbe il range appena
+// applicato), quindi si sostituisce e startRange la rimette.
+const RANGE_EXIT_HINT_SESSION = 'There is no Cancel: this ends when both sticks have covered the whole edge, or when you turn the controller off (hold PS for 10 s).';
+const RANGE_EXIT_HINT_CHECK = 'Nothing is sent to the controller now: rotate once to check, or press Skip check.';
+
 function startRangeCheck() {
+  $('range-exit-hint').textContent = RANGE_EXIT_HINT_CHECK;
   const tracker = createRangeTracker();
   rangeCheck = { tracker, result: null };
   useRangeTracker(tracker);
