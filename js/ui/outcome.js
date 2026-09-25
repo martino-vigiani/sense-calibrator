@@ -514,7 +514,9 @@ export function quickPreflightRoute(driftResult) {
   return null;
 }
 
-export function driftMessage(result, { previous = null, unsaved = false } = {}) {
+// `writeLock`: la modalità di writeLockFor per lo stato attuale ('allowed',
+// 'guarded', 'disabled'): l'invito a salvare compare solo con Write libero.
+export function driftMessage(result, { previous = null, unsaved = false, writeLock = 'allowed' } = {}) {
   const tiers = ['left', 'right'].map(side => stickTier(result, side)).filter(Boolean);
   const worstTier = tiers.sort((a, b) => SEVERITY.indexOf(b.id) - SEVERITY.indexOf(a.id))[0];
   const worst = Math.max(result.left.offset, result.right.offset);
@@ -546,14 +548,16 @@ export function driftMessage(result, { previous = null, unsaved = false } = {}) 
   // "fine to use as it is" dicono di non fare nulla proprio al momento di
   // decidere se scrivere: chi salta Write perde il risultato allo spegnimento.
   // Qui il testo sostiene il salvataggio, salvo quando il risultato non è
-  // migliore di prima (lì decide il pannello dell'esito, con il suo blocco).
+  // migliore di prima o Write è bloccato o protetto (lì decide il pannello
+  // dell'esito, con il suo blocco).
   const settled = !worstTier || worstTier.id === 'centered' || worstTier.id === 'within-1-step';
   if (unsaved && settled) {
     const before = previous ? Math.max(previous.left.offset, previous.right.offset) : null;
     const where = worstTier?.id === 'within-1-step' ? 'Within 1 step of center now.' : 'Centered now.';
-    text = before !== null && worst > before + 1e-9
-      ? `${where} This is not better than before the calibration: check the result panel before writing it to memory.`
-      : `${where} This calibration is still temporary: write it to memory to keep it.`;
+    if (writeLock === 'disabled') text = `${where} Write is off for this calibration: see the result panel for why.`;
+    else if (writeLock === 'guarded' || (before !== null && worst > before + 1e-9))
+      text = `${where} This is not better than before the calibration: check the result panel before writing it to memory.`;
+    else text = `${where} This calibration is still temporary: write it to memory to keep it.`;
   }
   if (noisy && worstTier?.id !== 'moving') {
     text += ' The signal is also noisy at rest, a sign of wear: calibration can re-center the stick, but the noise will stay.';

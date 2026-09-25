@@ -1020,7 +1020,7 @@ function finishDriftTest(result) {
   });
   // Testo e instradamento dal livello peggiore (js/ui/outcome.js): ≥15% →
   // Guided, Pinned → Range poi Guided, rumore → "il rumore resta".
-  $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved }).text;
+  $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved, writeLock: currentWriteLock().mode }).text;
 }
 
 /* ============================== unsaved / flash ============================== */

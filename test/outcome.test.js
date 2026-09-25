@@ -157,6 +157,14 @@ test('a centered retest after an unsaved calibration supports saving instead of 
   assert.doesNotMatch(worse.text, /No calibration needed|write it to memory to keep it/);
   assert.match(worse.text, /not better than before/);
 
+  // Write bloccato o protetto: nessun invito a salvare.
+  const locked = driftMessage(centered, { previous, unsaved: true, writeLock: 'disabled' });
+  assert.doesNotMatch(locked.text, /No calibration needed|write it to memory to keep it/);
+  assert.match(locked.text, /Write is off/);
+  const guarded = driftMessage(centered, { previous, unsaved: true, writeLock: 'guarded' });
+  assert.doesNotMatch(guarded.text, /write it to memory to keep it/);
+  assert.match(guarded.text, /check the result panel/);
+
   // Senza calibrazione attiva il testo di sempre.
   assert.match(driftMessage(centered).text, /No calibration needed/);
   assert.match(driftMessage(centered, { previous, unsaved: false }).text, /No calibration needed/);
