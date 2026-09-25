@@ -2055,7 +2055,7 @@ async function openRange() {
 
 let lastMinmax = 0;
 function updateRangeUI(ts) {
-  if (rangeCheck) { updateRangeCheckUI(); return; }
+  if (rangeCheck) { updateRangeCheckUI(ts); return; }
   const st = rangeStatus(rangeSession.tracker, ts - rangeSession.startTs);
   const pct = Math.round(st.coverage * 100);
   $('range-pct').textContent = `Coverage ${pct}%`;
@@ -2213,18 +2213,25 @@ function startRangeCheck() {
   done.textContent = 'Skip check';
 }
 
-function updateRangeCheckUI() {
+// Chiamata a ogni rAF. #range-hint è role="status": come il suggerimento della
+// sessione range passa da setLive (scrive solo se il testo cambia) e dal
+// cancello di 120 ms, altrimenti la riga di circolarità verrebbe riannunciata
+// ~60 volte al secondo mentre i numeri si muovono.
+let lastCheckHint = 0;
+function updateRangeCheckUI(ts = performance.now()) {
   const { tracker } = rangeCheck;
   const pct = Math.round(rangeStatus(tracker).coverage * 100);
-  $('range-pct').textContent = `Coverage ${pct}%`;
+  setLive($('range-pct'), `Coverage ${pct}%`);
   $('range-bar').style.width = pct + '%';
   const l = circularityRms(tracker.left);
   const r = circularityRms(tracker.right);
   if (l === null || r === null) return;
   rangeCheck.result = [+l.toFixed(1), +r.toFixed(1)];
+  if (ts - lastCheckHint <= 120) return;
+  lastCheckHint = ts;
   const { min, max } = CIRCULARITY_NORMAL;
-  $('range-hint').textContent = `Circularity error: L ${l.toFixed(1)}% · R ${r.toFixed(1)}% (about ${min}–${max}% is normal)`;
-  $('btn-range-done').textContent = 'Run drift test';
+  setLive($('range-hint'), `Circularity error: L ${l.toFixed(1)}% · R ${r.toFixed(1)}% (about ${min}–${max}% is normal)`);
+  setLive($('btn-range-done'), 'Run drift test');
 }
 
 function finishRangeCheck() {

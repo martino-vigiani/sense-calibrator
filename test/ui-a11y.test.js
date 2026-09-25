@@ -107,6 +107,40 @@ test('#range-hint (role=status) is written only when its text changes', async ()
   await h.run(h.click('btn-range-done'));
 });
 
+// Rotazione di entrambi gli stick dalla mano del DualSense virtuale.
+function rotate(h, dev, { turns, secPerTurn = 0.8, dir = 1, amp = 127.5, from = h.clock.now() + 10 }) {
+  const dur = turns * secPerTurn * 1000;
+  for (const stick of [0, 1]) {
+    dev.touches.push({
+      stick, t0: from, dur, tail: 1,
+      at: (t, ax) => { const a = dir * 2 * Math.PI * (t - from) / (secPerTurn * 1000); return amp * (ax === 0 ? Math.cos(a) : Math.sin(a)); },
+    });
+  }
+  return from + dur;
+}
+
+test('#range-hint on the range check step is written only when its text changes', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { seed: 21 });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.run(h.click('btn-range'));
+  const e1 = rotate(h, dev, { turns: 2.2 });
+  const e2 = rotate(h, dev, { turns: 1.2, dir: -1, from: e1 });
+  await h.advance(e2 - h.clock.now() + 100);
+  await h.run(h.click('btn-range-done'));
+  assert.ok(h.peek().rangeCheck, 'on the check step');
+  const turning = countWrites(h.$('range-hint'), 'textContent');
+  const end = rotate(h, dev, { turns: 1.2 });
+  await h.advance(end - h.clock.now() + 200);
+  assert.equal(turning.length, turning.filter((w, i) => i === 0 || w !== turning[i - 1]).length, 'no identical rewrite while turning');
+  assert.ok(turning.length <= Math.ceil((1.2 * 800 + 200) / 120) + 1, `throttled to the 120 ms tick, got ${turning.length}`);
+  const resting = countWrites(h.$('range-hint'), 'textContent');
+  await h.advance(2000); // stick a riposo, passo di verifica ancora aperto
+  assert.match(h.$('range-hint').textContent, /^Circularity error/);
+  assert.ok(resting.length <= 1, `a resting stick keeps the same check hint, got ${resting.length} writes`);
+});
+
 test('setLive skips identical text and identical HTML', async () => {
   const h = await connected();
   const el = h.$('quick-msg');
