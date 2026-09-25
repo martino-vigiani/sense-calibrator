@@ -252,7 +252,7 @@ async function assertReloadedPageBlocked(clock, dev, session) {
   const h2 = await loadApp({ clock, authorized: [dev], session });
   await h2.advance(5000);
   assert.ok(h2.peek().ds5, 'reconnected after the reload');
-  assert.ok(h2.eval('powerCycleLock'), 'the reloaded page is blocked');
+  assert.ok(h2.eval('powerCycleApplies()'), 'the reloaded page is blocked');
   assert.equal(h2.eval('repairAllowed'), false, 'and never repairs');
   assert.match(h2.$('calib-outcome').innerHTML, /reloaded/);
   assert.equal(h2.$('btn-flash').disabled, true);
@@ -335,7 +335,7 @@ test('a Quick that closes every session leaves no flag behind and repair stays a
   assert.ok(dev.committedSamples.every(n => n === 12));
   assert.equal(session.has(FLAG), false);
   assert.equal(h.eval('repairAllowed'), true);
-  assert.equal(h.eval('powerCycleLock'), null);
+  assert.equal(h.eval('powerCycleLocks.size'), 0);
 });
 
 test('a Guided run that completes leaves no flag behind', async () => {
@@ -387,7 +387,7 @@ for (const flow of ['quick', 'wizard']) test(`${flow}: a calibBegin whose reply 
     await h.run(go);
   }
   assert.ok(dev.cal, 'the firmware session is open');
-  assert.ok(h.eval('powerCycleLock'), 'the open session is tracked');
+  assert.ok(h.eval('powerCycleApplies()'), 'the open session is tracked');
   dev.unplug(); h.hid.fire('disconnect', dev);
   await h.advance(1000);
   dev.unplugged = false; dev.open(); dev.stopped = false; dev.schedule();
@@ -458,4 +458,131 @@ test('a Restart sent but never followed by a disconnect keeps the lock; a later 
   assert.ok(h.peek().ds5);
   assert.equal(h.$('btn-flash').disabled, true, 'an unplug long after Restart is not a reboot');
   assert.deepEqual(dev.committedSamples, []);
+});
+
+// ---- Blocco per controller (A → B → A): prima uno slot solo, e il blocco di
+// B sostituiva quello di A. Tutto model-verified.
+
+// Stallo sul controller già collegato: la sessione resta aperta nel firmware.
+async function stallConnected(h, dev) {
+  onCommand(dev, 'sample', 2, () => {
+    dev.touches.push({ stick: 0, t0: h.clock.now() + 10, dur: 60_000, tail: 100, amp: [8, 0] });
+  });
+  const begins = dev.counts.begin;
+  await h.click('btn-quick');
+  const running = h.click('btn-quick-go');
+  await h.advance(22_000);
+  await h.click('btn-quick-cancel');
+  await h.run(running);
+  assert.equal(dev.counts.begin, begins + 1);
+  assert.ok(dev.cal, 'the firmware session is still open');
+  await h.advance(70_000);
+}
+
+// Collega `dev` al posto del controller attuale (Disconnect confermato + Connect).
+async function swapTo(h, dev) {
+  h.confirmAnswer = true;
+  if (h.peek().ds5) await h.run(h.click('btn-disconnect'));
+  await h.advance(1000);
+  if (dev.stopped) { dev.open(); dev.stopped = false; dev.schedule(); }
+  h.hid.chooser.splice(0, Infinity, dev);
+  await h.run(h.click('btn-connect'));
+  await h.advance(5000);
+  assert.equal(h.peek().ds5?.device, dev);
+}
+
+async function assertBlocked(h, dev, what) {
+  assert.equal(h.$('btn-flash').disabled, true, `Write disabled on ${what}`);
+  assert.match(h.$('banner-lock').textContent, /left open/);
+  const before = { ...calibCounts(dev), nvs: dev.counts.nvs };
+  await h.run(h.ctx.doFlash());
+  await tryQuick(h);
+  assert.deepEqual({ ...calibCounts(dev), nvs: dev.counts.nvs }, before, `no calibration or NVS command on ${what}`);
+  assert.deepEqual(dev.committedSamples, [], `the partial session of ${what} was never committed`);
+}
+
+test('A → B → A, both leaving a session open: the lock of B does not replace the lock of A', async () => {
+  const { h, clock, dev: A } = await stallFirstPass({ serial: 'E8475C3A1B2F' });
+  const B = withSerial(realisticFirmware(makeDevice(clock, { seed: 41, drift: DRIFTING })), 'F1111111AAAA');
+  await swapTo(h, B);
+  assert.equal(h.$('btn-flash').disabled, false, 'B does not inherit the lock of A');
+  await stallConnected(h, B);
+  assert.equal(h.eval('powerCycleLocks.size'), 2);
+  await swapTo(h, A);
+  assert.match(h.$('calib-outcome').innerHTML, /Restart the controller before calibrating/);
+  await assertBlocked(h, A, 'A');
+  await swapTo(h, B);
+  await assertBlocked(h, B, 'B');
+});
+
+test('confirming the power-off of B leaves the lock of A in place', async () => {
+  const { h, clock, dev: A } = await stallFirstPass({ serial: 'E8475C3A1B2F' });
+  const B = withSerial(realisticFirmware(makeDevice(clock, { seed: 41, drift: DRIFTING })), 'F1111111AAAA');
+  await swapTo(h, B);
+  await stallConnected(h, B);
+  h.eval("runOutcomeAction('powered-off')");
+  assert.equal(h.eval('powerCycleApplies()'), false, 'B is unblocked');
+  await swapTo(h, A);
+  await assertBlocked(h, A, 'A');
+});
+
+test('a reload with the single-slot flag blocks every controller until each one shows its own restart', async () => {
+  const clock = new VClock();
+  const A = withSerial(realisticFirmware(makeDevice(clock, { seed: 11, drift: DRIFTING })), 'E8475C3A1B2F');
+  const B = withSerial(realisticFirmware(makeDevice(clock, { seed: 41, drift: DRIFTING })), 'F1111111AAAA');
+  // Valore scritto da una pagina precedente (anche di una versione precedente):
+  // non dice né quanti né quali controller avevano una sessione aperta.
+  const session = new Map([[FLAG, '1']]);
+  const h = await loadApp({ clock, authorized: [A], chooser: [A], session });
+  await h.advance(5000);
+  assert.equal(h.peek().ds5?.device, A);
+  assert.match(h.$('calib-outcome').innerHTML, /reloaded/);
+  assert.equal(h.$('btn-flash').disabled, true);
+  h.confirmAnswer = true;
+  h.eval("runOutcomeAction('powered-off')");
+  assert.equal(h.$('btn-flash').disabled, false, 'A confirmed its own power-off');
+  assert.equal(session.get(FLAG), '1', 'the flag stays: other controllers may still have a session open');
+  await swapTo(h, B);
+  assert.match(h.$('calib-outcome').innerHTML, /reloaded/);
+  await assertBlocked(h, B, 'B');
+  await swapTo(h, A);
+  assert.equal(h.$('btn-flash').disabled, false, 'A stays unblocked for this page');
+  assert.equal(h.eval('repairAllowed'), false, 'and still never repairs');
+});
+
+test('an unknown value in the flag blocks, it never unblocks', async () => {
+  const clock = new VClock();
+  const A = withSerial(realisticFirmware(makeDevice(clock, { seed: 11, drift: DRIFTING })), 'E8475C3A1B2F');
+  const h = await loadApp({ clock, authorized: [A], session: new Map([[FLAG, '{"v":2}']]) });
+  await h.advance(5000);
+  await assertBlocked(h, A, 'A');
+});
+
+test('a keyless lock (unreadable serial) applies to every controller, and a restart elsewhere does not clear it', async () => {
+  const { h, clock, dev: X } = await stallFirstPass(); // seriale illeggibile
+  assert.equal(h.eval('[...powerCycleLocks.keys()].join()'), '', 'keyless lock');
+  const B = withSerial(realisticFirmware(makeDevice(clock, { seed: 41, drift: DRIFTING })), 'F1111111AAAA');
+  await swapTo(h, B);
+  assert.equal(h.$('btn-flash').disabled, true, 'B may be X: blocked');
+  h.eval("runOutcomeAction('powered-off')");
+  assert.equal(h.$('btn-flash').disabled, false, 'B confirmed its own power-off');
+  await stallConnected(h, B);
+  const C = withSerial(realisticFirmware(makeDevice(clock, { seed: 51, drift: DRIFTING })), 'C0C0C0C0C0C0');
+  await swapTo(h, C);
+  await assertBlocked(h, C, 'C');
+  await swapTo(h, X);
+  await assertBlocked(h, X, 'X');
+});
+
+test('a controller with an unreadable serial cannot clear the lock of a known controller', async () => {
+  const { h, clock, dev: A } = await stallFirstPass({ serial: 'E8475C3A1B2F' });
+  const X = realisticFirmware(makeDevice(clock, { seed: 41, drift: DRIFTING })); // seriale illeggibile
+  await swapTo(h, X);
+  assert.equal(h.eval('powerCycleApplies()'), true, 'X may be A: blocked');
+  h.eval("runOutcomeAction('powered-off')");
+  assert.equal(h.eval('powerCycleApplies()'), true, 'X may not be A: the lock of A stays');
+  assert.match(h.$('calib-outcome').innerHTML, /Restart the controller before calibrating/);
+  await assertBlocked(h, X, 'X');
+  await swapTo(h, A);
+  await assertBlocked(h, A, 'A');
 });

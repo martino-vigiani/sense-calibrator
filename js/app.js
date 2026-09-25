@@ -1260,39 +1260,105 @@ let quickCancelRequested = false;
 // riavviato. Il blocco segue il CONTROLLER, non l'oggetto DS5: Disconnect +
 // Connect, un reload o un replug non lo spengono, la sessione resta aperta nel
 // firmware e il prossimo calibBegin, rifiutato, verrebbe "riparato" con un
-// calibEnd che committa il parziale (anche 0 campioni) senza consenso. Come
-// rangeWriteLocks usa la chiave salata del seriale (un seriale illeggibile conta
-// come lo stesso controller). Il segno in sessionStorage non porta nessun
-// identificativo: dopo un reload il blocco vale per qualunque controller, e
-// l'utente lo toglie con Restart o confermando di averlo spento.
+// calibEnd che committa il parziale (anche 0 campioni) senza consenso.
 // Si toglie SOLO con un Restart inviato o con la conferma esplicita di uno
 // spegnimento: la pagina non distingue uno spegnimento da uno stacco.
+//
+// Un blocco per controller, come rangeWriteLocks: chiave salata del seriale →
+// { controller, reload, exempt }. Prima era uno slot solo, e un blocco messo
+// su B sostituiva quello di A: A → B → A (entrambi con una sessione aperta)
+// ritrovava Write abilitato su A. Un controller diverso (due seriali noti e
+// diversi) non eredita il blocco di un altro, ma quel blocco NON decade: resta
+// sospeso e torna quando si ricollega il suo controller. Un seriale
+// illeggibile conta come lo stesso controller: un blocco senza chiave vale per
+// tutti, salvo i controller che hanno poi dimostrato il proprio riavvio
+// (`exempt`), e un controller senza seriale leggibile non toglie i blocchi con
+// chiave (potrebbe non essere il loro controller).
+//
+// Il segno in sessionStorage non porta nessun identificativo (la chiave è
+// salata per pagina e non si salva): dice solo che almeno un controller di
+// questa scheda aveva una sessione aperta. Dopo un reload diventa un blocco
+// senza chiave, che vale per QUALUNQUE controller finché ciascuno non mostra il
+// proprio riavvio; un solo riavvio non libera gli altri, perché il segno non
+// dice quanti e quali controller erano bloccati. Il formato è lo stesso di
+// prima ('1', una pagina precedente lo legge e lo scrive uguale) e qualunque
+// valore non vuoto conta come blocco: un valore sconosciuto (formato futuro,
+// dato corrotto) blocca, non sblocca.
 const TAB_POWER_CYCLE_KEY = 'sense-power-cycle-in-tab';
 function tabPowerCycleFlag() {
-  try { return tabStore()?.getItem(TAB_POWER_CYCLE_KEY) === '1'; } catch { return false; }
+  try { return !!tabStore()?.getItem(TAB_POWER_CYCLE_KEY); } catch { return false; }
 }
-let powerCycleLock = tabPowerCycleFlag() ? { controller: null, key: null, reload: true } : null; // { controller, key, reload }
+const powerCycleLocks = new Map();
+if (tabPowerCycleFlag()) powerCycleLocks.set(null, { controller: null, reload: true, exempt: new Set() });
 // Seconda linea di difesa: da quando questa scheda ha lasciato (o ereditato
 // da un reload) una sessione aperta, calibBegin non ripara più una sessione
 // rifiutata: fallisce e rimette il blocco. Così una conferma di spegnimento
 // sbagliata, o un Restart che non ha riavviato nulla, non committa il parziale.
-let repairAllowed = !powerCycleLock;
+let repairAllowed = !powerCycleLocks.size;
 
+// Il segno segue la mappa: resta finché c'è almeno un blocco (anche solo
+// sospeso per il controller collegato).
+function syncPowerCycleFlag() {
+  try {
+    if (powerCycleLocks.size) tabStore()?.setItem(TAB_POWER_CYCLE_KEY, '1');
+    else tabStore()?.removeItem(TAB_POWER_CYCLE_KEY);
+  } catch { /* storage negato: resta il blocco in memoria */ }
+}
+
+// `key`: chiave letta quando il ciclo è partito (il controller può essersi
+// staccato nel frattempo, e teardown azzera deviceKey). Sostituisce solo il
+// blocco di quel controller; un nuovo blocco senza chiave riparte senza
+// esenzioni (il controller illeggibile potrebbe essere uno di quelli esentati).
 function markPowerCycle(controller, key) {
-  powerCycleLock = { controller, key: key ?? null, reload: false };
+  powerCycleLocks.set(key ?? null, { controller, reload: false, exempt: new Set() });
   repairAllowed = false;
   // Il blocco sostituisce il segno provvisorio della sessione in volo: il suo
   // rilascio non deve più togliere nulla.
   sessionGuard = null;
-  try { tabStore()?.setItem(TAB_POWER_CYCLE_KEY, '1'); } catch { /* storage negato: resta il blocco in memoria */ }
+  syncPowerCycleFlag();
   updateWriteLock();
 }
 
-function clearPowerCycle(reason) {
-  if (!powerCycleLock) return;
-  powerCycleLock = null;
-  try { tabStore()?.removeItem(TAB_POWER_CYCLE_KEY); } catch { /* niente da togliere */ }
-  log(reason);
+// Il blocco che vale per `controller` (con chiave `key`), o null. Vale il
+// blocco messo su quello stesso oggetto DS5, quello con la stessa chiave, e
+// quelli le cui chiavi non si possono confrontare (una delle due manca:
+// prudente), salvo l'esenzione di un blocco senza chiave per un controller che
+// ha mostrato il proprio riavvio.
+function powerCycleLockFor(controller, key) {
+  let found = null;
+  for (const [lockKey, lock] of powerCycleLocks) {
+    if ((controller && lock.controller === controller) || (lockKey !== null && lockKey === key)) return lock;
+    if (lockKey !== null && key !== null) continue;
+    if (key !== null && lock.exempt.has(key)) continue;
+    found ??= lock;
+  }
+  return found;
+}
+
+// Riavvio mostrato (Restart confermato dallo scollegamento, o spegnimento
+// confermato) per il controller `controller`/`key`: toglie SOLO il suo blocco.
+// Con la chiave: il blocco con quella chiave decade, e il blocco senza chiave
+// smette di valere per lui (resta per gli altri). Senza chiave: decade il
+// blocco senza chiave; i blocchi con chiave restano, perché questo potrebbe
+// non essere il loro controller.
+function clearPowerCycle(reason, controller = ds5, key = deviceKey) {
+  if (!powerCycleLockFor(controller, key)) return;
+  if (key !== null) {
+    powerCycleLocks.delete(key);
+    powerCycleLocks.get(null)?.exempt.add(key);
+  } else {
+    powerCycleLocks.delete(null);
+  }
+  // Blocchi messi su questo stesso oggetto DS5 sono suoi, qualunque chiave.
+  for (const [lockKey, lock] of powerCycleLocks) {
+    if (controller && lock.controller === controller) powerCycleLocks.delete(lockKey);
+  }
+  syncPowerCycleFlag();
+  if (powerCycleLockFor(controller, key)) {
+    log('Another controller used in this tab still has a calibration pass left open, and this one can’t be told apart from it (its serial number can’t be read): calibration and saving stay blocked.');
+  } else {
+    log(reason);
+  }
   updateWriteLock();
 }
 
@@ -1303,7 +1369,7 @@ function clearPowerCycle(reason) {
 // pagina nuova partirebbe con repairAllowed = true, cioè con un calibBegin che
 // "ripara" il parziale committandolo. Con il segno la pagina nuova torna
 // bloccata (reload: true) e non ripara mai. In memoria cambia solo
-// repairAllowed: il blocco vero (powerCycleLock) lo mette chi vede la sessione
+// repairAllowed: il blocco vero (powerCycleLocks) lo mette chi vede la sessione
 // restare aperta. Il rilascio, dopo il calibEnd riuscito di quella sessione o a
 // ciclo finito senza blocco, rimette lo stato di prima; dopo un markPowerCycle
 // non fa nulla (il segno ora è del blocco).
@@ -1319,30 +1385,28 @@ function releaseSessionGuard(guard) {
   if (!guard || sessionGuard !== guard) return;
   sessionGuard = null;
   repairAllowed = guard.repairAllowed;
-  if (!guard.hadFlag && !powerCycleLock) {
+  if (!guard.hadFlag && !powerCycleLocks.size) {
     try { tabStore()?.removeItem(TAB_POWER_CYCLE_KEY); } catch { /* niente da togliere */ }
   }
 }
 
-// Vale per il controller collegato: lo stesso oggetto DS5, oppure uno la cui
-// chiave coincide o non si può confrontare (prudente).
+// Vale per il controller collegato (vedi powerCycleLockFor).
 function powerCycleApplies() {
-  if (!ds5 || !powerCycleLock) return false;
-  if (powerCycleLock.controller === ds5) return true;
-  return !(deviceKey && powerCycleLock.key && deviceKey !== powerCycleLock.key);
+  return !!ds5 && !!powerCycleLockFor(ds5, deviceKey);
 }
 
-// Al collegamento: se il blocco vale per il controller appena adottato, il
+// Al collegamento: se un blocco vale per il controller appena adottato, il
 // pannello lo dice subito, con Restart e la conferma di spegnimento.
 function reapplyPowerCycle() {
-  if (!powerCycleLock) return;
-  if (!powerCycleApplies()) {
-    log('A different controller is connected: the open calibration session of the previous one does not apply to it.');
+  if (!powerCycleLocks.size) return;
+  const lock = ds5 ? powerCycleLockFor(ds5, deviceKey) : null;
+  if (!lock) {
+    log('A different controller is connected: the open calibration session of the previous one does not apply to it (it still applies to that controller).');
     updateWriteLock();
     return;
   }
   log('This controller may still have a calibration pass left open: restart it before calibrating or saving.');
-  showOutcome(powerCycleReminderView({ reload: powerCycleLock.reload }));
+  showOutcome(powerCycleReminderView({ reload: lock.reload }));
 }
 
 function blockedForPowerCycle() {
@@ -1359,7 +1423,10 @@ function confirmPoweredOff() {
   const ok = confirm('Continue only if you turned the controller off (held PS for 10 s until the light went out, or used Restart) after the calibration pass was left open. Disconnecting or unplugging the cable doesn’t count. Did you turn it off?');
   if (!ok) return;
   clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.');
-  clearOutcome();
+  // Un controller dal seriale illeggibile non toglie i blocchi con chiave
+  // (vedi clearPowerCycle): se uno vale ancora, il promemoria resta.
+  if (powerCycleApplies()) reapplyPowerCycle();
+  else clearOutcome();
 }
 
 const QUICK_INTRO = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
