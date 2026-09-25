@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY_DEFAULTS, QUICK_CATASTROPHIC_PCT, classifyOutcome, decideAfterPass } from '../js/calib/quick-policy.js';
+import { POLICY_DEFAULTS, QUICK_CATASTROPHIC_PCT, QUICK_CEILING_MARGIN, classifyOutcome, decideAfterPass } from '../js/calib/quick-policy.js';
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import { QUICK_CENTER_RADIUS } from '../js/quick-center-guard.js';
 import { replayDecisions } from '../ops/sim/replay-sequences.mjs';
@@ -95,6 +95,31 @@ test('[100,100] ends as catastrophic, not converged', () => {
   // Anche dopo passate buone: il tetto vale a ogni passata, prima della convergenza.
   assert.deepEqual(stopOf([3, 15, 15]), [2, 'catastrophic']);
   assert.deepEqual(stopOf([3, 14.9, 14.9]), [4, 'budget'], 'just below the ceiling the old recovery rule applies');
+});
+
+// Review finding (model-verified, alt1-s2 #144, noisy-hold alt1-s3 #459): da
+// una partenza a 8.39 il plateau [14.52, 14.52] è a un passo da 15.3. La regola
+// precedente si fermava lì (worse-than-start, sotto il 15%); la continuazione
+// di recupero spendeva una terza passata e finiva catastrophic.
+test('no recovery or plateau pass within one lattice step of the ceiling', () => {
+  assert.ok(Math.abs(QUICK_CEILING_MARGIN - 0.784 * Math.SQRT2) < 0.01);
+  const d = decideAfterPass(
+    { pass: 2, worst: 14.52, beforeWorst: 8.393, prevWorst: 14.52, bestWorst: 8.393, bestPass: 14.52 },
+    QUICK_DEFAULTS,
+  );
+  assert.equal(d.stop, true);
+  assert.equal(d.reason, 'near-ceiling');
+  assert.equal(d.extra, null);
+  assert.deepEqual(stopOf([14.52, 14.52, 15.3], { beforeWorst: 8.393 }), [2, 'near-ceiling']);
+  assert.equal(classifyOutcome({ worst: 14.52, beforeWorst: 8.393, bestWorst: 8.393, maxNoise: 0.3, unstableEvents: 0, passes: [14.52, 14.52] }, QUICK_DEFAULTS), 'worse-than-start');
+  // Just outside the margin the recovery continuation still applies.
+  assert.ok(stopOf([13.5, 13.5, 3], { beforeWorst: 8.393 })[0] >= 3, 'the recovery pass is still taken at 13.5');
+  // Plateau continuation, if ever enabled, is capped the same way.
+  const plateau = decideAfterPass(
+    { pass: 2, worst: 14.2, beforeWorst: 14.3, prevWorst: 14.2, bestWorst: 14.2, bestPass: 14.2 },
+    { ...QUICK_DEFAULTS, plateauExtraPasses: 2 },
+  );
+  assert.deepEqual([plateau.stop, plateau.reason], [true, 'converged']);
 });
 
 test('a plateau worse than the start is not convergence (bestWorst seeded with before)', () => {

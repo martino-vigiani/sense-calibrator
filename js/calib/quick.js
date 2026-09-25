@@ -509,6 +509,10 @@ export async function runQuick({
         log('Converged: residual offset at the noise floor, further passes won’t help.');
         break;
       }
+      if (decision.reason === 'near-ceiling') {
+        log(`Still worse than the starting point, but within one step of ${p.catastrophicPct}%: stopping, another pass could cross it.`);
+        break;
+      }
       if (decision.reason === 'floor-cap') {
         log('Still worse than the starting point, but the other stick is centered: stopping to avoid disturbing it.');
         break;

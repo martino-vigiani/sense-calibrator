@@ -1,5 +1,7 @@
 'use strict';
 
+import { LSB_PCT } from './lattice.js';
+
 // Regole di arresto ed esito della calibrazione rapida, come funzioni pure.
 // Il simulatore e ops/sim/replay-sequences.mjs le applicano a sequenze di
 // passate reali o sintetiche per confrontare varianti di `params` senza
@@ -14,6 +16,17 @@
 // ([100,100], [16…16] nei dati reali). Il recupero è un'opzione esplicita
 // dell'utente (quick-safety / UX dei risultati), non una decisione del ciclo.
 export const QUICK_CATASTROPHIC_PCT = 15;
+
+// Margine sotto il tetto entro cui la regola NON aggiunge passate rispetto a
+// quella precedente (recupero, continuazione su plateau): un passo di reticolo
+// su entrambi gli assi, 1 LSB·√2 ≈ 1.109 punti. Un plateau a 14.52 (dopo una
+// partenza a 8.39) è a un passo da 15.3: la regola precedente si fermava lì
+// ("worse-than-start", sotto il 15%), la continuazione di recupero spendeva
+// un'altra passata irreversibile e finiva 'catastrophic' (model-verified,
+// ops/sim alt1-s2 #144 e noisy-hold alt1-s3 #459). §4.5 revoca la release per
+// UNA sola sessione partita sotto il 15% che finisce oltre: le passate in più
+// non si prendono dove un passo basta a superarlo.
+export const QUICK_CEILING_MARGIN = LSB_PCT * Math.SQRT2;
 
 // Un passo di quantizzazione: 1 LSB = 0.784 punti, e con un solo asse a 1 LSB
 // dal centro l'offset vale 1.240%. Fino a 1.25 il residuo è "entro un passo"
@@ -46,6 +59,7 @@ export const POLICY_DEFAULTS = Object.freeze({
   withinOneStepMax: QUICK_WITHIN_ONE_STEP_MAX,
   plateauExtraPasses: QUICK_PLATEAU_EXTRA_PASSES,
   extraAtFloorCap: QUICK_EXTRA_AT_FLOOR_CAP,
+  ceilingMargin: QUICK_CEILING_MARGIN,
   seedBestWithBefore: true,
 });
 const withDefaults = params => ({ ...POLICY_DEFAULTS, ...params });
@@ -63,8 +77,9 @@ const withDefaults = params => ({ ...POLICY_DEFAULTS, ...params });
 // extraUsed }: il chiamante ripassa lo stato alla passata successiva.
 // reason: 'target' | 'catastrophic' | 'converged' | 'floor-cap' (plateau
 //         peggiore dell'inizio, ma lo stick buono è al pavimento e la passata
-//         extra concessa è già stata spesa) | 'budget' (passate finite) |
-//         'continue'.
+//         extra concessa è già stata spesa) | 'near-ceiling' (plateau entro
+//         un passo di reticolo dal tetto: nessuna passata extra) | 'budget'
+//         (passate finite) | 'continue'.
 // `extra`: null, oppure perché si continua dove la regola precedente si
 //         fermava: 'recovery' (plateau peggiore dell'inizio) o 'plateau'
 //         (continuazione su plateau). `regressed` = la passata è peggiore
@@ -104,6 +119,9 @@ export function decideAfterPass(state, params) {
   if (worst >= p.catastrophicPct) return out(true, 'catastrophic', { regressed });
   const lastPass = pass >= p.maxPasses;
   const atFloor = otherWorst !== null && otherWorst < p.okMax;
+  // Vicino al tetto una passata in più può superarlo con un solo passo: le
+  // passate che questa regola aggiunge (recupero, plateau) non si prendono.
+  const nearCeiling = worst >= p.catastrophicPct - p.ceilingMargin;
   // Plateau vicino alla migliore passata: per la regola precedente era
   // convergenza. Un plateau raggiunto DOPO una regressione (5.0 → 5.4 → 5.35)
   // non lo era già prima, e continua senza limiti come allora.
@@ -113,12 +131,13 @@ export function decideAfterPass(state, params) {
       // convergenza, si usa il budget per recuperare. Ma se lo stick buono è
       // al pavimento, una sola passata in più.
       if (lastPass) return out(true, 'budget', { regressed });
+      if (nearCeiling) return out(true, 'near-ceiling', { regressed });
       if (atFloor && extraUsed >= p.extraAtFloorCap) return out(true, 'floor-cap', { regressed });
       return out(false, 'continue', { regressed, extra: 'recovery', extraUsed: extraUsed + 1 });
     }
     // Convergenza vera, salvo continuazione su plateau (0 di default).
     const allowed = atFloor ? Math.min(p.plateauExtraPasses, p.extraAtFloorCap) : p.plateauExtraPasses;
-    if (extraUsed < allowed && !lastPass) {
+    if (extraUsed < allowed && !lastPass && !nearCeiling) {
       return out(false, 'continue', { regressed, extra: 'plateau', extraUsed: extraUsed + 1 });
     }
     return out(true, 'converged', { regressed });
