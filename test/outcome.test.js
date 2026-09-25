@@ -5,7 +5,7 @@ import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../js/calib/quick-polic
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
   FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
-  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, quickOutcomeView, rangeOutcomeView, render,
+  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, rangeOutcomeView, render,
   revertAdvice, stickRows, writeLockFor,
 } from '../js/ui/outcome.js';
 import { replayOutcomes } from '../ops/sim/replay-telemetry.mjs';
@@ -208,8 +208,38 @@ test('outcome-specific copy: within 1 step, Try Guided, lost ground, moved and u
   assert.equal(centered.tone, 'ok');
 
   const already = quickOutcomeView({ outcome: 'already-centered', worst: null, beforeWorst: 0.555 });
-  assert.equal(already.center, null, 'nothing was sent: the Write state does not change');
+  // Nothing was sent, but what was just measured replaces the previous center
+  // result: an old catastrophic/worse-than-start verdict must not keep Write off
+  // on sticks measured centered (review finding: stale Write lock).
+  assert.deepEqual(already.center, {
+    outcome: 'already-centered', worst: 0.555, beforeWorst: 0.555, bestWorst: 0.555, pinned: false, committed: false,
+  });
+  assert.equal(writeLockFor({ center: already.center }).mode, 'allowed', 'measured centered: Write allowed, never "unverified"');
   assert.match(already.title, /nothing was sent/);
+});
+
+test('a stall reports "nothing was committed" only when that is true', () => {
+  const first = quickOutcomeView({ outcome: 'stalled', committed: true, needsPowerCycle: true, pass: 1, committedBefore: false });
+  assert.match(textOf(first), /Nothing was committed/);
+  const second = quickOutcomeView({ outcome: 'stalled', committed: true, needsPowerCycle: true, pass: 2, committedBefore: true });
+  assert.doesNotMatch(textOf(second), /Nothing was committed/);
+  assert.match(textOf(second), /Pass 2 was abandoned/);
+  assert.match(textOf(second), /previous pass is active on the controller and hasn’t been saved/);
+  const repaired = quickOutcomeView({ outcome: 'stalled', committed: true, needsPowerCycle: true, pass: 1, committedBefore: true });
+  assert.doesNotMatch(textOf(repaired), /Nothing was committed/);
+  assert.match(textOf(repaired), /already changed the calibration/);
+  for (const v of [first, second, repaired]) {
+    assert.equal(writeLockFor({ center: v.center }).mode, 'disabled');
+    assert.match(textOf(v), /Turn the controller off/);
+  }
+});
+
+test('the power-cycle reminder offers Restart and an explicit power-off confirmation', () => {
+  const view = powerCycleReminderView();
+  assert.equal(view.center, null);
+  assert.deepEqual(view.actions.map(a => a.id), ['restart', 'powered-off']);
+  assert.match(textOf(view), /doesn’t turn it off/);
+  assert.match(textOf(powerCycleReminderView({ reload: true })), /reloaded/);
 });
 
 test('pinned after calibration disables Write and routes to Range, then Guided', () => {

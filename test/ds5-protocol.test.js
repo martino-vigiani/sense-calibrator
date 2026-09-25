@@ -159,6 +159,18 @@ test('a calibBegin repair whose calibEnd times out reports committed on the thro
   assert.ok(ds5.poisoned);
 });
 
+test('calibBegin({ repair: false }) never sends the repair calibEnd: a refused begin fails with openSession', async () => {
+  const { dev, ds5, run } = setup({
+    reply: healthy({ 0x83: () => [0x83, 0, 0, 0] }), // begin rifiutato: sessione aperta
+  });
+  const { error } = await run(ds5.calibBegin({ repair: false }));
+  assert.ok(error);
+  assert.equal(error.openSession, true);
+  assert.equal(error.committed, false);
+  const sent82 = dev.events.filter(e => e[0] === 'send' && e[1] === 0x82);
+  assert.equal(sent82.length, 1, 'only the begin went out: no calibEnd, no retry');
+});
+
 // ------------------------------------------------------------ mutex
 
 test('request/response pairs never interleave', async () => {

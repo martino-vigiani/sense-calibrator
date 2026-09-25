@@ -14,7 +14,7 @@ import { runQuick } from './calib/quick.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
 import {
-  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, quickOutcomeView, rangeOutcomeView,
+  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView, rangeOutcomeView,
   revertAdvice, stickTier, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -642,6 +642,7 @@ async function adopt(device) {
     const nv = await refreshNv();
     if (ds5 !== candidate) return;
     reapplyRangeWriteLock(key);
+    reapplyPowerCycle();
 
     $('view-hero').classList.add('hidden');
     $('view-device').classList.remove('hidden');
@@ -1058,7 +1059,7 @@ function currentWriteLock() {
     center: centerState,
     range,
     poisoned: !!ds5?.poisoned,
-    needsPowerCycle: !!ds5 && ds5 === powerCycleController,
+    needsPowerCycle: powerCycleApplies(),
   });
 }
 
@@ -1102,6 +1103,8 @@ function runOutcomeAction(action) {
   else if (action === 'quick') $('btn-quick').click();
   else if (action === 'retest') startDriftTest();
   else if (action === 'recovery') openQuickRecovery();
+  else if (action === 'restart') rebootController();
+  else if (action === 'powered-off') confirmPoweredOff();
 }
 
 // Modale di Write: le cifre dell'ultimo esito e, se l'esito è peggiore
@@ -1235,16 +1238,81 @@ let quickRecoveryNext = false;
 // abbandonare la passata senza calibEnd. Fuori dallo stallo è ignorato.
 let quickStallCancelable = false;
 let quickCancelRequested = false;
-// Controller con una sessione di calibrazione lasciata aperta da uno stallo:
-// nessun comando di calibrazione o scrittura finché non viene riavviato e
-// ricollegato (un nuovo DS5 è un oggetto diverso, quindi il blocco decade da
-// solo alla riconnessione).
-let powerCycleController = null;
+// Controller con una sessione di calibrazione lasciata aperta (stallo di
+// Quick, errore o scollegamento fra calibBegin e calibEnd in Quick o nel
+// wizard): nessun comando di calibrazione o scrittura finché non viene
+// riavviato. Il blocco segue il CONTROLLER, non l'oggetto DS5: Disconnect +
+// Connect, un reload o un replug non lo spengono, la sessione resta aperta nel
+// firmware e il prossimo calibBegin, rifiutato, verrebbe "riparato" con un
+// calibEnd che committa il parziale (anche 0 campioni) senza consenso. Come
+// rangeWriteLock usa la chiave salata del seriale (un seriale illeggibile conta
+// come lo stesso controller). Il segno in sessionStorage non porta nessun
+// identificativo: dopo un reload il blocco vale per qualunque controller, e
+// l'utente lo toglie con Restart o confermando di averlo spento.
+// Si toglie SOLO con un Restart inviato o con la conferma esplicita di uno
+// spegnimento: la pagina non distingue uno spegnimento da uno stacco.
+const TAB_POWER_CYCLE_KEY = 'sense-power-cycle-in-tab';
+function tabPowerCycleFlag() {
+  try { return tabStore()?.getItem(TAB_POWER_CYCLE_KEY) === '1'; } catch { return false; }
+}
+let powerCycleLock = tabPowerCycleFlag() ? { controller: null, key: null, reload: true } : null; // { controller, key, reload }
+// Seconda linea di difesa: da quando questa scheda ha lasciato (o ereditato
+// da un reload) una sessione aperta, calibBegin non ripara più una sessione
+// rifiutata: fallisce e rimette il blocco. Così una conferma di spegnimento
+// sbagliata, o un Restart che non ha riavviato nulla, non committa il parziale.
+let repairAllowed = !powerCycleLock;
+
+function markPowerCycle(controller, key) {
+  powerCycleLock = { controller, key: key ?? null, reload: false };
+  repairAllowed = false;
+  try { tabStore()?.setItem(TAB_POWER_CYCLE_KEY, '1'); } catch { /* storage negato: resta il blocco in memoria */ }
+  updateWriteLock();
+}
+
+function clearPowerCycle(reason) {
+  if (!powerCycleLock) return;
+  powerCycleLock = null;
+  try { tabStore()?.removeItem(TAB_POWER_CYCLE_KEY); } catch { /* niente da togliere */ }
+  log(reason);
+  updateWriteLock();
+}
+
+// Vale per il controller collegato: lo stesso oggetto DS5, oppure uno la cui
+// chiave coincide o non si può confrontare (prudente).
+function powerCycleApplies() {
+  if (!ds5 || !powerCycleLock) return false;
+  if (powerCycleLock.controller === ds5) return true;
+  return !(deviceKey && powerCycleLock.key && deviceKey !== powerCycleLock.key);
+}
+
+// Al collegamento: se il blocco vale per il controller appena adottato, il
+// pannello lo dice subito, con Restart e la conferma di spegnimento.
+function reapplyPowerCycle() {
+  if (!powerCycleLock) return;
+  if (!powerCycleApplies()) {
+    log('A different controller is connected: the open calibration session of the previous one does not apply to it.');
+    updateWriteLock();
+    return;
+  }
+  log('This controller may still have a calibration pass left open: restart it before calibrating or saving.');
+  showOutcome(powerCycleReminderView({ reload: powerCycleLock.reload }));
+}
 
 function blockedForPowerCycle() {
-  if (!ds5 || ds5 !== powerCycleController) return false;
-  toast('Restart the controller (hold PS for 10 s) and reconnect it before calibrating or saving again.', 6000);
+  if (!powerCycleApplies()) return false;
+  toast('Restart the controller (Restart button, or hold PS for 10 s) before calibrating or saving again. Disconnecting it doesn’t count.', 6000);
   return true;
+}
+
+// Conferma esplicita di uno spegnimento fatto a mano. Il calibBegin successivo
+// resta senza riparazione (repairAllowed): se il controller non era stato
+// spento davvero, l'avvio viene rifiutato e il blocco torna, senza commit.
+function confirmPoweredOff() {
+  if (!powerCycleApplies() || ops.busy) return;
+  const ok = confirm('Continue only if you turned the controller off (held PS for 10 s until the light went out, or used Restart) after the calibration pass was left open. Disconnecting or unplugging the cable doesn’t count. Did you turn it off?');
+  if (!ok) return;
+  clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.');
+  clearOutcome();
 }
 
 const QUICK_INTRO = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
@@ -1461,6 +1529,9 @@ async function quickCalibrate() {
   // metà passata il ciclo non deve pilotare il controller nuovo (prima usava
   // il `ds5` globale). runQuick controlla isCurrent() dopo ogni await.
   const controller = ds5;
+  // Chiave del controller per il blocco "sessione aperta": deve seguirlo anche
+  // se si stacca mentre la passata è in volo (teardown azzera deviceKey).
+  const controllerKey = deviceKey;
   const recovery = quickRecoveryNext;
   const force = quickForceNext || recovery;
   cancelDriftTest();
@@ -1485,7 +1556,8 @@ async function quickCalibrate() {
     // Sessione lasciata aperta a metà passata: il controller va spento prima di
     // qualunque altro comando, come dopo uno stallo (il prossimo calibBegin
     // sarebbe rifiutato e la riparazione committerebbe il parziale).
-    if (needsPowerCycle && ds5 === controller) powerCycleController = controller;
+    // Anche da un ciclo orfano: il blocco segue il controller, non la UI.
+    if (needsPowerCycle) markPowerCycle(controller, controllerKey);
     if (!ops.isCurrent(op)) { recordSessionOnce(session); return; }
     ops.endOp(op);
     // La RAM del controller è cambiata se una passata precedente ha già chiuso
@@ -1510,6 +1582,7 @@ async function quickCalibrate() {
       isCancelled: () => quickCancelRequested,
       force,
       params: recovery ? { maxPasses: 1 } : {},
+      repairStaleSession: repairAllowed,
       onProgress: event => {
         if (ops.isCurrent(op)) {
           if (event.phase === 'held' || event.phase === 'stalled' || event.phase === 'unstable') quickHoldKnown = true;
@@ -1548,6 +1621,9 @@ async function quickCalibrate() {
       // (commit segnalato solo dall'errore), il segno della scheda e l'avviso
       // all'uscita mancano: li si dà qui. Che lo scollegamento la scarti è H11.
       recordSessionOnce(session);
+      // Scollegato fra calibBegin e calibEnd: la sessione resta aperta nel
+      // firmware anche dopo il ricollegamento (non è uno spegnimento).
+      if (run.needsPowerCycle) markPowerCycle(controller, controllerKey);
       if (run.committed && !committedShown) {
         markTabUnsaved(true);
         toast(unsavedOnExitMessage(lastNvStatus), 10000);
@@ -1564,7 +1640,7 @@ async function quickCalibrate() {
     }
     if (outcome === 'stalled') {
       recordSessionOnce(session);
-      powerCycleController = controller;
+      markPowerCycle(controller, controllerKey);
       setUnsaved(true);
       closeModal('modal-quick');
       showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
@@ -1817,6 +1893,7 @@ async function wizardNext() {
       $('btn-wizard-cancel').classList.add('hidden');
       w.op = ops.beginOp();
       w.controller = ds5;
+      w.key = deviceKey;
       clearOutcome();
       btn.textContent = 'Measuring…';
       $('wizard-msg').innerHTML = 'Keep your hands off the sticks for a moment…';
@@ -1842,7 +1919,7 @@ async function wizardNext() {
       w.before = summarizeResult(await measureOffset(1000));
       ensure();
       w.tol = restTolerance(w.before);
-      const begun = await w.controller.calibBegin();
+      const begun = await w.controller.calibBegin({ repair: repairAllowed });
       w.sessionOpen = true;
       // La riparazione di una sessione rimasta aperta può aver committato:
       // la RAM è già cambiata.
@@ -1880,16 +1957,19 @@ async function wizardNext() {
         ...(gone ? { aborted: 'disconnected' } : { err: String(error.message || error).slice(0, 120) }),
       });
     }
+    // Errore (o scollegamento) dopo un calibBegin riuscito e prima del
+    // calibEnd: la sessione resta aperta nel firmware con 1–3 angoli. Come per
+    // lo stallo della rapida, niente altri comandi finché il controller non
+    // viene spento: il prossimo calibBegin sarebbe rifiutato e la sua
+    // riparazione (calibEnd) committerebbe quel parziale. Un avvio rifiutato
+    // senza riparazione (`openSession`) lascia aperta la sessione di prima.
+    // Il blocco va segnato anche se il controller si è staccato: segue la
+    // chiave e torna al ricollegamento.
+    const leftOpen = w.sessionOpen === true || error.openSession === true;
+    if (leftOpen) markPowerCycle(w.controller, w.key);
     // Scollegato: il teardown ha già chiuso tutto e il controller nuovo non
     // eredita né il modale né lo stato "non salvato" di questo.
     if (gone) return;
-    // Errore dopo un calibBegin riuscito e prima del calibEnd: la sessione
-    // resta aperta nel firmware con 1–3 angoli. Come per lo stallo della
-    // rapida, niente altri comandi finché il controller non viene spento: il
-    // prossimo calibBegin sarebbe rifiutato e la sua riparazione (calibEnd)
-    // committerebbe quel parziale.
-    const leftOpen = w.sessionOpen === true;
-    if (leftOpen && ds5 === w.controller) powerCycleController = w.controller;
     // Una sessione solo aperta non ha cambiato la RAM: il blocco basta.
     if (error.committed || w.committed) setUnsaved(true);
     closeModal('modal-wizard');
@@ -2523,7 +2603,12 @@ async function rebootController() {
   if (ds5.poisoned) { toast(POISONED_MESSAGE, 7000); return; }
   if (unsaved && !confirm('You have an unsaved calibration: restarting the controller will lose it. Continue?'))
     return;
+  const hadOpenSession = powerCycleApplies();
   await ds5.reboot();
+  // Il riavvio chiude la sessione lasciata aperta. Se non fosse avvenuto, il
+  // prossimo calibBegin (senza riparazione, repairAllowed) verrebbe rifiutato
+  // e il blocco tornerebbe: nessun parziale committato.
+  if (hadOpenSession) clearPowerCycle('Restart sent: the calibration pass left open is discarded by the restart.');
   toast('Controller restarted: reconnect it once it has powered off.', 5000);
   // la disconnessione fisica arriverà dall'evento hid
 }
@@ -2535,6 +2620,15 @@ $('btn-connect').addEventListener('click', connect);
 // in corso l'utente perde lavoro, e cosa fa lo scollegamento non è verificato.
 $('btn-disconnect').addEventListener('click', () => {
   if (ops.busy && !confirm('A calibration is running. Disconnecting now interrupts it. Disconnect anyway?')) return;
+  // Con una sessione lasciata aperta, scollegare NON è lo spegnimento che serve:
+  // il blocco resta e il testo lo dice invece di lasciarlo intendere.
+  if (!ops.busy && powerCycleApplies()) {
+    if (!confirm('This controller was left in the middle of a calibration pass. Disconnecting doesn’t turn it off: '
+      + 'it will still need a restart (Restart button, or hold PS for 10 s) before you can calibrate or save. '
+      + (unsaved ? 'The calibration on it hasn’t been written to memory either. ' : '')
+      + 'Disconnect anyway?')) return;
+    return disconnect();
+  }
   if (!ops.busy && unsaved && !confirm('This calibration hasn’t been written to memory, and disconnecting won’t save it. '
     + 'We haven’t confirmed whether disconnecting discards it. Disconnect anyway?')) return;
   return disconnect();

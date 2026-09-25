@@ -254,9 +254,21 @@ export class DS5 {
   // Un calibEnd di riparazione scaduto conta come commit (non si sa se il
   // firmware l'abbia applicato), e il `committed` sopravvive anche se è il
   // secondo avvio a lanciare.
-  async calibBegin() {
+  // `repair: false` quando il chiamante sa o sospetta che la sessione aperta
+  // sia un parziale di questa pagina (uno stallo, un errore a metà passata, uno
+  // spegnimento dichiarato dall'utente ma non provato): allora niente calibEnd
+  // di riparazione, che committerebbe quel parziale senza consenso. L'avvio
+  // rifiutato lancia con `openSession: true` e nulla viene scritto.
+  async calibBegin({ repair = true } = {}) {
     let r = await this.calibCommand([1, 1, 1], 0x83010101);
     let committed = false;
+    if (!r.ok && !repair) {
+      this.log('Center calibration refused: a calibration session may still be open. Not closing it (that would commit a partial calibration).');
+      const error = new Error(`Center calibration refused: the controller still has a calibration session open (0x${r.word.toString(16)}). Restart it before calibrating again`);
+      error.openSession = true;
+      error.committed = false;
+      throw error;
+    }
     if (!r.ok) {
       this.log('Center calibration refused: closing a possibly stale session and retrying.');
       committed = await this.calibEnd().then(() => true, error => error?.committed === true);

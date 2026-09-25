@@ -195,6 +195,8 @@ const ACTION = {
   quick: { id: 'quick', label: 'Run Quick again' },
   retest: { id: 'retest', label: 'Run the drift test' },
   recovery: { id: 'recovery', label: 'Try one recovery pass' },
+  restart: { id: 'restart', label: 'Restart the controller' },
+  poweredOff: { id: 'powered-off', label: 'I already turned it off' },
 };
 
 // Il controller ha smesso di rispondere (timeout HID, DS5 avvelenato): la
@@ -214,6 +216,30 @@ export const isPoisonError = error => error?.timeout === true || error?.poisoned
 // Sessione di calibrazione lasciata aperta da un errore a metà passata: come
 // dopo uno stallo, il controller va spento prima di qualunque altro comando.
 const LEFT_OPEN = 'The controller was left mid-calibration. Turn it off (hold PS for 10 s) and reconnect it before calibrating or saving again.';
+
+// Ricollegato (o pagina ricaricata) con il blocco "sessione aperta" ancora
+// attivo: scollegare non spegne il controller, quindi la sessione lasciata
+// aperta c'è ancora e il prossimo calibBegin la chiuderebbe committando il
+// parziale. Le uscite sono Restart (comando di riavvio) o una conferma
+// esplicita di chi ha spento il controller a mano.
+export function powerCycleReminderView({ reload = false } = {}) {
+  return {
+    kind: 'power-cycle',
+    outcome: 'needs-power-cycle',
+    tone: 'bad',
+    title: 'Restart the controller before calibrating',
+    lines: [
+      reload
+        ? 'Before this page was reloaded, a calibration pass was left open on a controller. Reloading or reconnecting doesn’t turn it off, so the pass may still be open on this one.'
+        : 'This controller was left in the middle of a calibration pass. Disconnecting or unplugging it doesn’t turn it off, so the pass is still open.',
+      'Calibrating or saving now could store that unfinished pass. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it.',
+    ],
+    sticks: [],
+    actions: [ACTION.restart, ACTION.poweredOff],
+    center: null,
+    repair: false,
+  };
+}
 
 function routeFor(worst, pinned) {
   if (pinned) return [ACTION.range, ACTION.guided];
@@ -237,13 +263,31 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
   });
 
   if (outcome === 'already-centered') {
+    // Quello che si è appena misurato È lo stato del controller: sostituisce
+    // l'esito precedente nel blocco di Write. Tenere il vecchio (per esempio un
+    // catastrofico dovuto a un pollice in verifica) lascerebbe Write spento su
+    // stick misurati centrati, e le uniche uscite sarebbero passate
+    // irreversibili che la pagina stessa dice inutili. Nessun comando inviato:
+    // `committed` false, quindi mai 'unverified'.
     return view('ok', 'Already centered: nothing was sent', [
       `Both sticks already read ${fmt(beforeWorst)} or better, the measurement limit. Another pass could only keep them there or make them worse.`,
-    ], [], { center: null });
+    ], [], {
+      center: { outcome, worst: beforeWorst, beforeWorst, bestWorst: beforeWorst, pinned: false, committed: false },
+    });
   }
   if (outcome === 'stalled') {
+    // "Nulla è stato scritto" solo se è vero: dalla passata 2 in poi (o dopo
+    // una riparazione di calibBegin che ha committato) la RAM monta già una
+    // calibrazione nuova e non salvata, e la pagina alza `unsaved`.
+    const earlier = run.committedBefore === true || (isNum(run.pass) && run.pass > 1);
+    let first = 'Nothing was committed, but the controller was left mid-calibration.';
+    if (earlier && isNum(run.pass) && run.pass > 1) {
+      first = `Pass ${run.pass} was abandoned before it was committed, and the controller was left mid-calibration. The calibration from the previous pass is active on the controller and hasn’t been saved.`;
+    } else if (earlier) {
+      first = 'This pass was abandoned before it was committed, and the controller was left mid-calibration. Closing a leftover calibration session when the run started already changed the calibration, and it hasn’t been saved.';
+    }
     return view('bad', 'Calibration stopped: the sticks never settled', [
-      'Nothing was committed, but the controller was left mid-calibration.',
+      first,
       'Turn the controller off (hold PS for 10 s) and reconnect it before calibrating or saving again.',
     ]);
   }

@@ -156,6 +156,10 @@ export const QUICK_DEFAULTS = Object.freeze({
 //   meta        { board, fw } per la sessione di telemetria
 //   sampler     { waitForStable, measureOffset } già legati a source/clock:
 //               solo per i test che vogliono sceneggiare le attese
+//   repairStaleSession  false quando la pagina sospetta una sessione lasciata
+//               aperta da lei stessa (vedi DS5.calibBegin): un avvio rifiutato
+//               diventa un errore con needsPowerCycle invece di una
+//               riparazione che committerebbe il parziale
 //
 // Non lancia: un errore HID diventa { outcome: 'error', error, committed,
 // needsPowerCycle? }. `committed` è vero se la RAM del controller può essere
@@ -175,6 +179,7 @@ export async function runQuick({
   params = {},
   meta = {},
   sampler = null,
+  repairStaleSession = true,
 }) {
   const p = { ...QUICK_DEFAULTS, ...params };
   const waitForStable = sampler?.waitForStable ?? (opts => waitForStableFrom(source, clock, opts));
@@ -332,7 +337,7 @@ export async function runQuick({
 
       // DS5.calibBegin ripara una sessione rimasta aperta con un calibEnd, che
       // committa: la RAM è cambiata anche se questa passata poi fallisce.
-      const begun = await controller.calibBegin();
+      const begun = await controller.calibBegin({ repair: repairStaleSession });
       sessionOpen = true;
       if (begun?.committed) {
         committedAny = true;
@@ -409,8 +414,14 @@ export async function runQuick({
         // qualunque altro comando.
         session.passes.push(null);
         session.aborted = 'stalled';
-        log(`Pass ${pass} abandoned after ${taken} of ${p.samplesPerPass} samples: nothing was committed. Turn the controller off before trying again.`);
-        return { session, outcome: 'stalled', committed: true, needsPowerCycle: true, worst: null, beforeWorst, bestWorst };
+        // "Nulla è stato scritto" vale solo per QUESTA passata: un calibEnd di
+        // una passata precedente (o la riparazione di calibBegin) ha già
+        // cambiato la RAM, e il testo non deve dire il contrario.
+        const earlier = committedAny
+          ? 'this pass was not committed, but an earlier calibration step is active and unsaved'
+          : 'nothing was committed';
+        log(`Pass ${pass} abandoned after ${taken} of ${p.samplesPerPass} samples: ${earlier}. Turn the controller off before trying again.`);
+        return { session, outcome: 'stalled', committed: true, needsPowerCycle: true, worst: null, beforeWorst, bestWorst, pass, committedBefore: committedAny };
       }
       await clock.sleep(p.endDelayMs);
       ensureCurrent();
@@ -539,7 +550,9 @@ export async function runQuick({
     // calibEnd fallito): come uno stallo, il controller va spento prima di
     // qualunque altro comando. `committed` resta quello vero: aprire una
     // sessione non cambia la RAM.
-    const extra = sessionOpen ? { needsPowerCycle: true } : {};
+    // Un avvio rifiutato senza riparazione (`openSession`, vedi
+    // repairStaleSession) lascia la sessione di prima aperta: stesso blocco.
+    const extra = sessionOpen || error?.openSession === true ? { needsPowerCycle: true } : {};
     // Un controller scollegato (o sostituito) non è un errore dell'algoritmo:
     // l'errore HID del cavo staccato arriva spesso prima dell'evento
     // `disconnect`, quindi si guarda anche isCurrent().
