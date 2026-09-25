@@ -2,7 +2,55 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
-## Unreleased — 2026-09-16
+## Unreleased — 2026-09-25
+
+Simulator figures in this section are **model-verified**: the real calibration code run against a model of the controller fitted to the collected telemetry. They are not hardware measurements. Hardware checks H0, H10, H11 and H12 have not been run yet; the copy says so wherever it depends on them.
+
+### Calibration safety
+
+- **Quick calibration sends nothing when both sticks already read below 1.2%.** They are at the measurement floor, and a pass from there can only stay or get worse. The panel says "Already centered: nothing was sent" and offers **Calibrate anyway**. Starts at one step (1.24%) still calibrate.
+- **Every pass waits for released, centered sticks first**, not only the first one. A thumb resting on the rim no longer gets written in as the new center; the modal says "Hold detected: let go of the sticks" while it waits.
+- **Samples are only taken from a still stick at the point it rests.** Each of the 12 samples in a pass needs a stable reading within 4 steps of where the sticks rested after the pass began, and a timed-out wait never produces a sample.
+- **A pass that can't collect its 12 samples is abandoned, not committed.** After 15 s the modal asks you to let go (with Cancel); after 30 s more, or on Cancel, the pass stops without writing anything, and the controller has to be turned off and reconnected before any other calibration or Write. The same now applies when a pass fails for any other reason while it is open (a refused sample, a failed write, an error in the guided procedure).
+- **A result of 15% or more stops the loop.** It is reported as "Don't save this result", Write is disabled, and a single recovery pass is offered but never run automatically.
+- **A result worse than the start is never called "converged".** The loop keeps its remaining passes to try to recover, with at most one extra pass when the other stick is already at the floor. Warnings about damage now come before explanations such as a worn sensor.
+- **A controller that stops answering is never sent another command.** A command without a reply within 1 s marks the connection as not responding until the controller is reconnected; if the stuck command was a write, the page treats the calibration as possibly applied. The panel explains that and asks you to turn the controller off and reconnect it, without the raw error.
+- **Unsaved changes are tracked from the moment they happen.** The unsaved banner and the "may still be active" reminder are raised as soon as a pass writes to the controller, so unplugging in the middle of a later pass still warns you.
+- **Calibration is blocked when the controller reports its memory as unlocked**, where a "temporary" calibration could become permanent. Firmware built in 2020–2021 asks for confirmation once per connection.
+
+### Results and saving
+
+- **The result stays on the page.** A persistent panel shows each stick before → after, in the same terms as the drift test (for example "0.6% · at floor", "1.2% · 1 step"), and what to do next.
+- **Write is disabled** after a result of 15% or more, a stick pinned at the edge, an abandoned pass, an unresponsive controller, or an incomplete or unknown range. **It asks for a second confirmation** (with Cancel focused) after a result worse than the start, worse than an earlier pass, or not verified.
+- **Advice to turn the controller off to discard a calibration appears only when its memory reads "locked".** Whether unplugging the cable alone discards it has not been checked (H11), and the copy says so instead of recommending it.
+- **A "may still be active" banner after a reload.** If this tab calibrated without saving, a reload says that a temporary calibration may still be on the controller. It stores no device identifier.
+
+### Guided and Range calibration
+
+- **Guided calibration never samples a held stick.** Each corner needs both sticks to have reached it and then to rest, still, where they rested when the session began. A thumb held still at a corner or on the rim is never sampled. A stick that never settles gets an explicit, confirmed "My stick doesn't rest still" option that loosens the position check without removing it.
+- **Range opens on an intro step and only starts on Start.** Once running, it can only end when both sticks have covered the whole edge (or by turning the controller off), and the intro says so before anything is sent. With a stick pinned at the edge, the intro warns that the range may never complete.
+- **Range Done needs real coverage:** every direction, at least two turns and a change of direction on both sticks. After 15 s a confirmed **Finish anyway** can close an incomplete range, and then Write stays disabled until a complete range replaces it, including after reconnecting the same controller. Whether Range also moves the center has not been checked yet (H12), so routing a pinned stick to Range is presented as something to try.
+- A short check step after Range measures how round the new range is.
+
+### Interface
+
+- **The movement meter describes movement only.** "Not moving", "Moving a little" and "Moving" replace "Hands off: steady" and "Sticks at rest", which a thumb holding a stick still would also produce. When the page knows a stick is held, the meter says "Stick held: let go".
+- **Connection help.** An empty device chooser shows a short checklist, and WebHID errors are explained in plain language.
+- **×10 dial zoom** shows the byte lattice near the center, so the 0.555% floor and one 1.24% step are visible. It changes the drawing only, never the measurements.
+
+### Accessibility
+
+- Modals keep keyboard focus inside them, start on the right control, and never drop focus when the active button is disabled mid-run.
+- Status messages are announced once per change, not on every refresh; errors go to an alert region.
+- Progress bars expose their value, the guided steps are announced as text, and verdict details are visible text.
+- Text meets 4.5:1 contrast and component edges 3:1.
+
+### Privacy
+
+- **The serial number is masked by default**, with a Show serial button, so a shared screenshot does not publish it.
+- The precision test's "previous result" and the range write lock are keyed by a salted local hash of the serial that is never sent anywhere.
+- Network telemetry is unchanged: still the same nine fields, and only for complete Quick sessions.
+
 
 ### Public scope
 
