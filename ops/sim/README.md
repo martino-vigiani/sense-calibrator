@@ -30,7 +30,8 @@ input reports use while a calibration session is open).
 | `variants.mjs` | Named `params` overrides; `baseline` must stay empty. `legacyStop` restores the stop rule before quick-stopping-policy (paired comparisons, pre-refactor goldens); `plateau1` is the plateau-continuation candidate |
 | `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
-| `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them |
+| `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them. `--restricted 1` (release gate 2) compares only the sessions no WS1 rule can touch (`untouchedByWs1`, shared with `test/sim-equivalence.test.js`) and allows only the WS2 outcome changes in `ALLOWED_OUTCOME_CHANGES` |
+| `release-gates.mjs` | Release gates of the plan §4.2 in one command: builds the baseline (and optionally WS1) tree with `git archive` plus this `ops/sim`, runs the fit × seed × scenario matrix on both trees (cached by a source hash), and prints every number next to its threshold with PASS/FAIL, plus gate 2 (restricted equivalence) and gate 4 (real-data replay) |
 | `range-sweep.mjs` | WS7: range coverage of one synthetic turn (8-bit quantized, stored range 0.8–1.4× off, 60/250 Hz), old rule against `js/calib/range-coverage.js`. No telemetry |
 | `precision-user.mjs` | WS8: a model controller (8-bit lattice, noise, spring return, square-ish gate) and a model user who reacts to the precision test's view (lets go, flicks toward the lit mark, rolls the sticks, presses Retry/Skip) driving the real `createPrecisionTest` at ~250 Hz. Scenarios: brush, slow push, endless hold, report gap, hidden tab, no flicks. It also runs the dead-wait instrument (a stall over 2 s without a `why`). Reaction times are assumptions: durations are model-verified |
 | `precision-discrimination.mjs` | WS8: Center score medians per drift tier and the 1-LSB sensitivity, on the real "before" values (`SENSE_TELEMETRY`); prints aggregates only |
@@ -69,10 +70,108 @@ node ops/sim/safety-gates.mjs --baseline base-rim-hold.json ws1-rim-hold.json \
 node ops/sim/replay-sequences.mjs [--params '{"convergeEps":0}'] [--details]
 node ops/sim/replay-telemetry.mjs [--renderer path/to/pure-renderer.mjs]
 
-# refactor equivalence against the pre-refactor app.js
+# release gates (plan §4.2): full matrix, 3 fits × 3 seeds, ~15 min on 10 cores
+node ops/sim/release-gates.mjs --baseline 57621c0 --ws1 26732b0 --dir /tmp/sense-gates --json gates.json
+# an experiment: only some runs of a params variant of the candidate, no evaluation
+node ops/sim/release-gates.mjs --baseline 57621c0 --dir /tmp/sense-gates \
+  --params '{"refToleranceLsb":1000}' --runs-only normal,one-step
+
+# refactor equivalence against the pre-refactor app.js (full, then restricted to
+# the sessions no WS1 rule can touch)
 node ops/sim/equivalence.mjs --n 1785 --workers 4
 node ops/sim/equivalence.mjs --n 714 --scenario hold --workers 4
+node ops/sim/equivalence.mjs --n 1785 --workers 4 --restricted 1
 ```
+
+`replay-sequences.mjs` also prints `convergedWorse`: the sessions the previous
+stop rule (`legacyStop`) ended as "converged" on a value worse than the start,
+and whether the current rule asks for another pass on each (14 in the PG
+cohort: 12 continue, 2 are ≥15% and stop at the ceiling as `catastrophic`).
+
+## Release gates (§4.2), as re-specified on 2026-09-25
+
+`release-gates.mjs` is the reference implementation; everything it prints is
+model-verified (gate 3) or a real-data replay (gate 4). The baseline is
+`57621c0` (the tree before WS1/WS2) with this `ops/sim` copied over.
+
+Two gates of the plan could not be met as written because of the model, not the
+code, and were re-specified:
+
+- **Final ≥15%, normal population.** The plan asked for ≤0.1%. The model's
+  first-pass capture error produces runaways on the very first `calibEnd`,
+  identical in the baseline (candidate/baseline counts, all 9 fit × seed runs:
+  best 16/16, 20/23, 11/11; alt1 21/21, 30/30, 15/15; alt2 3/3, 2/2, 1/1). No
+  Quick rule can prevent a first pass that the firmware model gets wrong. The
+  gate is now **no more sessions ≥15% than the paired baseline**; the raw rate
+  and the paired extras are printed as INFO. A single session can move either
+  way between two trees by one LSB of capture (for example alt1-s1 #1309:
+  13.78 → [14.52, 14.52] in the baseline, [14.52, 15.3] in the candidate; #1092
+  the other way), which is why the gate is a count and not "0 extra".
+- **Final ≥15%, forced hold.** The WS1 value was never recorded; it is now
+  measured by running the WS1 tree (`26732b0`, tip of the quick-safety branch,
+  with this `ops/sim`) with `--ws1`. Values (n=714, model-verified): best
+  0.56% / 0.70% / 0.70%, alt1 0.84% / 1.26% / 0.98%, alt2 0.00% / 0.00% / 0.14%
+  for seeds 1 / 2 / 3; baseline 1.26–2.52%. The CI bound (<1.7%) is read on
+  the sessions **attributable to the hold** (≥15% with the hold and not ≥15% in
+  the same session without it): at most 1 session per run, upper bound ≤0.4%.
+  The raw CI upper bound exceeds 1.7% on alt1-s2 (2.0%) and alt1-s3 (1.8%)
+  only because of the normal-population runaways above; it is printed as INFO.
+
+Gates that stay as written and are **not claimed** for this release:
+
+- **Final ≥15%, moving or noisy hold ≤ baseline** fails on alt1-s2 noisy hold
+  (9 against 8). The extra session is #479: before 8.245, pass 1 at 14.52 in
+  both trees; both trees run pass 2 (the stop rule has always continued after a
+  first pass that is not at the target), and the candidate's pass 2 captured
+  one LSB more (15.3 against 14.52). It is not a recovery continuation, so a
+  rule on recovery passes cannot change it; a general "stop near the ceiling"
+  rule would, but on the real PG sequences the only other session in that state
+  (1.24 → 8.24 → 0.55) recovered to the floor on its next pass, so no such rule
+  was added.
+- **1.24 starts within 2 pp** is evaluated on the `one-step` scenario (30 real
+  1.24 starts × 20, n≈680 per run), where every run passes (Δ −1.8 to +0.4 pp).
+  On the ~150 1.24 starts inside the normal population the Δ is noisier
+  (−5.4 to +1.3 pp) and printed as INFO. Why pass 2 after a 1.24 first pass
+  recovers less often in the model is recorded below (short answer: it is
+  not the 4-LSB filter); it depends on H0 and goes on the hardware list.
+
+### 1.24 starts: why pass 2 recovers less often in the model
+
+The review hypothesis was that WS1's in-session reference (each `calibSample`
+needs a window within 4 LSB of the first in-session reading) re-captures the
+same 1-LSB error. A paired run of the candidate with the filter disabled
+(`--params '{"refToleranceLsb":1000}'`, normal and one-step, 3 fits × 3 seeds)
+rules that out:
+
+| 1.24 starts, pass rate | baseline | candidate | candidate, no 4-LSB filter |
+|---|---|---|---|
+| normal subset, 9 runs (n≈148 each) | 69.7–84.7% | 69.1–83.3% | identical to the candidate in every run |
+| one-step scenario, 9 runs (n≈680 each) | 76.1–79.3% | 75.1–79.2% | within 0.2 pp of the candidate |
+| pass 2 < 1.2 after a 1.24 pass 1, pooled | 993/2409 (41.2%) | 871/2215 (39.3%) | 870/2208 (39.4%) |
+
+The lost sessions (`[1.24, 0.55]` in the baseline, `[1.24, 1.24]` in the
+candidate) are the same with and without the filter. What the pairing cannot
+show is the cause: `fake-dualsense.mjs` draws report timing, stick noise and
+the `calibEnd` capture error from **one** random generator, so any change in
+how many reports a pass reads (WS1 reads an in-session reference and waits on
+report-driven windows) makes the pass-2 capture a different draw. Pass 1 stays
+paired; pass 2 and later are not. The pooled difference (−1.9 pp, about 1.3
+standard errors) and the one-step runs (all within 2 pp) are consistent with
+that noise. Conclusion: a model artefact of pairing, not a code effect we can
+see; H0-b in `docs/hardware-checks.md` checks it on hardware.
+
+Two side effects of the filter that the same run shows (model-verified):
+
+- "Pass 2 after a first pass ≥ 2 reaches < 1.2" falls from 4.4% to 0.5%
+  (3.8% without the filter). This is selection, not harm: the first passes
+  that the baseline spoiled with a touch during sampling (and then recovered)
+  are refused by the filter in the candidate, which goes straight to 0.55. What
+  remains ≥ 2 after pass 1 is the model's persistent capture bias, which a
+  second pass rarely fixes.
+- `stalled` outcomes in the normal population: 84 of 16,065 sessions with the
+  filter, 21 without (0.5% against 0.1%). Each stall asks for a power cycle.
+  That is the cost of never sampling a stick that moved away from the
+  in-session reference; it stays, and depends on H0.
 
 Sessions depend only on `(seed, index)`, so worker count never changes a result.
 

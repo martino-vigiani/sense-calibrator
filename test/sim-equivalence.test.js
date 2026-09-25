@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runVariant } from '../ops/sim/run.mjs';
-import { goldenRecord } from '../ops/sim/equivalence.mjs';
+import { ALLOWED_OUTCOME_CHANGES, goldenRecord, untouchedByWs1 } from '../ops/sim/equivalence.mjs';
 
 // I golden sono stati prodotti dall'harness PRE-refactor (ops/sim/legacy,
 // app.js monolitico al commit 40a08ed) sulla popolazione sintetica, perché la
@@ -28,15 +28,7 @@ import { goldenRecord } from '../ops/sim/equivalence.mjs';
 // L'esito mostrato è cambiato di proposito anche per WS2 (precedenza e nuovi
 // esiti in quick-policy.js): è ammesso solo uno dei cambi elencati qui, e
 // ognuno deve essere coerente con i numeri della sessione.
-const OUTCOME_CHANGES = {
-  'residual>within-1-step': r => Math.max(...r.s.after.off) <= 1.25,
-  'residual>residual-deterministic': r => r.s.passes.length >= 2 && r.s.passes.at(-1) === r.s.passes.at(-2),
-  'worn>worse-than-start': r => Math.max(...r.s.after.off) - Math.max(...r.s.before.off) > 0.8,
-};
-const untouchedByWs1 = g => g.s.passes.length === 1
-  && Math.max(...g.s.before.off) >= 1.2
-  && g.s.unstableEvents === 0
-  && g.s.passes[0] < 15;
+const OUTCOME_CHANGES = ALLOWED_OUTCOME_CHANGES;
 
 for (const scenario of ['normal', 'hold']) {
   test(`runQuick matches the pre-refactor harness where no WS1 rule applies and keeps the safety invariants elsewhere (synthetic, ${scenario})`, async () => {

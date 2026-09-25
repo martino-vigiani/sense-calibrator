@@ -10,6 +10,12 @@
 //
 //   node ops/sim/replay-sequences.mjs [--cohort PG] [--variant baseline]
 //        [--params '{"convergeEps":0}'] [--details]
+//
+// L'uscita include sempre `convergedWorse` (gate 4 del piano §4.2): le sessioni
+// che la regola PRECEDENTE (variante legacyStop) fermava per "convergenza" su
+// un valore peggiore della partenza (13 nella coorte PG), e per ognuna se la
+// variante in prova chiede almeno una passata in più. Il gate passa solo se
+// tutte continuano, salvo quelle chiuse dal tetto del 15% ('catastrophic').
 import * as policy from '../../js/calib/quick-policy.js';
 import { QUICK_DEFAULTS } from '../../js/calib/quick.js';
 import { cohort, loadSessions, worstOf } from './population.mjs';
@@ -105,6 +111,43 @@ export function replayCohort(rows, params = QUICK_DEFAULTS) {
   return { summary, details };
 }
 
+// Le sessioni "convergenti ma peggiori dell'inizio" per la regola precedente
+// (`legacyParams`, cioè QUICK_DEFAULTS + VARIANTS.legacyStop), e dove si ferma
+// `params` sulle stesse. `continued`: la variante chiede almeno una passata
+// oltre il punto in cui la regola precedente dichiarava convergenza.
+export function convergedWorseCheck(rows, params, legacyParams) {
+  const sessions = [];
+  for (const r of rows) {
+    const beforeWorst = worstOf(r.before);
+    const otherWorst = Math.min(...r.after.off);
+    const legacy = replayDecisions(r.passes, legacyParams, { beforeWorst, otherWorst });
+    if (legacy.reason !== 'converged' || !(legacy.worst > beforeWorst + legacyParams.convergeEps)) continue;
+    const skipped = typeof policy.decideBeforeStart === 'function' && policy.decideBeforeStart({ beforeWorst }, params)?.skip;
+    const now = skipped ? null : replayDecisions(r.passes, params, { beforeWorst, otherWorst });
+    sessions.push({
+      before: beforeWorst,
+      passes: r.passes,
+      legacyStopAt: legacy.stopAt,
+      now: skipped ? 'skipped' : { stopAt: now.stopAt, reason: now.reason },
+      // Una partenza saltata (sotto okMax) non riceve nessuna passata: meglio
+      // ancora di "una in più", la sequenza peggiore non avviene.
+      continued: skipped || now.stopAt > legacy.stopAt,
+      // ≥15%: il tetto fisico chiude il ciclo come 'catastrophic' (mai
+      // "convergenza", nessuna passata automatica): è l'arresto voluto.
+      ceiling: !skipped && now.reason === 'catastrophic',
+    });
+  }
+  const bad = sessions.filter(s => !s.continued && !s.ceiling);
+  return {
+    legacyConvergedWorse: sessions.length,
+    continued: sessions.filter(s => s.continued).length,
+    stoppedAtCeiling: sessions.filter(s => !s.continued && s.ceiling).length,
+    notContinued: bad,
+    pass: bad.length === 0,
+    sessions,
+  };
+}
+
 function parseArgs(argv) {
   const opts = { cohort: 'PG', variant: 'baseline', params: {}, details: false };
   for (let k = 0; k < argv.length; k++) {
@@ -123,5 +166,7 @@ if (process.argv[1]?.endsWith('replay-sequences.mjs')) {
   const params = { ...QUICK_DEFAULTS, ...VARIANTS[opts.variant], ...opts.params };
   const rows = cohort(loadSessions(), opts.cohort);
   const { summary, details } = replayCohort(rows, params);
-  console.log(JSON.stringify({ label: REPLAY_LABEL, cohort: opts.cohort, variant: opts.variant, overrides: { ...VARIANTS[opts.variant], ...opts.params }, summary, ...(opts.details ? { details } : {}) }, null, 2));
+  const cw = convergedWorseCheck(rows, params, { ...QUICK_DEFAULTS, ...VARIANTS.legacyStop });
+  const { sessions: _all, ...convergedWorse } = cw;
+  console.log(JSON.stringify({ label: REPLAY_LABEL, cohort: opts.cohort, variant: opts.variant, overrides: { ...VARIANTS[opts.variant], ...opts.params }, summary, convergedWorse, ...(opts.details ? { details } : {}) }, null, 2));
 }
