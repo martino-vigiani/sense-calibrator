@@ -23,6 +23,12 @@ function calibrationPair(value) {
 // local events stay in the browser until a versioned server contract exists.
 export function buildCalibrationUpload(entry) {
   if (!entry || entry.kind !== 'quick') return null;
+  // Solo sessioni Quick complete: una corsa fermata prima del suo esito
+  // (`aborted`, per esempio 'moved' quando la tenuta prima della passata k>1
+  // fallisce) o troncata dal tetto di durata (`truncated`) resta locale. Nel
+  // payload a nove campi sembrerebbe un algoritmo che si ferma da solo con
+  // meno passate, e sporcherebbe il confronto dei KPI con la baseline (§4.5).
+  if (entry.aborted != null || entry.truncated != null) return null;
   if (!isCanonicalTimestamp(entry.t)) return null;
   if (entry.board !== null && (typeof entry.board !== 'string' || entry.board.length > 20)) return null;
   if (entry.fw !== null && !Number.isInteger(entry.fw)) return null;

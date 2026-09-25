@@ -333,6 +333,9 @@ export async function runQuick({
       // dell'ultima passata, come a budget di passate esaurito.
       if (pass > 1 && now() + p.stallMs > samplingDeadline) {
         log(`Time limit reached: no pass ${pass}.`);
+        // Marca solo locale: una corsa troncata dal tetto di durata non è una
+        // sessione completa e non va caricata (buildCalibrationUpload).
+        session.truncated = 'time-limit';
         break;
       }
 

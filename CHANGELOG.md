@@ -50,7 +50,7 @@ Simulator figures in this section are **model-verified**: the real calibration c
 
 - **The serial number is masked by default**, with a Show serial button, so a shared screenshot does not publish it.
 - The precision test's "previous result" and the range write lock are keyed by a salted local hash of the serial that is never sent anywhere.
-- Network telemetry is unchanged: still the same nine fields, and only for complete Quick sessions.
+- Network telemetry is unchanged: still the same nine fields, and only for complete Quick sessions. A run stopped before its result (a stick held before a later pass) or cut short by the time limit counts as incomplete and stays in this browser.
 
 
 ### Public scope

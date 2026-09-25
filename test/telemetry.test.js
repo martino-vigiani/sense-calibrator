@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildCalibrationUpload, uploadCalibrationEvent } from '../js/telemetry.js';
+import { VClock } from '../ops/sim/vclock.mjs';
+import { FakeDualSense } from '../ops/sim/fake-dualsense.mjs';
+import { makeSimInstance } from '../ops/sim/harness.mjs';
 
 function validQuick(overrides = {}) {
   return {
@@ -120,4 +123,59 @@ test('network failures reject without changing calibration state', async () => {
     }),
     /offline/,
   );
+});
+
+// Review 2: una corsa Quick fermata prima del suo esito ('moved') o troncata
+// dal tetto di durata resta locale, anche se i suoi campi sono tutti validi.
+test('stopped or truncated quick runs stay local and never call fetch', async () => {
+  for (const entry of [validQuick({ aborted: 'moved' }), validQuick({ truncated: 'time-limit' })]) {
+    let calls = 0;
+    assert.equal(buildCalibrationUpload(entry), null);
+    const sent = await uploadCalibrationEvent(entry, { fetchImpl: async () => { calls += 1; } });
+    assert.equal(sent, false);
+    assert.equal(calls, 0);
+  }
+});
+
+function modelDevice(clock) {
+  return new FakeDualSense({
+    clock, seed: 5,
+    sticks: [[8, -3], [-0.1, 0.4]].map(d => ({ drift: d, noise: 0.05, bias: { axis: 0, B: 3 } })),
+    fw: { sf: 0, cmdMs: [2, 6] },
+    timing: { period: 4, jitter: 0.3, gapProb: 0, gapMs: [30, 200] },
+    hand: { schedule: [] },
+  });
+}
+const canonical = session => ({ ...session, t: new Date(Date.parse(session.t)).toISOString() });
+
+test('model: a run stopped by a held stick before pass 2 ("moved") is not uploadable', async () => {
+  const clock = new VClock();
+  const dev = modelDevice(clock);
+  let touched = false;
+  const onProgress = e => {
+    if (e.phase !== 'next' || touched) return;
+    touched = true;
+    dev.touches.push({ stick: 0, t0: clock.now() + 5, dur: 120_000, tail: 150, amp: [40, 0], at: () => 40 });
+  };
+  const inst = makeSimInstance(clock, dev, { board: 'BDM-030', fw: 1 }, {}, { onProgress });
+  const res = await clock.run(inst.run());
+  dev.stopped = true;
+  assert.equal(res.outcome, 'moved');
+  assert.equal(res.session.aborted, 'moved');
+  assert.ok(res.session.after, 'the record itself looks complete');
+  assert.equal(buildCalibrationUpload(canonical(res.session)), null);
+  assert.ok(buildCalibrationUpload(canonical({ ...res.session, aborted: undefined })), 'only the marker keeps it local');
+});
+
+test('model: a run cut by the session time limit is marked truncated and not uploadable', async () => {
+  const clock = new VClock();
+  const dev = modelDevice(clock);
+  // Tetto appena sopra una passata: la passata 2 non ha il tempo di partire.
+  const inst = makeSimInstance(clock, dev, { board: 'BDM-030', fw: 1 }, { maxSessionMs: 30_000 });
+  const res = await clock.run(inst.run());
+  dev.stopped = true;
+  assert.equal(res.session.truncated, 'time-limit');
+  assert.equal(res.session.passes.length, 1);
+  assert.equal(res.session.aborted, undefined);
+  assert.equal(buildCalibrationUpload(canonical(res.session)), null);
 });
