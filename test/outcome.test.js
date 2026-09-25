@@ -131,6 +131,37 @@ test('the Moving and Pinned overrides route the user, and never show a percentag
   assert.match(pinned.text, /Range calibration first, then Guided/);
 });
 
+// Review 2: dopo una calibrazione non salvata il test drift non dice "No
+// calibration needed" proprio mentre il pannello chiede di scrivere in memoria.
+test('a centered retest after an unsaved calibration supports saving instead of "No calibration needed"', () => {
+  const centered = {
+    left: { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 },
+    right: { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 },
+  };
+  const previous = {
+    left: { offset: 2.3, noise: 0.3, x: 0.023, y: 0 },
+    right: { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 },
+  };
+  const after = driftMessage(centered, { previous, unsaved: true });
+  assert.doesNotMatch(after.text, /No calibration needed/);
+  assert.match(after.text, /^Worst stick: before 2\.3%.* → now 0\.6% · at floor\. Centered now\. This calibration is still temporary: write it to memory to keep it\.$/);
+  assert.equal(after.tier, 'centered');
+
+  const oneStep = { ...centered, left: { offset: 1.24, noise: 0.3, x: 0.0124, y: 0 } };
+  const within = driftMessage(oneStep, { previous, unsaved: true });
+  assert.doesNotMatch(within.text, /fine to use as it is/);
+  assert.match(within.text, /Within 1 step of center now\. This calibration is still temporary: write it to memory/);
+
+  // Non migliore di prima: niente invito a salvare, rimanda al pannello.
+  const worse = driftMessage(oneStep, { previous: centered, unsaved: true });
+  assert.doesNotMatch(worse.text, /No calibration needed|write it to memory to keep it/);
+  assert.match(worse.text, /not better than before/);
+
+  // Senza calibrazione attiva il testo di sempre.
+  assert.match(driftMessage(centered).text, /No calibration needed/);
+  assert.match(driftMessage(centered, { previous, unsaved: false }).text, /No calibration needed/);
+});
+
 test('fix-rate copy is the WS3 report figure, in words', () => {
   assert.equal(FIX_RATE.cohort, 'PG');
   assert.ok(FIX_RATE.centered >= 0.7 && FIX_RATE.centered < 0.8, '"about 3 in 4" must match the published rate');

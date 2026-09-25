@@ -542,6 +542,19 @@ export function driftMessage(result, { previous = null, unsaved = false } = {}) 
     default:
       text = 'Sticks correctly centered. No calibration needed.';
   }
+  // Con una calibrazione attiva ma non salvata, "No calibration needed" o
+  // "fine to use as it is" dicono di non fare nulla proprio al momento di
+  // decidere se scrivere: chi salta Write perde il risultato allo spegnimento.
+  // Qui il testo sostiene il salvataggio, salvo quando il risultato non è
+  // migliore di prima (lì decide il pannello dell'esito, con il suo blocco).
+  const settled = !worstTier || worstTier.id === 'centered' || worstTier.id === 'within-1-step';
+  if (unsaved && settled) {
+    const before = previous ? Math.max(previous.left.offset, previous.right.offset) : null;
+    const where = worstTier?.id === 'within-1-step' ? 'Within 1 step of center now.' : 'Centered now.';
+    text = before !== null && worst > before + 1e-9
+      ? `${where} This is not better than before the calibration: check the result panel before writing it to memory.`
+      : `${where} This calibration is still temporary: write it to memory to keep it.`;
+  }
   if (noisy && worstTier?.id !== 'moving') {
     text += ' The signal is also noisy at rest, a sign of wear: calibration can re-center the stick, but the noise will stay.';
   }
