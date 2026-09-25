@@ -14,7 +14,8 @@ import { runQuick } from './calib/quick.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
 import {
-  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView, rangeOutcomeView,
+  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
+  quickPreflightRoute, rangeOutcomeView,
   revertAdvice, stickTier, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -1316,8 +1317,12 @@ function confirmPoweredOff() {
 }
 
 const QUICK_INTRO = 'Rest the controller on a stable surface and <b>don’t touch the sticks</b>.';
+// Dopo una preflight fallita con uno stick che riposa oltre il raggio di Quick
+// o al bordo (ultimo test drift): il bottone principale apre Guided o Range.
+let quickRouteNext = null;
 function resetQuickModal() {
   quickForceNext = false;
+  quickRouteNext = null;
   quickRecoveryNext = false;
   $('btn-quick-go').textContent = 'Calibrate now';
   $('btn-quick-go').className = 'btn btn-primary';
@@ -1525,6 +1530,13 @@ function quickProgressHtml({ phase, pass, worst }) {
 // qui restano `busy`, modale, messaggi, toast, telemetria e stato non salvato.
 async function quickCalibrate() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
+  if (quickRouteNext) {
+    const route = quickRouteNext;
+    resetQuickModal();
+    closeModal('modal-quick');
+    runOutcomeAction(route);
+    return;
+  }
   // Il controller catturato è l'UNICO bersaglio dei comandi: dopo un replug a
   // metà passata il ciclo non deve pilotare il controller nuovo (prima usava
   // il `ds5` globale). runQuick controlla isCurrent() dopo ogni await.
@@ -1649,9 +1661,21 @@ async function quickCalibrate() {
     }
     if (outcome === 'preflight') {
       quickPreflightBlocked = true;
+      recordSessionOnce(session);
+      // Se l'ultimo test drift dice già che uno stick riposa oltre il raggio di
+      // Quick (o al bordo), nessuno lo sta toccando: il testo lo dice per primo
+      // e il bottone porta a Guided (Pinned: Range). Niente "Stick held": il
+      // misuratore mostrerebbe una mano che non c'è.
+      const route = quickPreflightRoute(lastDriftResult);
+      if (route) {
+        quickRouteNext = route.action.id;
+        $('btn-quick-go').textContent = route.action.label;
+        blockedMessage = `Calibration has not started. <b>${esc(route.text)}</b> If someone was touching the sticks, release them and run the drift test again.`;
+        log(`Quick calibration not started: ${route.text}`);
+        return;
+      }
       // Il modale dice "Release both sticks": il misuratore non deve dire il contrario.
       if (ops.isCurrent(op)) quickHoldKnown = true;
-      recordSessionOnce(session);
       blockedMessage = 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
       log('Quick calibration not started: centered, stable stick readings are required.');
       return;

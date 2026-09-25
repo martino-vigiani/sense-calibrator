@@ -528,3 +528,43 @@ test('app: a calibEnd that never answers shows the poisoned copy, not an earlier
   assert.equal(h.peek().unsaved, true, 'a timed-out commit may have landed');
   assert.equal(h.$('btn-flash').disabled, true);
 });
+
+// Review finding: una preflight fallita su uno stick che RIPOSA oltre il 15%
+// (Severe/Pinned all'ultimo test drift) non è una mano. Niente "Stick held",
+// il testo lo dice per primo e il bottone porta a Guided. Model-verified.
+test('a stick resting past the Quick radius is routed to Guided, not told to let go', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[25, 0], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(6000);
+  assert.equal(h.eval("stickTier(lastDriftResult, 'left')?.id"), 'guided-only');
+  await h.click('btn-quick');
+  const go = h.click('btn-quick-go');
+  await h.advance(20_000);
+  await h.run(go);
+  assert.equal(dev.counts.begin, 0, 'nothing sent');
+  const msg = h.$('quick-msg').innerHTML;
+  assert.match(msg, /^Calibration has not started\. <b>The left stick rests too far off-center for Quick calibration/);
+  assert.doesNotMatch(msg, /Release both sticks/);
+  assert.equal(h.eval('quickHoldKnown'), false, 'the meter is not forced to "Stick held"');
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
+  await h.run(h.click('btn-quick-go'));
+  await h.advance(500);
+  assert.equal(h.visible('modal-wizard'), true, 'the main button opens Guided');
+  assert.equal(dev.counts.begin, 0);
+});
+
+test('a preflight failure with no drift-test evidence of a resting offset still says "Release both sticks"', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[0.2, -0.3], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(6000);
+  dev.touches.push({ stick: 0, t0: clock.now(), dur: 60_000, tail: 100, amp: [30, 0] });
+  await h.click('btn-quick');
+  const go = h.click('btn-quick-go');
+  await h.advance(20_000);
+  await h.run(go);
+  assert.match(h.$('quick-msg').innerHTML, /Release both sticks/);
+  assert.equal(h.eval('quickHoldKnown'), true);
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
+});

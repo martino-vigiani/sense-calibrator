@@ -79,8 +79,11 @@ test('a successful Quick sends its first command only after both centered holds 
 
 // ---------------------------------------------------------------- UI (app reale)
 
-// Stick sinistro tenuto al 40%: il preflight non può mai passare.
-const heldAtStart = [{ stick: 0, t0: 0, dur: 60_000, tail: 0, amp: [50, 0] }];
+// Stick sinistro tenuto al 40%: il preflight non può mai passare. La mano
+// arriva DOPO il test drift automatico (finito entro 5 s): se il test drift
+// stesso vede lo stick al 40%, la preflight fallita instrada a Guided
+// (quickPreflightRoute, coperto in quick-safety.test.js).
+const heldAtStart = [{ stick: 0, t0: 5000, dur: 60_000, tail: 0, amp: [50, 0] }];
 
 async function connectedApp({ schedule = [] } = {}) {
   const clock = new VClock();
@@ -133,7 +136,7 @@ test('Cancel resumes drift after a blocked start, and cannot close an active cal
 });
 
 test('a blocked attempt preserves an existing unsaved result and can be retried successfully', async () => {
-  const shortHold = [{ stick: 0, t0: 0, dur: 9000, tail: 0, amp: [50, 0] }];
+  const shortHold = [{ stick: 0, t0: 5000, dur: 9000, tail: 0, amp: [50, 0] }];
   const { h, dev } = await connectedApp({ schedule: shortHold });
   h.ctx.setUnsaved(true);
   await h.click('btn-quick');

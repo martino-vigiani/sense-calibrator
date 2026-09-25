@@ -479,6 +479,39 @@ export function stickTier(result, side) {
   return tierFor({ ...r, unstable: result.unstable === true });
 }
 
+// Quick non è partito (preflight) e l'ultimo test drift aveva già messo uno
+// stick oltre il raggio di Quick (guided-only) o un asse al bordo (pinned):
+// nessuno lo sta toccando, riposa lì. Il testo lo dice per primo e l'azione
+// viene da routeFor (Pinned → Range, poi Guided; oltre il 15% → Guided),
+// invece di "Release both sticks", che farebbe riprovare all'infinito e
+// accenderebbe "Stick held" su uno stick libero. Null se il test drift non lo
+// dice (allora la preflight fallita resta un probabile pollice).
+export function quickPreflightRoute(driftResult) {
+  if (!driftResult) return null;
+  const sticks = [['left', 'left'], ['right', 'right']].map(([side, name]) => ({
+    name, tier: stickTier(driftResult, side)?.id ?? null, offset: driftResult[side]?.offset,
+  }));
+  const pinned = sticks.find(st => st.tier === 'pinned');
+  if (pinned) {
+    const [first, then] = routeFor(null, true);
+    return {
+      action: first,
+      then,
+      text: `The ${pinned.name} stick rests at the very edge (last drift test), so Quick calibration can’t start or fix it. Try Range calibration first, then Guided if the center is still off.`,
+    };
+  }
+  const far = sticks.find(st => st.tier === 'guided-only');
+  if (far) {
+    const [action] = routeFor(far.offset, false);
+    return {
+      action,
+      then: null,
+      text: `The ${far.name} stick rests too far off-center for Quick calibration (${fmt(far.offset)} in the last drift test; Quick only starts within ${GUIDED_ONLY_MIN}%). Use Guided calibration.`,
+    };
+  }
+  return null;
+}
+
 export function driftMessage(result, { previous = null, unsaved = false } = {}) {
   const tiers = ['left', 'right'].map(side => stickTier(result, side)).filter(Boolean);
   const worstTier = tiers.sort((a, b) => SEVERITY.indexOf(b.id) - SEVERITY.indexOf(a.id))[0];

@@ -5,7 +5,7 @@ import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../js/calib/quick-polic
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
   FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
-  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, rangeOutcomeView, render,
+  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, render,
   revertAdvice, stickRows, writeLockFor,
 } from '../js/ui/outcome.js';
 import { replayOutcomes } from '../ops/sim/replay-telemetry.mjs';
@@ -577,4 +577,17 @@ test('the drift card shows Moving instead of a percentage when the sticks never 
     left: { offset: 4, noise: 6, x: 0.04, y: 0 }, right: { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 } })`);
   assert.equal(h.$('verdict-l').textContent, 'Moving');
   assert.match(h.$('drift-status').textContent, /kept moving/);
+});
+
+test('quickPreflightRoute: Pinned → Range then Guided, Severe → Guided, otherwise nothing', () => {
+  const stick = (offset, extra = {}) => ({ offset, x: 0, y: 0, noise: 0.3, ...extra });
+  assert.equal(quickPreflightRoute(null), null);
+  assert.equal(quickPreflightRoute({ left: stick(3.2), right: stick(0.555) }), null, 'Marked: a failed preflight is a hand');
+  const severe = quickPreflightRoute({ left: stick(19.6, { x: 0.196 }), right: stick(0.555) });
+  assert.equal(severe.action.id, 'guided');
+  assert.match(severe.text, /^The left stick rests too far off-center for Quick calibration/);
+  const pinned = quickPreflightRoute({ left: stick(0.555), right: stick(100, { x: 1, y: 0, noise: 0.1 }) });
+  assert.equal(pinned.action.id, 'range');
+  assert.equal(pinned.then.id, 'guided');
+  assert.match(pinned.text, /^The right stick rests at the very edge/);
 });
