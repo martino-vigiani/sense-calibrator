@@ -61,3 +61,25 @@ test('gate 3.3 compares counts against the paired baseline, and the WS1 forced-h
     assert.ok(Number.isFinite(v) && v >= 0 && v < 0.017, `${fit}-s${seed} recorded`);
   }
 });
+
+test('gate 5 compares report v2 with the plan §1 figures, including the two recorded corrections', async () => {
+  const { reportFigureRows, PLAN_CORRECTIONS } = await import('../ops/sim/report-figures.mjs');
+  const m = (sessions, passingRate, withinOneStepRate = 0) => ({ sessions, passingRate, withinOneStepRate });
+  const report = {
+    sessions: { total: 354 },
+    publicThreshold: { passingAfter: 267, passingRate: 267 / 354 },
+    withinOneStep: { withinAfter: 298, withinOneStepRate: 298 / 354 },
+    safety: { runaways: 5, worseThanStart: 14 },
+    cohorts: { plausible: { metrics: m(349, 0.765043, 0.853868) }, matched: { metrics: m(295, 0.738983) } },
+    breakdowns: { board: { 'BDM-030': m(110, 0.645455), 'BDM-020': m(94, 0.691), 'BDM-010': m(27, 0.926), 'BDM-040': m(44, 0.864), 'BDM-050': m(74, 0.865) } },
+    lattice: { after: { singleAxis: 686, ambiguous: 22, twoAxis: 0 } },
+  };
+  const rows = reportFigureRows({ pg: report, all: { sessions: { total: 368 } }, convergedWorse: 14 });
+  assert.ok(rows.every(r => r.pass && r.id === '5'), rows.filter(r => !r.pass).map(r => r.metric).join(', '));
+  assert.equal(PLAN_CORRECTIONS.length, 2);
+  // The plan's own 21 ambiguous / 13 converged-worse would fail: they are corrections, not tolerances.
+  const planAsWritten = reportFigureRows({ pg: { ...report, lattice: { after: { singleAxis: 686, ambiguous: 21, twoAxis: 0 } } }, convergedWorse: 13 });
+  assert.equal(planAsWritten.filter(r => !r.pass).length, 2);
+  const drifted = reportFigureRows({ pg: { ...report, publicThreshold: { passingAfter: 266, passingRate: 266 / 354 } } });
+  assert.equal(drifted.find(r => /PG pass/.test(r.metric)).pass, false);
+});

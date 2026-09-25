@@ -31,7 +31,8 @@ input reports use while a calibration session is open).
 | `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
 | `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them. `--restricted 1` (release gate 2) compares only the sessions no WS1 rule can touch (`untouchedByWs1`, shared with `test/sim-equivalence.test.js`) and allows only the WS2 outcome changes in `ALLOWED_OUTCOME_CHANGES` |
-| `release-gates.mjs` | Release gates of the plan §4.2 in one command: builds the baseline (and optionally WS1) tree with `git archive` plus this `ops/sim`, runs the fit × seed × scenario matrix on both trees (cached by a source hash), and prints every number next to its threshold with PASS/FAIL, plus gate 2 (restricted equivalence) and gate 4 (real-data replay) |
+| `release-gates.mjs` | Release gates of the plan §4.2 in one command: builds the baseline (and optionally WS1) tree with `git archive` plus this `ops/sim`, runs the fit × seed × scenario matrix on both trees (cached by a source hash), and prints every number next to its threshold with PASS/FAIL, plus gate 2 (restricted equivalence), gate 4 (real-data replay) and gate 5 (report v2 figures) |
+| `report-figures.mjs` | Gate 5: builds the quality report v2 from `SENSE_TELEMETRY` (PG, PGP, ALL, MC, boards, lattice) plus the replay's converged-worse count, and compares each with the plan §1 figure; prints aggregates only |
 | `range-sweep.mjs` | WS7: range coverage of one synthetic turn (8-bit quantized, stored range 0.8–1.4× off, 60/250 Hz), old rule against `js/calib/range-coverage.js`. No telemetry |
 | `precision-user.mjs` | WS8: a model controller (8-bit lattice, noise, spring return, square-ish gate) and a model user who reacts to the precision test's view (lets go, flicks toward the lit mark, rolls the sticks, presses Retry/Skip) driving the real `createPrecisionTest` at ~250 Hz. Scenarios: brush, slow push, endless hold, report gap, hidden tab, no flicks. It also runs the dead-wait instrument (a stall over 2 s without a `why`). Reaction times are assumptions: durations are model-verified |
 | `precision-discrimination.mjs` | WS8: Center score medians per drift tier and the 1-LSB sensitivity, on the real "before" values (`SENSE_TELEMETRY`); prints aggregates only |
@@ -94,19 +95,35 @@ cohort: 12 continue, 2 are ≥15% and stop at the ceiling as `catastrophic`).
 model-verified (gate 3) or a real-data replay (gate 4). The baseline is
 `57621c0` (the tree before WS1/WS2) with this `ops/sim` copied over.
 
-Two gates of the plan could not be met as written because of the model, not the
-code, and were re-specified:
+Three gates of the plan could not be met as written because of the model, not
+the code, and were re-specified. **The plan owner has not signed off on these
+re-specifications yet**: until then they are proposals, and none of the three
+may be reported as passing "as written". Their raw values are always printed as
+INFO rows (3.3i, 3.4i, 3.5i).
 
 - **Final ≥15%, normal population.** The plan asked for ≤0.1%. The model's
-  first-pass capture error produces runaways on the very first `calibEnd`,
-  identical in the baseline (candidate/baseline counts, all 9 fit × seed runs:
-  best 16/16, 20/23, 11/11; alt1 21/21, 30/30, 15/15; alt2 3/3, 2/2, 1/1). No
-  Quick rule can prevent a first pass that the firmware model gets wrong. The
-  gate is now **no more sessions ≥15% than the paired baseline**; the raw rate
-  and the paired extras are printed as INFO. A single session can move either
-  way between two trees by one LSB of capture (for example alt1-s1 #1309:
-  13.78 → [14.52, 14.52] in the baseline, [14.52, 15.3] in the candidate; #1092
-  the other way), which is why the gate is a count and not "0 extra".
+  first-pass capture error produces runaways on the very first `calibEnd`
+  (candidate/baseline counts, all 9 fit × seed runs, after the near-ceiling
+  guard below: best 16/16, 20/23, 11/11; alt1 21/21, 29/30, 15/15; alt2 3/3,
+  2/2, 1/1). No Quick rule can prevent a first pass that the firmware model
+  gets wrong. The gate is now **no more sessions ≥15% than the paired
+  baseline**; the raw rate and the paired extras are printed as INFO. A single
+  session can move either way between two trees by one LSB of capture (for
+  example alt1-s1 #1309: 13.78 → [14.52, 14.52] in the baseline, [14.52, 15.3]
+  in the candidate, on the ordinary pass 2 both trees run; #1092 the other
+  way), which is why the gate is a count and not "0 extra".
+  *Correction (review, 2026-09-25):* an earlier version of this section said
+  every such session was a first-pass runaway "identical in the baseline".
+  That was false for two sessions where the candidate's own **recovery
+  continuation** made the crossing: normal alt1-s2 #144 (before [0.555, 8.393];
+  baseline [14.52, 14.52] worse-than-start, candidate [14.52, 14.52, 15.3]
+  catastrophic) and noisy-hold alt1-s3 #459 (before [2.987, 4.471]; same
+  passes). The count gates hid them because another session moved the other
+  way. `decideAfterPass` now takes no recovery or plateau pass within one
+  lattice step of the ceiling (`QUICK_CEILING_MARGIN` = 1 LSB·√2 ≈ 1.109, reason
+  `near-ceiling`); both sessions now stop at [14.52, 14.52] as in the baseline
+  (model-verified, this runner). Real PG data has 0 sessions plateauing in
+  [12, 15), so the real-world exposure was small.
 - **Final ≥15%, forced hold.** The WS1 value was never recorded; it is now
   measured by running the WS1 tree (`26732b0`, tip of the quick-safety branch,
   with this `ops/sim`) with `--ws1`. Values (n=714, model-verified): best
@@ -116,6 +133,27 @@ code, and were re-specified:
   the same session without it): at most 1 session per run, upper bound ≤0.4%.
   The raw CI upper bound exceeds 1.7% on alt1-s2 (2.0%) and alt1-s3 (1.8%)
   only because of the normal-population runaways above; it is printed as INFO.
+- **Final ≥15%, rim hold.** The plan asks for 0 (a regression test). Raw
+  counts (candidate / baseline, n=714, seeds 1/2/3): best 4/5, 5/5, 5/5;
+  alt1 5/7, 8/9, 8/9; alt2 0/1, 0/0, 1/2. So the gate **as written fails on 7
+  of 9 fit × seed runs**. Every one of those sessions is a first-pass model
+  runaway that is also ≥15% in the paired normal session (no hold at all), so
+  the gate counts only the sessions **attributable to the rim hold** (≥15% with
+  the hold, not ≥15% in the same session without it): 0 in all 9 runs. The raw
+  count, candidate against baseline, is the INFO row 3.5i. An earlier commit
+  (716830c) described the matrix as "all gates PASS except 3.6 noisy hold"
+  without saying that 3.5 had been re-specified; this entry corrects that.
+
+Gate 5 (report v2 reproduces the §1 figures per cohort) runs in
+`report-figures.mjs`, called by the runner with gates 2 and 4 (or alone:
+`SENSE_TELEMETRY=… node ops/sim/report-figures.mjs`). It matches the plan on
+every figure except two, where the plan was wrong and the expected values are
+recorded as corrections: **22** ambiguous after-values, not 21 (686 + 22 = 708
+= 354 × 2), and **14** "converged but worse" sessions, not 13 (the same
+`convergedWorseCheck` count gate 4 prints). Gate 6 (public surface) needs
+headless Chromium and is run separately: `ops/ui-check/a11y-check.mjs` and
+`ops/ui-check/game-check.mjs` (Playwright passed by path; the runner prints the
+commands).
 
 Gates that stay as written and are **not claimed** for this release:
 
@@ -123,11 +161,12 @@ Gates that stay as written and are **not claimed** for this release:
   (9 against 8). The extra session is #479: before 8.245, pass 1 at 14.52 in
   both trees; both trees run pass 2 (the stop rule has always continued after a
   first pass that is not at the target), and the candidate's pass 2 captured
-  one LSB more (15.3 against 14.52). It is not a recovery continuation, so a
-  rule on recovery passes cannot change it; a general "stop near the ceiling"
-  rule would, but on the real PG sequences the only other session in that state
-  (1.24 → 8.24 → 0.55) recovered to the floor on its next pass, so no such rule
-  was added.
+  one LSB more (15.3 against 14.52). Unlike #144 and #459 above, #479 is not a
+  recovery continuation, so the near-ceiling guard on recovery and plateau
+  passes does not change it; a general "stop near the ceiling" rule on every
+  pass would, but on the real PG sequences the only other session in that
+  state (1.24 → 8.24 → 0.55) recovered to the floor on its next pass, so no
+  such rule was added.
 - **1.24 starts within 2 pp** is evaluated on the `one-step` scenario (30 real
   1.24 starts × 20, n≈680 per run), where every run passes (Δ −1.8 to +0.4 pp).
   On the ~150 1.24 starts inside the normal population the Δ is noisier
