@@ -26,6 +26,20 @@
   /* stronger curves for enter/exit + on-screen movement */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Movimento: una sola scala, definita qui e letta anche da app.js
+     (motionToken). Entrate su --motion-base, uscite più rapide su
+     --motion-fast (l'utente ha già visto, il sistema si toglie di mezzo),
+     spazio che si apre o si chiude nel flusso su --motion-layout con la curva
+     da drawer, che parte decisa e si posa senza rimbalzo. Tutto sotto i 300 ms
+     tranne l'unico richiamo del passo di salvataggio (--motion-cue).
+     --motion-shift è lo spostamento d'entrata: 0 con reduced motion, così le
+     stesse regole diventano dissolvenze pure. */
+  --ease-layout: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+  --motion-layout: 280ms;
+  --motion-cue: 600ms;
+  --motion-shift: 8px;
 }
 
 * { box-sizing: border-box; }
@@ -240,7 +254,6 @@ main {
   font-size: 14px;
   text-align: left;
 }
-.callout:not(.hidden) { animation: viewIn 0.3s var(--ease-out); }
 
 /* ---------------- browser non supportato / mobile ---------------- */
 
@@ -637,11 +650,13 @@ main {
   border: 1px solid var(--line-2);
   background: transparent;
   color: var(--ink-2);
-  animation: viewIn 0.3s var(--ease-out);
   /* Il passaggio "Marked drift" → "Centered" è il momento in cui l'utente
-     vede che il fix ha funzionato: deve trasformarsi, non essere sostituito. */
+     vede che il fix ha funzionato: deve trasformarsi, non essere sostituito.
+     Entrata e uscita (nascosto durante un nuovo test) nel blocco movimento. */
   transition: background-color 0.26s var(--ease), border-color 0.26s var(--ease),
-              color 0.26s var(--ease), box-shadow 0.26s var(--ease);
+              color 0.26s var(--ease), box-shadow 0.26s var(--ease),
+              opacity var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out),
+              display var(--motion-base) allow-discrete;
 }
 .verdict.v-ok { border-color: var(--ink); color: var(--ink); }
 /* Il peso doppio è un box-shadow inset, non un border 2px: cambiare la
@@ -711,11 +726,6 @@ main {
   border-radius: var(--radius);
   padding: 18px 24px;
   margin-bottom: 18px;
-  animation: bannerIn 0.36s var(--ease-out);
-}
-@keyframes bannerIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.99); }
-  to { opacity: 1; transform: none; }
 }
 .banner b { display: block; font-size: 14.5px; }
 .banner span { font-size: 13px; opacity: 0.75; }
@@ -810,14 +820,14 @@ main {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: rgba(247, 247, 245, 0.92);
-  animation: fadeIn 0.2s var(--ease-out);
+  animation: fadeIn var(--motion-base) var(--ease-out);
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* Uscita simmetrica all'entrata ma più rapida: l'utente ha già deciso,
-   il sistema deve solo togliersi di mezzo. */
-.modal.closing { animation: fadeOut 0.16s var(--ease-out) forwards; }
-.modal.closing .modal-panel { animation: panelOut 0.16s var(--ease-out) forwards; }
+   il sistema deve solo togliersi di mezzo. --motion-fast = MODAL_CLOSE_MS. */
+.modal.closing { animation: fadeOut var(--motion-fast) var(--ease-out) forwards; }
+.modal.closing .modal-panel { animation: panelOut var(--motion-fast) var(--ease-out) forwards; }
 @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
 @keyframes panelOut {
   from { opacity: 1; transform: none; }
@@ -836,7 +846,7 @@ main {
   box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.08), 0 28px 70px -24px rgba(0, 0, 0, 0.32);
   padding: 28px 30px;
   /* modals stay centered: transform-origin center is correct here */
-  animation: panelIn 0.28s var(--ease-out);
+  animation: panelIn var(--motion-layout) var(--ease-out);
 }
 @keyframes panelIn {
   from { opacity: 0; transform: translateY(12px) scale(0.97); }
@@ -1000,7 +1010,8 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  /* niente gap: lo spazio è il margin-top di ogni toast, che si apre e si
+     chiude con lui (un gap comparirebbe di colpo) */
   pointer-events: none;
 }
 .toast {
@@ -1011,19 +1022,30 @@ main {
   padding: 11px 20px;
   border-radius: 999px;
   box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.4);
-  animation: toastIn 0.32s var(--ease-out);
   max-width: min(520px, 86vw);
   text-align: center;
+  margin-top: 8px;
+  overflow: clip;
+  /* Transizioni, non keyframe: un toast che arriva mentre un altro esce
+     riparte dal punto in cui è. Il nuovo apre il suo spazio in fondo e i
+     precedenti salgono con lui invece di saltare di una riga. */
+  interpolate-size: allow-keywords;
+  transition: opacity var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out),
+              height var(--motion-layout) var(--ease-layout), padding-block var(--motion-layout) var(--ease-layout),
+              margin-top var(--motion-layout) var(--ease-layout);
 }
-/* exit stays under the 350ms JS removal delay; same direction as enter */
-.toast.out { animation: toastOut 0.24s var(--ease-out) forwards; }
-@keyframes toastIn {
-  from { opacity: 0; transform: translateY(14px) scale(0.96); }
-  to { opacity: 1; transform: none; }
+@starting-style {
+  .toast { opacity: 0; transform: translateY(var(--motion-shift)) scale(0.97); height: 0; padding-block: 0; margin-top: 0; }
 }
-@keyframes toastOut {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(10px) scale(0.97); }
+/* Esce dal basso, da dove è entrato, e più in fretta; resta sotto i 350 ms
+   dopo cui toast() lo rimuove. */
+.toast.out {
+  opacity: 0;
+  transform: translateY(var(--motion-shift)) scale(0.97);
+  height: 0;
+  padding-block: 0;
+  margin-top: 0;
+  transition-duration: var(--motion-fast), var(--motion-fast), var(--motion-base), var(--motion-base), var(--motion-base);
 }
 
 /* ---------------- avviso telemetria ---------------- */
@@ -1043,13 +1065,14 @@ main {
   border-radius: var(--radius);
   box-shadow: 0 0 0 1px rgba(10, 10, 10, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.25);
   padding: 18px 20px 16px;
-  animation: noticeIn 0.36s var(--ease-out);
+  animation: noticeIn var(--motion-layout) var(--ease-out);
 }
-/* Esce dal basso, da dove è entrato: stessa direzione, metà del tempo. */
-.notice.closing { animation: noticeOut 0.18s var(--ease-out) forwards; }
+/* Esce dal basso, da dove è entrato: stessa direzione, più in fretta (il
+   timer di resolveNotice, 180 ms, copre --motion-fast). */
+.notice.closing { animation: noticeOut var(--motion-fast) var(--ease-out) forwards; }
 @keyframes noticeOut {
   from { opacity: 1; transform: translate(-50%, 0); }
-  to { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 0; transform: translate(-50%, calc(var(--motion-shift) * 1.5)); }
 }
 .notice.hidden { display: none; }
 .notice h4 {
@@ -1075,7 +1098,7 @@ main {
   margin-top: 14px;
 }
 @keyframes noticeIn {
-  from { opacity: 0; transform: translate(-50%, 16px); }
+  from { opacity: 0; transform: translate(-50%, calc(var(--motion-shift) * 2)); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 /* Sotto i 560px diventa un bottom sheet ancorato al bordo: occupava metà
@@ -2060,13 +2083,15 @@ a.btn { text-decoration: none; }
 .save-step-numbers { margin: 10px 0 0; font-family: var(--mono); font-size: 13px; }
 .save-step .banner-lock { font-size: 13.5px; margin-top: 10px; }
 .btn-save { padding: 15px 30px; font-size: 15.5px; }
-/* Un solo impulso quando compare: una leggera scala e un anello che si
-   allarga e svanisce. Niente ripetizioni (il reduced-motion lo spegne). */
-.save-step-cue { animation: saveCue 0.7s var(--ease-out) 1; }
+/* Un solo richiamo quando compare: un anello che si allarga e svanisce.
+   Niente scala (su un blocco grande e scuro faceva "salto" e sfocava il
+   testo) e parte dopo --motion-layout, quando lo scroll che lo porta in
+   vista si sta posando: durante lo scroll l'occhio non lo vedrebbe.
+   Niente ripetizioni (il reduced-motion lo spegne). */
+.save-step-cue { animation: saveCue var(--motion-cue) var(--ease-out) var(--motion-layout) 1; }
 @keyframes saveCue {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(10, 10, 10, 0.35); }
-  35% { transform: scale(1.015); box-shadow: 0 0 0 5px rgba(10, 10, 10, 0.2); }
-  100% { transform: none; box-shadow: 0 0 0 14px rgba(10, 10, 10, 0); }
+  from { box-shadow: 0 0 0 0 rgba(10, 10, 10, 0.3); }
+  to { box-shadow: 0 0 0 12px rgba(10, 10, 10, 0); }
 }
 /* Write spento: superficie chiara e bordo tratteggiato, bottone a contorno.
    Il blocco resta visibile per dire perché, ma niente lo fa sembrare
@@ -2109,11 +2134,25 @@ a.btn { text-decoration: none; }
   box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45);
   font-size: 14px;
   font-weight: 600;
-  animation: reminderIn 0.28s var(--ease-out);
+  /* Sale dal bordo in basso e ci torna. L'entrata aspetta --reminder-delay:
+     alla chiusura di un modale lo scroll di revealSaveStep porta il blocco in
+     vista in qualche centinaio di ms, e senza attesa il promemoria lampeggiava
+     (dentro e subito fuori). Se torna nascosto prima, non si vede affatto.
+     Uscita subito e più rapida. visibility (non display) lo toglie dal fuoco e
+     dall'albero accessibile esattamente quando è invisibile. */
+  --reminder-delay: 450ms;
+  transition: opacity var(--motion-base) var(--ease-out) var(--reminder-delay),
+              transform var(--motion-base) var(--ease-out) var(--reminder-delay),
+              visibility 0s linear var(--reminder-delay);
 }
-@keyframes reminderIn {
-  from { opacity: 0; transform: translate(-50%, 10px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+.save-reminder.hidden {
+  display: flex !important;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, calc(var(--motion-shift) * 1.5));
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out),
+              visibility 0s linear var(--motion-fast);
 }
 .save-reminder-text { flex: 1; min-width: 0; }
 /* Hover su fondo scuro: quello generico di .btn-primary (#292929) spegneva il
@@ -2152,7 +2191,20 @@ a.btn { text-decoration: none; }
 .handsoff[data-level="amber"]::before { background: #b07300; }
 .handsoff[data-level="red"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
 /* Tenuta nota alla pagina (il misuratore vede solo il movimento): come il rosso. */
-.handsoff[data-level="held"]::before { background: #c92a2a; box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
+.handsoff[data-level="held"]::before {
+  background: #c92a2a;
+  box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18);
+  /* Un solo anello quando la tenuta viene riconosciuta: parte solo al cambio
+     di livello (l'animazione non si riavvia finché resta `held`), mai sul
+     verde/ambra/rosso che il misuratore aggiorna a ogni report. Il testo
+     cambia subito: è un'istruzione. */
+  animation: heldOnset var(--motion-cue) var(--ease-out) 1;
+}
+@keyframes heldOnset {
+  from { box-shadow: 0 0 0 0 rgba(201, 42, 42, 0.45); }
+  40% { box-shadow: 0 0 0 7px rgba(201, 42, 42, 0.12); }
+  to { box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.18); }
+}
 .battery-hint { margin: 8px 0 0; }
 
 .flash-numbers { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13.5px; }
@@ -2167,6 +2219,84 @@ a.btn { text-decoration: none; }
 .flash-warning p { margin: 0 0 10px; font-weight: 600; }
 .flash-ack { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
 .flash-ack input { margin-top: 2px; }
+
+/* ============================================================
+   Movimento: entrate e uscite dei blocchi che compaiono
+   ============================================================ */
+
+/* Avvisi, esito, passo di salvataggio e motivo del blocco: sono nel flusso,
+   quindi comparire o sparire sposta tutto quello che sta sotto. Uscita:
+   lo spazio si richiude (altezza, padding e margini a 0) mentre il contenuto
+   svanisce. `hidden` resta sincrono per app.js e i test: è display con
+   transition-behavior allow-discrete a tenere il blocco a schermo per la
+   durata dell'uscita. Solo Chromium ha WebHID, quindi il fallback (nessuna
+   animazione) riguarda solo la landing su altri browser. */
+.callout,
+.save-step,
+.outcome-card,
+.banner-lock {
+  overflow: clip;
+  interpolate-size: allow-keywords;
+}
+.callout.hidden,
+.save-step.hidden,
+.outcome-card.hidden,
+.banner-lock.hidden {
+  opacity: 0;
+  height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  transition: opacity var(--motion-fast) var(--ease-out),
+              height var(--motion-base) var(--ease-layout),
+              padding-top var(--motion-base) var(--ease-layout), padding-bottom var(--motion-base) var(--ease-layout),
+              margin-top var(--motion-base) var(--ease-layout), margin-bottom var(--motion-base) var(--ease-layout),
+              display var(--motion-base) allow-discrete;
+}
+
+/* Entrata degli avvisi (errore di connessione, aiuto, sessione precedente,
+   motivo del blocco): lo spazio si apre e il contenuto arriva con lui. */
+.callout,
+.banner-lock {
+  transition: opacity var(--motion-base) var(--ease-out),
+              height var(--motion-layout) var(--ease-layout),
+              padding-top var(--motion-layout) var(--ease-layout), padding-bottom var(--motion-layout) var(--ease-layout),
+              margin-top var(--motion-layout) var(--ease-layout), margin-bottom var(--motion-layout) var(--ease-layout);
+}
+@starting-style {
+  .callout,
+  .banner-lock { opacity: 0; height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
+}
+
+/* Il passo di salvataggio entra solo in dissolvenza: compare quasi sempre
+   dietro un modale, e revealSaveStep misura la sua geometria al frame dopo
+   per decidere lo scroll, quindi l'altezza non deve essere a metà strada.
+   Cambio del blocco di Write (pieno ↔ tratteggiato): un morph, non un salto. */
+.save-step {
+  transition: opacity var(--motion-base) var(--ease-out),
+              background-color var(--motion-base) var(--ease), color var(--motion-base) var(--ease),
+              border-color var(--motion-base) var(--ease);
+}
+@starting-style {
+  .save-step { opacity: 0; }
+}
+
+/* L'esito entra da app.js (growBlock, WAAPI), dopo che showOutcome ha scelto
+   lo scroll sulla geometria finale. Qui solo il cambio di tono (bordo). */
+.outcome-card {
+  transition: box-shadow var(--motion-base) var(--ease), border-color var(--motion-base) var(--ease);
+}
+
+/* Badge del verdetto: si nascondono all'inizio di un nuovo test e tornano al
+   risultato. Entrano con un piccolo spostamento, escono in dissolvenza. */
+@starting-style {
+  .verdict { opacity: 0; transform: translateY(calc(var(--motion-shift) / 2)); }
+  .verdict-detail { opacity: 0; }
+}
+.verdict.hidden { opacity: 0; transition-duration: var(--motion-fast); }
+.verdict-detail { transition: opacity var(--motion-base) var(--ease-out), display var(--motion-fast) allow-discrete; }
+.verdict.hidden + .verdict-detail { opacity: 0; transition-duration: var(--motion-fast); }
 
 /* ============================================================
    Reduced motion — ultima regola: vince su tutto quanto sopra
@@ -2186,4 +2316,20 @@ a.btn { text-decoration: none; }
   .verdict { transition-duration: 0.26s !important; }
   .progress i { transition: none !important; }
   .save-step-cue { animation: none !important; }
+  /* Niente spostamenti e nessuno spazio che si apre o si chiude: gli
+     elementi compaiono in dissolvenza (l'altezza è subito quella finale) e i
+     blocchi nel flusso spariscono di colpo, come prima. Il toast, che è fuori
+     dal flusso, svanisce senza richiudersi: lo toglie toast() a 350 ms. */
+  :root { --motion-shift: 0px; }
+  .toast,
+  .callout,
+  .banner-lock,
+  .save-step,
+  .verdict-detail,
+  .verdict.hidden + .verdict-detail {
+    transition: opacity var(--motion-fast) var(--ease), display var(--motion-fast) allow-discrete !important;
+  }
+  .toast.out { height: auto; padding-block: 11px; margin-top: 8px; }
+  .save-reminder { transition: opacity var(--motion-fast) var(--ease) var(--reminder-delay), visibility 0s linear var(--reminder-delay) !important; }
+  .save-reminder.hidden { transition: opacity var(--motion-fast) var(--ease), visibility 0s linear var(--motion-fast) !important; }
 }

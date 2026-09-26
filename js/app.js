@@ -1187,6 +1187,10 @@ function showOutcome(view) {
   if (view.center) { centerState = view.center; lastCenterView = view; }
   if (view.range) rangeState = view.range;
   const el = $('calib-outcome');
+  // Altezza di partenza per growBlock: 0 da nascosto, quella a schermo (anche
+  // a metà di un'entrata o di un'uscita) se c'era già.
+  const fromHeight = el.offsetHeight || 0;
+  for (const anim of el.getAnimations?.() ?? []) anim.cancel();
   el.dataset.tone = view.tone;
   el.innerHTML = outcomeHtml(view);
   el.classList.remove('hidden');
@@ -1202,13 +1206,78 @@ function showOutcome(view) {
     if (el.getBoundingClientRect().height > room)
       actions.scrollIntoView({ block: 'nearest', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
   }
+  // Solo ora, a scroll già deciso sulla geometria finale: scrollIntoView
+  // fissa la destinazione alla chiamata, e l'altezza animata parte dopo.
+  growBlock(el, fromHeight);
   updateWriteLock();
 }
 
 function clearOutcome() {
   const el = $('calib-outcome');
-  el.innerHTML = '';
-  el.classList.add('hidden');
+  // L'uscita (lo spazio che si richiude) è in CSS, .outcome-card.hidden; il
+  // contenuto resta finché dura, poi il blocco è display:none e vuoto.
+  for (const anim of el.getAnimations?.() ?? []) anim.cancel();
+  if (!el.classList.contains('hidden')) el.classList.add('hidden');
+  if (typeof el.animate === 'function' && !reduceMotion.matches) {
+    clearTimeout(clearOutcome.timer);
+    clearOutcome.timer = setTimeout(() => { if (el.classList.contains('hidden')) el.innerHTML = ''; }, motionMs('--motion-base', 240));
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+/* --------- movimento dei blocchi nel flusso --------- */
+
+// Durate e curve stanno in css/style.css (:root, --motion-*/--ease-*): qui
+// si leggono, così la scala resta una sola.
+function motionToken(name, fallback) {
+  if (typeof getComputedStyle !== 'function') return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+function motionMs(name, fallback) {
+  const value = motionToken(name, '');
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return fallback;
+  return /ms$/.test(value) ? n : n * 1000;
+}
+
+// Con un modale aperto o in chiusura la pagina sotto è coperta: quello che
+// cambia lì è già al suo posto quando lo scrim svanisce, e animarlo sarebbe
+// un secondo movimento sotto il primo.
+function pageCovered() {
+  return [...document.querySelectorAll('.modal')].some(m => !m.classList.contains('hidden'));
+}
+
+// Il pannello dell'esito apre il suo spazio invece di spingere giù la pagina
+// di colpo, e un nuovo esito al posto di uno vecchio cambia altezza senza
+// salti, con il contenuto nuovo in dissolvenza. WAAPI e non @starting-style:
+// chi chiama misura la geometria finale per lo scroll prima che parta.
+// Reduced motion: solo la dissolvenza.
+function growBlock(el, fromHeight) {
+  if (typeof el.animate !== 'function' || typeof getComputedStyle !== 'function' || pageCovered()) return;
+  const fade = { duration: motionMs('--motion-base', 240), easing: motionToken('--ease-out', 'ease-out') };
+  const content = [...el.children];
+  // Dentro una vista ancora nascosta (esito mostrato durante la connessione)
+  // non c'è niente da aprire: entra con la vista.
+  if (!el.offsetHeight) return;
+  if (reduceMotion.matches) {
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motionMs('--motion-fast', 160), easing: 'ease' });
+    return;
+  }
+  const to = el.offsetHeight;
+  const layout = { duration: motionMs('--motion-layout', 280), easing: motionToken('--ease-layout', 'ease-out') };
+  if (fromHeight <= 0) {
+    const cs = getComputedStyle(el);
+    el.animate([
+      { height: '0px', paddingTop: '0px', paddingBottom: '0px', marginBottom: '0px', opacity: 0 },
+      { height: `${to}px`, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, marginBottom: cs.marginBottom, opacity: 1 },
+    ], layout);
+  } else if (fromHeight !== to) {
+    el.animate([{ height: `${fromHeight}px` }, { height: `${to}px` }], layout);
+  }
+  const shift = motionToken('--motion-shift', '8px');
+  for (const child of content)
+    child.animate([{ opacity: 0, transform: `translateY(calc(${shift} / 2))` }, { opacity: 1, transform: 'none' }], fade);
 }
 
 function runOutcomeAction(action) {
@@ -2748,7 +2817,7 @@ function finishRangeCheck() {
 
 // L'entrata era animata e l'uscita no: il modale spariva di colpo. L'uscita
 // ora è simmetrica ma più corta (l'utente ha già deciso), e `display:none`
-// arriva solo a animazione finita.
+// arriva solo a animazione finita. Uguale a --motion-fast in css/style.css.
 const MODAL_CLOSE_MS = 160;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const closeTimers = new Map();
