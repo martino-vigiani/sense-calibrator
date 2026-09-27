@@ -4,7 +4,7 @@ import { DRIFT_MOVE_SPREAD, summarizeResult } from '../js/calib/measure.js';
 import { STICK_LSB, measureOffset } from '../js/calib/sampling.js';
 import {
   WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
-  sampleGateOptions, wizardComparison,
+  sampleGateOptions, wizardComparison, axisWorsening,
 } from '../js/calib/wizard-gate.js';
 
 // Gate del wizard guidato (WS7) su una sorgente scriptata: gli stick sono una
@@ -190,7 +190,7 @@ test('a corner that was not reached refuses the sample at once, with no wait', a
   const at = () => REST;
   const source = scriptedSource(at);
   const r = await gateWizardSample(source, idleClock, { tracker: createCornerTracker(TOP_LEFT), ref: REST, tol: 4 * STICK_LSB });
-  assert.deepEqual(r, { ok: false, reason: 'corner', missing: ['left', 'right'] });
+  assert.deepEqual(r, { ok: false, reason: 'corner', missing: ['left', 'right'], axes: [{ side: 'left', axes: ['x', 'y'] }, { side: 'right', axes: ['x', 'y'] }] });
   assert.equal(source.t, 0);
   assert.equal(source.listeners.size, 0);
 });
@@ -312,4 +312,37 @@ test('the before/after comparison formats both sticks and flags a worse result',
   assert.equal(c.measured, false);
   assert.equal(c.worse, false);
   assert.equal(c.sticks[1].afterLabel, '—');
+});
+
+test('a corner needs both axes in the same report, not one axis pushed to the edge', () => {
+  // Il caso trovato in revisione: X a fondo verso sinistra, Y fermo. La sola
+  // proiezione diagonale (0,6) lo accettava come angolo in alto a sinistra.
+  const t = createCornerTracker(TOP_LEFT);
+  t.push({ lx: -0.85, ly: 0, rx: -0.85, ry: 0 });
+  assert.deepEqual(t.missing(), ['left', 'right']);
+  assert.deepEqual(t.missingAxes(), [{ side: 'left', axes: ['y'] }, { side: 'right', axes: ['y'] }]);
+  // X a fondo e poi Y a fondo in due momenti diversi non sono un angolo.
+  t.push({ lx: 0, ly: -0.85, rx: 0, ry: -0.85 });
+  assert.deepEqual(t.missing(), ['left', 'right']);
+  // Un angolo vero, anche imperfetto, sì.
+  t.push({ lx: -0.8, ly: -0.4, rx: -0.55, ry: -0.55 });
+  assert.deepEqual(t.missing(), []);
+});
+
+test('the gate names the short axis when a corner is missed', async () => {
+  const tracker = createCornerTracker(TOP_LEFT);
+  tracker.push({ lx: -0.9, ly: -0.1, rx: -0.6, ry: -0.6 });
+  const r = await gateWizardSample(scriptedSource(() => REST), idleClock, { tracker, ref: REST, tol: 4 * STICK_LSB });
+  assert.deepEqual(r, { ok: false, reason: 'corner', missing: ['left'], axes: [{ side: 'left', axes: ['y'] }] });
+});
+
+test('an axis that moved away from center is reported even when the stick improved', () => {
+  const before = { off: [3.1, 0.555], xy: [[3.0, 0.4], [0.4, 0.4]] };
+  const after = { off: [2.8, 0.555], xy: [[0.4, 2.8], [0.4, 0.4]] };
+  const c = wizardComparison(before, after);
+  assert.equal(c.worse, false);
+  assert.deepEqual(c.axisWorse, [{ stick: 'Left', axis: 'Y', before: 0.4, after: 2.8 }]);
+  // un passo (0,784) non basta: stessa soglia di worseEps
+  assert.deepEqual(axisWorsening({ xy: [[0.4, 0.4], [0.4, 0.4]] }, { xy: [[1.18, 0.4], [0.4, 0.4]] }), []);
+  assert.deepEqual(axisWorsening(null, after), []);
 });

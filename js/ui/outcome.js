@@ -24,6 +24,7 @@ import {
 } from '../calib/lattice.js';
 import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../calib/quick-policy.js';
 import { QUICK_DEFAULTS, QUICK_REGRESSION_EPS } from '../calib/quick.js';
+import { axisWorsening } from '../calib/wizard-gate.js';
 
 // Tasso di riuscita pubblicato nel testo. Viene dal report di qualità v2 di
 // WS3 (ops/calib-telemetry), coorte PG (n=354, generato il 2026-09-25):
@@ -437,15 +438,21 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
       revert ?? 'Run Guided again, releasing both sticks fully before each Continue.',
     ], [ACTION.guided]);
   }
+  // Un asse peggiorato va detto anche quando il raggio dello stick migliora.
+  const axisLine = axisWorsening(before, after).length
+    ? `The ${axisWorsening(before, after).map(w => `${w.stick.toLowerCase()} ${w.axis}`).join(', ')} axis moved further from center than before, even though the stick as a whole improved.`
+    : null;
   if (outcome === 'centered') return view(outcome, 'ok', 'Both sticks centered', [`Worst stick ${fmt(worst)}, the measurement limit. Write it to memory to keep it.`]);
-  if (outcome === 'within-1-step') return view(outcome, 'ok', 'Within 1 step: fine to save', [`Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`]);
+  if (outcome === 'within-1-step') return view(outcome, 'ok', 'Within 1 step: fine to save', [`Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`, axisLine]);
   if (outcome === 'worn') {
     return view(outcome, 'warn', 'Re-centered as far as a worn sensor allows', [
       `Worst stick ${fmt(worst)}. The signal wanders even at rest: calibration can re-center the stick, but the noise will stay.`,
+      axisLine,
     ], [], { repair: true });
   }
   return view(outcome, 'warn', 'Not fully centered', [
     `Worst stick ${fmt(worst)}${isNum(beforeWorst) ? `, from ${fmt(beforeWorst)}` : ''}. You can save it if it’s better than before, or run the procedure again.`,
+    axisLine,
   ], [ACTION.guided]);
 }
 

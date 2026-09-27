@@ -639,3 +639,16 @@ test('quickPreflightRoute: Pinned → Range then Guided, Severe → Guided, othe
   assert.equal(pinned.then.id, 'guided');
   assert.match(pinned.text, /^The right stick rests at the very edge/);
 });
+
+test('guided result names an axis that got worse even when the stick improved', () => {
+  const v = guidedOutcomeView({
+    before: { off: [3.1, 0.555], noise: [0, 0], xy: [[3.0, 0.4], [0.4, 0.4]] },
+    after: { off: [2.8, 0.555], noise: [0, 0], xy: [[0.4, 2.8], [0.4, 0.4]] },
+  });
+  assert.match(textOf(v), /left Y axis moved further from center/);
+  const ok = guidedOutcomeView({
+    before: { off: [3.1, 0.555], noise: [0, 0], xy: [[3.0, 0.4], [0.4, 0.4]] },
+    after: { off: [0.555, 0.555], noise: [0, 0], xy: [[0.4, 0.4], [0.4, 0.4]] },
+  });
+  assert.doesNotMatch(textOf(ok), /moved further/);
+});

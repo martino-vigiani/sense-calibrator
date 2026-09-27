@@ -2254,7 +2254,7 @@ function wizardShowCorner(i, note = '') {
   $('wizard-target').setAttribute('cx', c.x);
   $('wizard-target').setAttribute('cy', c.y);
   $('wizard-msg').innerHTML = (note ? `${note}<br>` : '')
-    + `Move <b>both sticks ${c.label}</b> (inside the dashed ring below), then release them.<br>`
+    + `Push <b>both sticks ${c.label}</b>, all the way into the corner (diagonally, not just sideways or up/down), then release them.<br>`
     + 'When they’ve returned to the center, press <b>Continue</b>.';
   // mini quadranti live: l'utente vede dove sta puntando davvero,
   // anche con la calibrazione attuale sballata
@@ -2333,7 +2333,12 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
       const what = gate.missing.length === 2
         ? 'Neither stick reached the corner.'
         : `The ${gate.missing[0]} stick didn’t reach the corner.`;
-      wizardShowCorner(i, `<b>${what}</b> No sample was taken.`);
+      // Quale asse è rimasto corto: spingere solo di lato o solo in alto non
+      // basta più, e senza dirlo l'utente non capirebbe perché.
+      const short = (gate.axes ?? []).filter(m => m.axes.length === 1)
+        .map(m => `the ${m.side} stick needs to go further ${m.axes[0] === 'x' ? 'sideways' : (WIZARD_CORNERS[i].ty < 0 ? 'up' : 'down')}`);
+      const hint = short.length ? ` Push all the way into the corner: ${short.join(', and ')}.` : ' Push both sticks all the way into the corner.';
+      wizardShowCorner(i, `<b>${what}</b>${hint} No sample was taken.`);
     } else {
       wizardTimeout(w, 'The sticks are not resting where they started.');
     }
@@ -2400,6 +2405,10 @@ function wizardResultHtml(cmp, escaped) {
     // Il consiglio di spegnere solo con la memoria confermata `locked` (C0-11).
     tail = '<b>This is worse than before.</b> Don’t write it to memory'
       + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s), which should discard it.' : '.');
+  } else if (cmp.axisWorse?.length) {
+    // Il raggio può migliorare mentre un asse peggiora: va detto per nome.
+    const axes = cmp.axisWorse.map(w => `${esc(w.stick.toLowerCase())} ${w.axis}`).join(', ');
+    tail = `<b>Careful: the ${axes} axis moved further from center.</b> Check the result with the drift test before saving.`;
   } else tail = 'Check the result with the drift test.';
   const escapedNote = escaped ? '<br>The rest check was looser for some samples: the result may be less precise.' : '';
   return `Center calibration complete.<br>${rows}<br>${tail}${escapedNote}`;

@@ -10,8 +10,9 @@
 // cioè dei casi più difficili, e aveva meno protezione di Quick.
 //
 // Regole per ogni campione:
-//   1. l'angolo richiesto è stato raggiunto: dall'ultimo campione, la
-//      proiezione di ciascuno stick verso l'angolo ha toccato cornerDot;
+//   1. l'angolo richiesto è stato raggiunto: dall'ultimo campione, in almeno
+//      un report ciascuno stick ha toccato cornerDot verso l'angolo con
+//      entrambi gli assi oltre cornerAxisMin;
 //   2. gli stick sono fermi (spread ≤ gate per holdMs, entro timeoutMs) E il
 //      centro della finestra è entro max(4 LSB, 3·rumore) dal punto di riposo
 //      di riferimento;
@@ -77,6 +78,13 @@ export const WIZARD_DEFAULTS = Object.freeze({
   // Proiezione minima verso l'angolo (frazione della corsa) per dire che
   // l'utente ci è arrivato.
   cornerDot: 0.6,
+  // Minimo per asse verso l'angolo. La sola proiezione diagonale accettava uno
+  // stick spinto su un asse soltanto (X=−0,85, Y=0 "raggiunge" l'angolo in alto
+  // a sinistra): quell'asse non veniva mai esercitato, e la telemetria v2 mostra
+  // Guided che lascia fuori pavimento assi che prima erano buoni. Con un gate
+  // circolare l'angolo pieno vale ~0,71 per asse; 0,35 chiede un movimento
+  // vero su entrambi senza pretendere precisione dall'utente.
+  cornerAxisMin: 0.35,
   // Timeout (sull'intera procedura) prima di offrire l'uscita esplicita.
   escapeAfter: 2,
   // Variazione (punti %) oltre cui il confronto prima/dopo parla di
@@ -128,28 +136,62 @@ export function cornerProjection(sticks, corner) {
   };
 }
 
-// Traccia il massimo della proiezione dall'ultimo reset (alimentato dagli
-// input report, non da rAF: un passaggio rapido all'angolo tra due frame
-// non va perso).
-export function createCornerTracker(corner) {
+// Componenti di ciascuno stick lungo gli assi dell'angolo (segno dell'angolo
+// applicato): 1 = asse a fondo corsa nella direzione giusta.
+export function cornerAxes(sticks, corner) {
+  const sx = Math.sign(corner.tx) || 1, sy = Math.sign(corner.ty) || 1;
+  return {
+    left: { x: sticks.lx * sx, y: sticks.ly * sy },
+    right: { x: sticks.rx * sx, y: sticks.ry * sy },
+  };
+}
+
+// Traccia, dall'ultimo reset, il massimo della proiezione e il massimo di
+// ciascun asse verso l'angolo (alimentato dagli input report, non da rAF: un
+// passaggio rapido all'angolo tra due frame non va perso). Un angolo è
+// raggiunto quando, in un singolo report, la proiezione supera `cornerDot` E
+// entrambi gli assi superano `cornerAxisMin`: i massimi separati non bastano,
+// perché X a fondo e poi Y a fondo in due momenti non sono un angolo.
+export function createCornerTracker(corner, params = {}) {
+  const p = wizardParams(params);
+  const fresh = () => ({ left: -Infinity, right: -Infinity });
   const t = {
     corner,
-    best: { left: -Infinity, right: -Infinity },
+    best: fresh(),
+    reached: { left: false, right: false },
+    // Il meglio visto per asse, per dire all'utente QUALE asse manca.
+    bestAxis: { left: { x: -Infinity, y: -Infinity }, right: { x: -Infinity, y: -Infinity } },
     push(sticks) {
-      const p = cornerProjection(sticks, t.corner);
-      if (p.left > t.best.left) t.best.left = p.left;
-      if (p.right > t.best.right) t.best.right = p.right;
+      const proj = cornerProjection(sticks, t.corner);
+      const axes = cornerAxes(sticks, t.corner);
+      for (const side of ['left', 'right']) {
+        if (proj[side] > t.best[side]) t.best[side] = proj[side];
+        const a = axes[side];
+        if (a.x > t.bestAxis[side].x) t.bestAxis[side].x = a.x;
+        if (a.y > t.bestAxis[side].y) t.bestAxis[side].y = a.y;
+        if (proj[side] >= p.cornerDot && a.x >= p.cornerAxisMin && a.y >= p.cornerAxisMin) t.reached[side] = true;
+      }
     },
     reset(nextCorner = t.corner) {
       t.corner = nextCorner;
-      t.best = { left: -Infinity, right: -Infinity };
+      t.best = fresh();
+      t.reached = { left: false, right: false };
+      t.bestAxis = { left: { x: -Infinity, y: -Infinity }, right: { x: -Infinity, y: -Infinity } };
     },
     // Stick che non hanno ancora raggiunto l'angolo: [] = entrambi ok.
-    missing(minDot = WIZARD_DEFAULTS.cornerDot) {
-      const out = [];
-      if (!(t.best.left >= minDot)) out.push('left');
-      if (!(t.best.right >= minDot)) out.push('right');
-      return out;
+    missing() {
+      return ['left', 'right'].filter(side => !t.reached[side]);
+    },
+    // Per ogni stick mancante, l'asse (o gli assi) rimasti corti: 'x', 'y' o
+    // entrambi. Serve solo al testo per l'utente.
+    missingAxes() {
+      return t.missing().map(side => {
+        const b = t.bestAxis[side];
+        const axes = [];
+        if (!(b.x >= p.cornerAxisMin)) axes.push('x');
+        if (!(b.y >= p.cornerAxisMin)) axes.push('y');
+        return { side, axes };
+      });
     },
   };
   return t;
@@ -200,8 +242,8 @@ export async function gateWizardSample(source, clock, { tracker, ref, tol, escap
   const p = wizardParams(params);
   if (!ref) return { ok: false, reason: 'timeout' };
   if (tracker) {
-    const missing = tracker.missing(p.cornerDot);
-    if (missing.length) return { ok: false, reason: 'corner', missing };
+    const missing = tracker.missing();
+    if (missing.length) return { ok: false, reason: 'corner', missing, axes: tracker.missingAxes?.() ?? [] };
   }
   const stable = await waitForStable(source, clock, sampleGateOptions({ ref, tol, escaped, params, isCancelled }));
   if (isCancelled?.()) return { ok: false, reason: 'cancelled' };
@@ -239,5 +281,25 @@ export function wizardComparison(before, after, params = {}) {
     measured,
     worse: measured && afterWorst - beforeWorst > p.worseEps,
     centered: afterWorst !== null && afterWorst < CENTERED_MAX,
+    axisWorse: axisWorsening(before, after, params),
   };
+}
+
+// Assi che si sono allontanati dal centro di più di `worseEps` punti, anche
+// quando il raggio dello stick migliora: X da 3% a 0,6% e Y da 0,6% a 2,8%
+// danno un raggio quasi uguale e nasconderebbero un asse peggiorato.
+// → [{ stick: 'Left'|'Right', axis: 'X'|'Y', before, after }] (valori in %).
+export function axisWorsening(before, after, params = {}) {
+  const p = wizardParams(params);
+  const b = before?.xy, a = after?.xy;
+  if (!Array.isArray(b) || !Array.isArray(a)) return [];
+  const out = [];
+  ['Left', 'Right'].forEach((stick, i) => {
+    ['X', 'Y'].forEach((axis, j) => {
+      const bv = b[i]?.[j], av = a[i]?.[j];
+      if (!Number.isFinite(bv) || !Number.isFinite(av)) return;
+      if (Math.abs(av) - Math.abs(bv) > p.worseEps) out.push({ stick, axis, before: bv, after: av });
+    });
+  });
+  return out;
 }
