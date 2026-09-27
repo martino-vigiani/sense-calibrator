@@ -135,8 +135,9 @@ test('the raw NVS status word is logged after flash without gating the outcome',
 });
 
 test('reopening the Write modal re-enables the confirm button', async () => {
-  assert.match(source, /\$\('btn-flash'\)\.addEventListener\('click', openFlashModal\);/);
-  const body = source.match(/function openFlashModal\(\) \{([\s\S]*?)\n\}/)?.[1];
+  // Il blocco apre il modale dicendo da dove (telemetria v2: blocco o promemoria).
+  assert.match(source, /\$\('btn-flash'\)\.addEventListener\('click', \(\) => openFlashModal\('block'\)\);/);
+  const body = source.match(/function openFlashModal\(source = 'block'\) \{([\s\S]*?)\n\}/)?.[1];
   assert.ok(body, 'openFlashModal should exist');
   assert.match(body, /^\s*\$\('btn-flash-go'\)\.disabled = false;/, 're-enabled first, at every opening');
   const { h } = await connectedApp();

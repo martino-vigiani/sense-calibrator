@@ -26,6 +26,8 @@ import * as opsModule from '../../js/calib/ops.js';
 import * as wizardGateModule from '../../js/calib/wizard-gate.js';
 import * as rangeCoverageModule from '../../js/calib/range-coverage.js';
 import * as guardModule from '../../js/quick-center-guard.js';
+import * as telemetryV2Module from '../../js/telemetry-v2.js';
+import * as restNoiseModule from '../../js/calib/rest-noise.js';
 
 const APP_SOURCE = fs.readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 const INDEX_HTML = fs.readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
@@ -249,13 +251,20 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
   const hid = makeHid();
   hid.authorized.push(...authorized);
   hid.chooser.push(...chooser);
-  const store = new Map(Object.entries({ ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1' } : {}), ...storage }));
+  // "Avviso letto" vuol dire l'avviso attuale: v1 (notice) e v2 (scope).
+  const store = new Map(Object.entries({
+    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2' } : {}),
+    ...storage,
+  }));
   const uploads = [];
+  // Eventi v2 che hanno raggiunto uploadEventV2 (builder e validatore reali,
+  // solo fetch sostituito).
+  const uploadsV2 = [];
   const consoleCalls = [];
   const raf = { paused: false, queue: [], pending: new Map() };
   const windowListeners = new Map();
   const h = {
-    clock, doc, hid, store, uploads, consoleCalls, raf,
+    clock, doc, hid, store, uploads, uploadsV2, consoleCalls, raf,
     confirmAnswer: true,
     toasts: () => doc.appended.map(el => el.textContent),
   };
@@ -301,6 +310,15 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './ds5.js': ds5Module,
       './telemetry.js': { uploadCalibrationEvent: async entry => { uploads.push(structuredClone(entry)); return true; } },
       './quick-center-guard.js': guardModule,
+      './telemetry-v2.js': {
+        ...telemetryV2Module,
+        uploadEventV2: async event => {
+          if (telemetryV2Module.validateEventV2(event) !== null) return false;
+          uploadsV2.push(structuredClone(event));
+          return true;
+        },
+      },
+      './calib/rest-noise.js': restNoiseModule,
       './calib/measure.js': measureModule,
       './calib/sampling.js': samplingModule,
       './calib/quick.js': quickModule,

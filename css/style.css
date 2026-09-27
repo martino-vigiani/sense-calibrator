@@ -1086,6 +1086,9 @@ main {
   color: var(--ink-2);
   margin: 0;
 }
+/* "What's shared has changed", sopra la descrizione, per chi aveva già
+   risposto all'avviso della v1. */
+#notice-changed { margin-bottom: 6px; color: var(--ink); }
 .notice a {
   color: var(--ink);
   text-decoration: underline;

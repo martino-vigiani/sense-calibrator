@@ -6,6 +6,11 @@ import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
 import {
+  TELEMETRY_SCOPE, buildFlashEvent, buildGuidedEvent, buildQuickEvent, buildRangeEvent, buildRestEvent, buildSaveEvent,
+  flashResultFor, uploadEventV2, validateEventV2,
+} from './telemetry-v2.js';
+import { createRestNoiseCollector } from './calib/rest-noise.js';
+import {
   DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
 } from './calib/measure.js';
@@ -704,6 +709,10 @@ function renderDeviceInfo(info) {
 }
 
 function teardown(message = null) {
+  // Prima di azzerare lo stato: il blocco di Write letto qui è ancora quello
+  // del controller che se ne va.
+  closeSaveChapter('disconnected');
+  restNoise.reset();
   const hadUnsaved = unsaved;
   const nvAtExit = lastNvStatus;
   ds5 = null;
@@ -819,6 +828,7 @@ function onInputReport(event) {
 
   const now = performance.now();
   feedHandsOff(now);
+  feedRestNoise(now);
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
     battery = ds5.parseBattery(d);
@@ -1026,6 +1036,7 @@ function finishDriftTest(result) {
 /* ============================== unsaved / flash ============================== */
 
 function setUnsaved(v) {
+  if (v && !unsaved) openSaveChapter();
   unsaved = v;
   $('banner-unsaved').classList.toggle('hidden', !v);
   // Il segno per la scheda si alza con la RAM cambiata e si abbassa solo con
@@ -1111,6 +1122,7 @@ function goToSaveStep() {
 if (typeof IntersectionObserver === 'function') {
   new IntersectionObserver(entries => {
     saveStepInView = entries[entries.length - 1].isIntersecting;
+    if (saveStepInView && saveChapter) saveChapter.seen = true;
     syncSaveReminder();
   }, { rootMargin: '-64px 0px 0px 0px' }).observe($('banner-unsaved'));
 }
@@ -1292,10 +1304,14 @@ function runOutcomeAction(action) {
 
 // Modale di Write: le cifre dell'ultimo esito e, se l'esito è peggiore
 // dell'inizio o perso, avviso, Cancel col fuoco e una seconda conferma.
-function openFlashModal() {
+function openFlashModal(source = 'block') {
   $('btn-flash-go').disabled = false; // disattivato da doFlash al click precedente
   const lock = updateWriteLock();
   if (lock.mode === 'disabled') { toast(lock.reasons[0].text, 7000); return; }
+  if (saveChapter) {
+    if (source === 'reminder') saveChapter.reminderOpens += 1;
+    else saveChapter.opens += 1;
+  }
   const summary = flashSummary(lastCenterView, lock);
   const numbers = $('flash-numbers');
   numbers.innerHTML = summary.numbers.map(line => `<li>${esc(line)}</li>`).join('');
@@ -1368,6 +1384,13 @@ async function doFlash() {
   const op = ops.beginOp();
   closeModal('modal-flash');
   flashing = true;
+  if (saveChapter) saveChapter.attempts += 1;
+  const attempt = saveChapter?.attempts ?? 1;
+  const noteFlash = (error, nv) => {
+    const result = flashResultFor(error, nv);
+    if (saveChapter) saveChapter.lastFlash = result;
+    emitV2(ctx => buildFlashEvent(ctx, { result, nv, attempt, lock: lock.mode }));
+  };
   try {
     await controller.flash();
     const nv = await refreshNv();
@@ -1381,11 +1404,15 @@ async function doFlash() {
     log(`NVS status after flash: ${nv?.status ?? 'n/a'} (raw ${raw}).`);
     if (nv?.status === 'unlocked') {
       recordEvent('flash', { ok: false, nv: nv.status });
+      noteFlash(null, nv);
       toast(`Save not confirmed: ${NV_UNLOCKED_MESSAGE}`, 8000, { alert: true });
       log('Flash not confirmed: NVS still unlocked.');
       return;
     }
     recordEvent('flash', { ok: true, nv: nv?.status ?? null });
+    noteFlash(null, nv);
+    savedThisLoad = true;
+    closeSaveChapter('saved');
     setUnsaved(false);
     markTabUnsaved(false);
     if (nv?.status === 'pending_reboot') {
@@ -1399,6 +1426,7 @@ async function doFlash() {
     // fallito lascia la NVS aperta, e il chip deve dirlo (e bloccare Quick).
     const nv = await refreshNv();
     recordEvent('flash', { ok: false, nv: nv?.status ?? null, err: String(error.message || error).slice(0, 120) });
+    noteFlash(error, nv);
     if (error.nvUnknown) toast(NV_UNKNOWN_MESSAGE, 8000, { alert: true });
     else toast(`Error while saving: ${error.message}`, 5000, { alert: true });
     log(`Flash error: ${error.message}`);
@@ -1755,7 +1783,10 @@ function recordCalibSession(entry) {
   } catch { /* storage pieno o negato: la telemetria non è mai bloccante */ }
 
   if (!telemetryEnabled()) return;
-  if (!noticeSeen()) {
+  // Anche con l'avviso già letto in passato: finché quello aggiornato è a
+  // schermo (telemetria v2, descrizione nuova) niente parte, così "nothing
+  // from this visit has been sent yet" resta vero per chi aveva già detto sì.
+  if (!noticeSeen() || noticeOpen) {
     // Copia, non riferimento: l'oggetto sessione viene ancora mutato dopo la
     // registrazione (il catch vi scrive `aborted`/`err`), e accodare il vivo
     // farebbe partire al flush una versione diversa da quella registrata.
@@ -1782,6 +1813,166 @@ function uploadEvent(entry) {
   uploadCalibrationEvent(entry)
     .then(sent => { if (sent) log('Anonymous calibration telemetry sent.'); })
     .catch(error => log(`Anonymous telemetry not sent: ${error.message}`));
+}
+
+/* --------- telemetria v2: eventi tipizzati (js/telemetry-v2.js) --------- */
+// Stesso consenso di v1, più un livello: `sense-telemetry-scope` è la versione
+// della descrizione che la persona ha visto e accettato ("Keep sharing" o una
+// casella di condivisione spuntata a mano). Gli eventi v2 partono solo con
+// scope ≥ TELEMETRY_SCOPE; prima restano in coda (limitata) mentre l'avviso è
+// a schermo, e "Don't share" li scarta. Chi aveva accettato solo v1 rivede
+// l'avviso una volta, con il testo nuovo: le categorie nuove (esiti di tutte
+// le calibrazioni, salvataggio, rumore a riposo) non sono quelle a cui aveva
+// detto sì.
+const TELEMETRY_SCOPE_KEY = 'sense-telemetry-scope';
+const scopeAccepted = () => Number(storageRead(TELEMETRY_SCOPE_KEY)) >= TELEMETRY_SCOPE;
+let noticeOpen = false;
+// Il sid v2 (8 cifre esadecimali, contratto) è suo, non SESSION_ID: quello
+// finisce nello storico locale (`sense-calib-sessions`), e un codice scritto su
+// disco collegherebbe gli eventi inviati a chi ha accesso al browser. Questo
+// vive solo in memoria, per un caricamento di pagina.
+const V2_SID = [...crypto.getRandomValues(new Uint8Array(4))].map(b => b.toString(16).padStart(2, '0')).join('');
+const V2_PENDING_MAX = 24;
+const V2_MAX_PER_LOAD = 60;
+let v2Seq = 0;
+let v2Pending = [];
+let v2Chain = Promise.resolve();
+// Registro in memoria degli eventi v2 di questa pagina, per il debug
+// (window.__senseTelemetryV2) e per i controlli headless: stato 'queued',
+// 'sent', 'failed', 'discarded'. Mai persistito.
+const v2Outbox = [];
+let lastCalibV2 = null; // { seq, committed, claimed, at }
+// Una calibrazione registrata poco prima che `unsaved` si alzi (lo stallo, il
+// range completo) apre lei il periodo. Oltre questa finestra l'evento è di
+// un'altra storia, per esempio l'esito 'disconnected' di un ciclo orfano
+// arrivato dopo il teardown, e il periodo nuovo non lo eredita.
+const CALIB_SEED_MS = 5000;
+
+function sendV2(item, { now = false } = {}) {
+  item.state = 'sending';
+  const go = () => uploadEventV2(item.event)
+    .then(sent => { item.state = sent ? 'sent' : 'invalid'; })
+    .catch(error => { item.state = 'failed'; log(`Anonymous telemetry v2 not sent: ${error.message}`); });
+  // In fila, uno alla volta: al "Keep sharing" la coda parte senza raffiche.
+  // `now` (uscita dalla pagina) salta la fila: dopo pagehide le continuazioni
+  // delle promise possono non girare più, e fetch keepalive deve partire ora.
+  if (now) go();
+  else v2Chain = v2Chain.then(go);
+}
+
+// Costruisce, valida e invia (o accoda) un evento v2. `build(ctx)` riceve sid,
+// seq e la scheda del controller; `device` sovrascrive board/fw quando
+// l'evento arriva dopo il teardown (esito 'disconnected'). Con la
+// condivisione spenta non costruisce nemmeno l'evento.
+function emitV2(build, { device = null, now = false } = {}) {
+  if (!telemetryEnabled() || v2Seq >= V2_MAX_PER_LOAD || v2Seq > 255) return null;
+  const ctx = {
+    sid: V2_SID,
+    seq: v2Seq,
+    board: device ? device.board : deviceInfo?.board ?? null,
+    fw: device ? device.fw : deviceInfo?.fwversion ?? null,
+  };
+  const event = build(ctx);
+  const error = validateEventV2(event);
+  if (error) { log(`Telemetry v2 event dropped: ${error}.`); return null; }
+  v2Seq += 1;
+  const item = { event, state: 'queued' };
+  v2Outbox.push(item);
+  if (scopeAccepted() && !noticeOpen) sendV2(item, { now });
+  else if (v2Pending.length < V2_PENDING_MAX) v2Pending.push(item);
+  else item.state = 'discarded';
+  return event;
+}
+
+function flushV2(keepSharing) {
+  const queued = v2Pending;
+  v2Pending = [];
+  for (const item of queued) {
+    if (keepSharing) sendV2(item);
+    else item.state = 'discarded';
+  }
+}
+
+// Evento di una calibrazione (quick, guided, range): lo lega al periodo "non
+// salvato" in corso, o a quello che si apre subito dopo (lo stallo registra la
+// sessione prima di alzare `unsaved`).
+function emitCalibV2(build, options) {
+  const event = emitV2(build, options);
+  if (!event) return;
+  lastCalibV2 = { seq: event.seq, committed: event.committed, claimed: false, at: performance.now() };
+  if (saveChapter) {
+    saveChapter.ref = event.seq;
+    saveChapter.sessions += 1;
+    lastCalibV2.claimed = true;
+  }
+}
+
+/* --------- periodo "non salvato": si salva davvero? --------- */
+// Si apre quando `unsaved` passa a vero e si chiude con un Write riuscito
+// ('saved'), uno scollegamento ('disconnected', il teardown abbassa `unsaved`)
+// o l'uscita dalla pagina ('left', via pagehide: best effort, un evento che
+// non arriva il report lo conta come esito ignoto). Conta cosa è successo nel
+// mezzo: aperture del modale di Write (dal blocco o dal promemoria), Cancel,
+// tentativi e l'ultimo esito, e se il blocco è mai stato in vista.
+let saveChapter = null;
+let savedThisLoad = false;
+
+function openSaveChapter() {
+  if (saveChapter) return;
+  const seed = lastCalibV2 && !lastCalibV2.claimed && lastCalibV2.committed
+    && performance.now() - lastCalibV2.at <= CALIB_SEED_MS ? lastCalibV2 : null;
+  if (seed) seed.claimed = true;
+  saveChapter = {
+    startedAt: performance.now(),
+    ref: seed ? seed.seq : null,
+    sessions: seed ? 1 : 0,
+    opens: 0, reminderOpens: 0, cancels: 0, attempts: 0,
+    lastFlash: null,
+    seen: saveStepInView,
+  };
+}
+
+function closeSaveChapter(result, { now = false } = {}) {
+  const chapter = saveChapter;
+  if (!chapter) return;
+  saveChapter = null;
+  const lock = currentWriteLock();
+  emitV2(ctx => buildSaveEvent(ctx, {
+    ...chapter, result, lock, waitMs: performance.now() - chapter.startedAt,
+  }), { now });
+}
+
+/* --------- rumore a riposo (js/calib/rest-noise.js) --------- */
+// Solo con la pagina visibile, un controller collegato, nessuna calibrazione,
+// flash o modale in corso e la condivisione non negata. Al massimo
+// REST_DEFAULTS.maxPerLoad riassunti per caricamento, uno per finestra di
+// 30 s; i campioni restano nel collettore, esce solo il riassunto.
+const restNoise = createRestNoiseCollector();
+let restSlowCheckAt = -Infinity;
+let restSlowBlocked = false;
+function restNoiseAllowed(now) {
+  if (!ds5 || document.hidden || ops.busy || flashing || rangeSession || rangeCheck) return false;
+  // Modali (DOM) e consenso (localStorage): a 250 report/s basta
+  // ricontrollarli ogni 200 ms.
+  if (now - restSlowCheckAt > 200 || now < restSlowCheckAt) {
+    restSlowCheckAt = now;
+    restSlowBlocked = !!activeModalEl() || !telemetryEnabled();
+  }
+  return !restSlowBlocked;
+}
+function restState() {
+  if (unsaved || tabUnsavedFlag()) return 'unsaved';
+  return savedThisLoad ? 'saved' : 'none';
+}
+function feedRestNoise(now) {
+  if (restNoise.done) return;
+  if (!restNoiseAllowed(now)) {
+    if (restNoise.samples) restNoise.reset();
+    return;
+  }
+  const summary = restNoise.push(sticks, now, { drift: !!driftTest });
+  if (!summary) return;
+  emitV2(ctx => buildRestEvent(ctx, { summary, drift: summary.drift, state: restState(), discarded: summary.discarded }));
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
@@ -1840,6 +2031,20 @@ async function quickCalibrate() {
   $('btn-quick-cancel').disabled = true;
   let blockedMessage = null;
   let run = null;
+  const startedAt = performance.now();
+  const quickDevice = { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null };
+  const quickStart = recovery ? 'recovery' : force ? 'forced' : 'normal';
+  // Evento v2 della corsa, una volta sola come l'evento locale (stessa
+  // WeakSet): `outcome` è quello di runQuick, o 'error' per un errore della
+  // pagina dopo di lei.
+  const reportedV2 = new WeakSet();
+  const recordQuickV2 = (session, outcome, committed, needsPowerCycle) => {
+    if (!session || reportedV2.has(session)) return;
+    reportedV2.add(session);
+    emitCalibV2(ctx => buildQuickEvent(ctx, {
+      session, outcome, start: quickStart, committed, needsPowerCycle, durMs: performance.now() - startedAt,
+    }), { device: quickDevice });
+  };
   // Vero appena la pagina ha alzato `unsaved` per un commit di QUESTA corsa
   // (evento 'committed' di runQuick): il teardown di uno scollegamento
   // successivo lo vede e avvisa da solo.
@@ -1852,6 +2057,7 @@ async function quickCalibrate() {
     // sarebbe rifiutato e la riparazione committerebbe il parziale).
     // Anche da un ciclo orfano: il blocco segue il controller, non la UI.
     if (needsPowerCycle) markPowerCycle(controller, controllerKey);
+    recordQuickV2(session, 'error', committed, needsPowerCycle);
     if (!ops.isCurrent(op)) { recordSessionOnce(session); return; }
     ops.endOp(op);
     // La RAM del controller è cambiata se una passata precedente ha già chiuso
@@ -1912,6 +2118,8 @@ async function quickCalibrate() {
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
     });
     const { session, outcome } = run;
+    // Tutti gli esiti tranne 'error', che passa da fail() con i suoi flag.
+    if (outcome !== 'error') recordQuickV2(session, outcome, run.committed === true, run.needsPowerCycle === true);
     if (outcome === 'disconnected') {
       // Il teardown ha già chiuso i modali e avvisato: la UI ora può essere di
       // un altro controller, quindi qui si registra soltanto. Se però la RAM
@@ -2171,6 +2379,10 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
     done: true, before: w.before ?? null, after,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses, escaped: w.escaped,
   });
+  emitCalibV2(ctx => buildGuidedEvent(ctx, {
+    outcome: 'done', committed: true, needsPowerCycle: false, step: 5, before: w.before, after,
+    timeouts: w.timeouts, escaped: w.escaped, durMs: performance.now() - w.startedAt,
+  }), { device: w.device });
   $('wizard-diagram').classList.add('hidden');
   wizardHideLive();
   // Prima e dopo anche nel pannello persistente (WS5), con lo stesso blocco di
@@ -2209,6 +2421,8 @@ async function wizardNext() {
       // ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
       w.op = ops.beginOp();
+      w.startedAt = performance.now();
+      w.device = { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null };
       w.controller = ds5;
       w.key = deviceKey;
       clearOutcome();
@@ -2259,6 +2473,7 @@ async function wizardNext() {
       // openSessionGuard): un reload fra due angoli torna bloccato.
       const repair = repairAllowed;
       w.guard = openSessionGuard();
+      w.beginSent = true;
       const begun = await w.controller.calibBegin({ repair });
       w.sessionOpen = true;
       // La riparazione di una sessione rimasta aperta può aver committato:
@@ -2289,6 +2504,18 @@ async function wizardNext() {
     // fallita sporcherebbe il rapporto successi/fallimenti del dataset.
     if (!w.reported) {
       w.reported = true;
+      // v2 solo se un comando è partito (calibBegin): un avvio rifiutato
+      // prima non lascia il catch, e un errore della misura iniziale non ha
+      // toccato il controller.
+      if (w.beginSent) {
+        emitCalibV2(ctx => buildGuidedEvent(ctx, {
+          outcome: gone ? 'disconnected' : 'error',
+          committed: error.committed === true || !!w.committed,
+          needsPowerCycle: w.sessionOpen === true || error.openSession === true,
+          step: w.step ?? 0, before: w.before, after: null,
+          timeouts: w.timeouts, escaped: w.escaped, durMs: performance.now() - (w.startedAt ?? performance.now()),
+        }), { device: w.device ?? null });
+      }
       recordEvent('wizard', {
         done: false,
         step: w.step ?? null,
@@ -2353,7 +2580,7 @@ function openWizard() {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
     samples: 0, timeouts: 0, cornerMisses: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
-    running: false, reported: false,
+    running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
   wizardSetDots(0);
@@ -2591,7 +2818,7 @@ async function startRange() {
   rangeCheck = null;
   const tracker = createRangeTracker();
   useRangeTracker(tracker);
-  rangeSession = { startTs: performance.now(), tracker, controller, op };
+  rangeSession = { startTs: performance.now(), tracker, controller, op, device: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null } };
   $('range-msg').innerHTML = RANGE_MSG_HTML;
   const done = $('btn-range-done');
   done.disabled = true;
@@ -2692,6 +2919,13 @@ async function finishRange() {
   // per QUESTO controller (è proprio il caso per cui esiste: un rangeEnd
   // incompleto o dall'esito ignoto seguito da un ricollegamento).
   const key = deviceKey;
+  // Evento v2: anche per un range finito con il controller staccato durante il
+  // rangeEnd (lì l'evento locale manca) e per l'errore.
+  const rangeV2 = (outcome, committed) => emitCalibV2(ctx => buildRangeEvent(ctx, {
+    outcome, committed,
+    coverage: [rangeStats.covL, rangeStats.covR], turns: rangeStats.turns, allEdges: rangeStats.allEdges,
+    durMs: rangeStats.ms,
+  }), { device: session.device });
   // Il blocco si registra anche se il controller non c'è più; se nel frattempo
   // se n'è collegato un altro, gli si applica la stessa regola del
   // ricollegamento (decade solo con un seriale noto e diverso).
@@ -2705,6 +2939,7 @@ async function finishRange() {
     // code 3: la sessione era già chiusa, questo rangeEnd non ha scritto nulla,
     // ma il range in RAM è ignoto.
     if (alreadyClosed) {
+      rangeV2('already-closed', false);
       lockFor('closed');
       // Scollegato durante il rangeEnd: teardown ha già chiuso la UI.
       if (gone) return;
@@ -2716,6 +2951,7 @@ async function finishRange() {
       return;
     }
     if (finishAnyway) {
+      rangeV2('incomplete', true);
       lockFor('incomplete');
       if (gone) return;
       recordEvent('range', { ...rangeStats, incomplete: finishAnyway, alreadyClosed });
@@ -2727,6 +2963,7 @@ async function finishRange() {
       startDriftTest();
       return;
     }
+    rangeV2('complete', true);
     // Range completo ma controller già staccato: il blocco (se c'era) resta,
     // per prudenza; lo toglie solo un range completo visto a controller
     // collegato.
@@ -2742,6 +2979,7 @@ async function finishRange() {
     startRangeCheck();
   } catch (error) {
     const gone = ds5 !== controller;
+    rangeV2('error', error.committed === true);
     // Un rangeEnd partito (o scaduto) può aver committato. Staccato durante
     // il rangeEnd, l'esito è ignoto comunque: blocco anche senza `committed`.
     if (error.committed || gone) lockFor('error');
@@ -3094,12 +3332,12 @@ $('btn-range-done').addEventListener('click', finishRange);
 $('btn-range-start').addEventListener('click', startRange);
 $('btn-range-cancel').addEventListener('click', cancelRangeIntro);
 
-$('btn-flash').addEventListener('click', openFlashModal);
+$('btn-flash').addEventListener('click', () => openFlashModal('block'));
 // Dal promemoria: con Write spento porta al blocco che spiega perché, e
 // altrimenti apre lo stesso modale di Write, con le stesse guardie.
 $('btn-save-reminder').addEventListener('click', () => {
   if (currentWriteLock().mode === 'disabled') goToSaveStep();
-  else openFlashModal();
+  else openFlashModal('reminder');
 });
 $('banner-unsaved').addEventListener('animationend', event => {
   if (event.animationName === 'saveCue') $('banner-unsaved').classList.remove('save-step-cue');
@@ -3108,7 +3346,10 @@ $('banner-unsaved').addEventListener('animationend', event => {
 $('flash-ack').addEventListener('change', () => {
   if (!$('flash-warning').classList.contains('hidden')) $('btn-flash-go').disabled = !$('flash-ack').checked;
 });
-$('btn-flash-cancel').addEventListener('click', () => closeModal('modal-flash'));
+$('btn-flash-cancel').addEventListener('click', () => {
+  if (saveChapter) saveChapter.cancels += 1;
+  closeModal('modal-flash');
+});
 $('btn-flash-go').addEventListener('click', doFlash);
 
 // Test di precisione: il gioco legge solo gli stick (deps), nessun comando HID.
@@ -3196,6 +3437,11 @@ for (const button of document.querySelectorAll('[data-tool]')) {
 }
 
 // avvisa prima di chiudere la pagina con modifiche non salvate
+// Uscita dalla pagina con una calibrazione non salvata: chiude il periodo come
+// 'left'. pagehide, non beforeunload (che può essere annullato dall'avviso qui
+// sotto) né visibilitychange (una tab in background non è un'uscita).
+window.addEventListener('pagehide', () => closeSaveChapter('left', { now: true }));
+
 window.addEventListener('beforeunload', e => {
   if (unsaved || ops.busy) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -3211,7 +3457,27 @@ function setConsent(on) {
 }
 for (const box of consentBoxes) {
   box.checked = telemetryEnabled();
-  box.addEventListener('change', () => setConsent(box.checked));
+  box.addEventListener('change', () => {
+    // Togliere la spunta è "Don't share": con l'avviso a schermo lo risolve,
+    // altrimenti spegne e scarta le code. Spuntarla riaccende; vale come
+    // accettare la descrizione attuale (scope) solo nel footer, dove l'etichetta
+    // nomina ogni categoria e porta alla descrizione completa. La casella del
+    // modale Quick riaccende e basta: le categorie v2 aspettano l'avviso, che
+    // ricompare al prossimo caricamento.
+    if (!box.checked) {
+      if (noticeOpen) { resolveNotice(false); return; }
+      setConsent(false);
+      pendingUploads = [];
+      flushV2(false);
+      return;
+    }
+    setConsent(true);
+    if (box.id === 'telemetry-consent-footer' && !noticeOpen) {
+      storageWrite(TELEMETRY_NOTICE_KEY, '1');
+      storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
+      flushV2(true);
+    }
+  });
 }
 
 // Spazio che l'avviso telemetria occupa in basso, in --notice-space: il CSS lo
@@ -3231,14 +3497,22 @@ function syncNoticeSpace() {
 // Avviso una tantum al primo avvio. Banner persistente, non un toast che
 // scompare: è una scelta da fare, e finché non è fatta niente lascia il browser.
 function resolveNotice(keepSharing) {
+  if (!noticeOpen) return;
+  noticeOpen = false;
   storageWrite(TELEMETRY_NOTICE_KEY, '1');
+  // Anche con "Don't share": la persona ha visto la descrizione attuale, e se
+  // un giorno riaccende la condivisione dal footer non va richiesto di nuovo.
+  storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
   setConsent(keepSharing);
   const queued = pendingUploads;
   pendingUploads = [];
+  flushV2(keepSharing);
   if (keepSharing) {
     for (const entry of queued) uploadEvent(entry);
   } else {
-    toast('Nothing was sent. You can re-enable sharing anytime in the footer.', 5000);
+    toast(noticeReturning
+      ? 'Sharing is off. Nothing from this visit was sent, and nothing more will be. You can turn it back on in the footer.'
+      : 'Nothing was sent. You can re-enable sharing anytime in the footer.', 5000);
   }
   const el = $('telemetry-notice');
   el.classList.add('closing');
@@ -3254,7 +3528,12 @@ function resolveNotice(keepSharing) {
 // apre il link dal telefono. Il flag resta non impostato, così la scelta viene
 // chiesta davvero la prima volta che la pagina si apre su un browser che può
 // usare il tool. L'opt-out nel footer resta comunque visibile e funzionante.
-if (navigator.hid && telemetryEnabled() && !noticeSeen()) {
+// Chi aveva già accettato la descrizione v1 (avviso letto, scope < 2) rivede
+// l'avviso una volta, con la riga "what's shared has changed" in testa.
+const noticeReturning = noticeSeen();
+if (navigator.hid && telemetryEnabled() && !scopeAccepted()) {
+  noticeOpen = true;
+  $('notice-changed')?.classList.toggle('hidden', !noticeReturning);
   $('telemetry-notice').classList.remove('hidden');
   syncNoticeSpace();
   // L'altezza cambia con la larghezza (testo che va a capo, bottom sheet sotto
@@ -3373,6 +3652,9 @@ window.__senseExtractStable = extractStableSamples;
 window.__senseWaitForStable = waitForStable;
 // Storico locale delle calibrazioni (telemetria per futura calibrazione ML).
 window.__senseCalibSessions = () => JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
+// Eventi v2 di questa pagina con il loro stato (queued, sending, sent, failed,
+// discarded). Solo memoria: ricaricare la pagina li perde.
+window.__senseTelemetryV2 = () => v2Outbox.map(item => ({ state: item.state, event: JSON.parse(JSON.stringify(item.event)) }));
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
 // in coppia con __senseSimulate.
