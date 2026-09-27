@@ -1,0 +1,1528 @@
+{
+  "description": "Contract fixtures for POST /api/calib/v2/events. Copied verbatim into subralabs-v2/code/calib-telemetry/contract/; both test suites run every case through their own validator.",
+  "valid": [
+    {
+      "name": "quick centered",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "quick preflight with nulls",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 1,
+        "app": 20260927,
+        "board": null,
+        "fw": null,
+        "outcome": "preflight",
+        "start": "normal",
+        "committed": false,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": null,
+        "after": null,
+        "passes": [],
+        "durS": 4
+      }
+    },
+    {
+      "name": "quick stalled recovery with an unverified pass",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 2,
+        "app": 20260927,
+        "board": "BDM-060M",
+        "fw": 0,
+        "outcome": "stalled",
+        "start": "recovery",
+        "committed": true,
+        "needsPowerCycle": true,
+        "truncated": false,
+        "before": [
+          18.2,
+          0.6
+        ],
+        "after": null,
+        "passes": [
+          null,
+          16.1
+        ],
+        "durS": 61
+      }
+    },
+    {
+      "name": "guided done with escape",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 5,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95
+      }
+    },
+    {
+      "name": "guided disconnected",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 4,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "disconnected",
+        "committed": false,
+        "needsPowerCycle": true,
+        "step": 2,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": null,
+        "timeouts": 0,
+        "escaped": false,
+        "durS": 40
+      }
+    },
+    {
+      "name": "range incomplete",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20260927,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "incomplete",
+        "committed": true,
+        "coverage": [
+          0.92,
+          1
+        ],
+        "turns": [
+          2.5,
+          3.1
+        ],
+        "allEdges": false,
+        "durS": 31
+      }
+    },
+    {
+      "name": "flash ok",
+      "event": {
+        "v": 2,
+        "type": "flash",
+        "sid": "3f9a01bc",
+        "seq": 6,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "result": "ok",
+        "nv": "locked",
+        "attempt": 1,
+        "lock": "allowed"
+      }
+    },
+    {
+      "name": "flash nv-unknown guarded",
+      "event": {
+        "v": 2,
+        "type": "flash",
+        "sid": "3f9a01bc",
+        "seq": 7,
+        "app": 20260927,
+        "board": null,
+        "fw": null,
+        "result": "nv-unknown",
+        "nv": null,
+        "attempt": 2,
+        "lock": "guarded"
+      }
+    },
+    {
+      "name": "save saved",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 8,
+        "app": 20260927,
+        "result": "saved",
+        "ref": 0,
+        "sessions": 1,
+        "lock": "allowed",
+        "reasons": [],
+        "opens": 1,
+        "reminderOpens": 0,
+        "cancels": 0,
+        "attempts": 1,
+        "lastFlash": "ok",
+        "seen": true,
+        "waitS": 12
+      }
+    },
+    {
+      "name": "save left while locked",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 9,
+        "app": 20260927,
+        "result": "left",
+        "ref": 5,
+        "sessions": 2,
+        "lock": "disabled",
+        "reasons": [
+          "catastrophic",
+          "range-incomplete"
+        ],
+        "opens": 0,
+        "reminderOpens": 1,
+        "cancels": 1,
+        "attempts": 0,
+        "lastFlash": null,
+        "seen": false,
+        "waitS": 3600
+      }
+    },
+    {
+      "name": "rest idle",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "not an object",
+      "event": [
+        {
+          "v": 2,
+          "type": "quick",
+          "sid": "3f9a01bc",
+          "seq": 0,
+          "app": 20260927,
+          "board": "BDM-030",
+          "fw": 16777258,
+          "outcome": "centered",
+          "start": "normal",
+          "committed": true,
+          "needsPowerCycle": false,
+          "truncated": false,
+          "before": [
+            4.21,
+            1.5
+          ],
+          "after": [
+            0.55,
+            0.55
+          ],
+          "passes": [
+            1.24,
+            0.55
+          ],
+          "durS": 23
+        }
+      ]
+    },
+    {
+      "name": "null body",
+      "event": null
+    },
+    {
+      "name": "unknown type",
+      "event": {
+        "v": 2,
+        "type": "drift",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927
+      }
+    },
+    {
+      "name": "missing type",
+      "event": {
+        "v": 2,
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "v1 envelope",
+      "event": {
+        "v": 1,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "unknown top-level field",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "serial": "E1234567"
+      }
+    },
+    {
+      "name": "client timestamp field",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "t": "2026-09-27T10:00:00.000Z"
+      }
+    },
+    {
+      "name": "missing required field",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ]
+      }
+    },
+    {
+      "name": "sid too long",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc00",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "sid uppercase",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3F9A01BC",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "seq above 255",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 256,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "app before contract",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20250101,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "board free text",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "my controller",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "fw negative",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": -1,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "fw float",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 1.5,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "outcome free text",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "it went fine",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "outcome from another mode",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "done",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "before with three values",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          1,
+          2,
+          3
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "percent over 200",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          201,
+          0.5
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "nine passes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "pass as string",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          "1.2"
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "durS over an hour",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 3601
+      }
+    },
+    {
+      "name": "boolean as number",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": 1,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23
+      }
+    },
+    {
+      "name": "guided step 6",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 6,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95
+      }
+    },
+    {
+      "name": "guided with quick field",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 5,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95,
+        "passes": []
+      }
+    },
+    {
+      "name": "range coverage over 1",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20260927,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "incomplete",
+        "committed": true,
+        "coverage": [
+          1.2,
+          1
+        ],
+        "turns": [
+          2.5,
+          3.1
+        ],
+        "allEdges": false,
+        "durS": 31
+      }
+    },
+    {
+      "name": "range outcome disconnected",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20260927,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "disconnected",
+        "committed": true,
+        "coverage": [
+          0.92,
+          1
+        ],
+        "turns": [
+          2.5,
+          3.1
+        ],
+        "allEdges": false,
+        "durS": 31
+      }
+    },
+    {
+      "name": "flash attempt 0",
+      "event": {
+        "v": 2,
+        "type": "flash",
+        "sid": "3f9a01bc",
+        "seq": 6,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "result": "ok",
+        "nv": "locked",
+        "attempt": 0,
+        "lock": "allowed"
+      }
+    },
+    {
+      "name": "flash disabled lock",
+      "event": {
+        "v": 2,
+        "type": "flash",
+        "sid": "3f9a01bc",
+        "seq": 6,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "result": "ok",
+        "nv": "locked",
+        "attempt": 1,
+        "lock": "disabled"
+      }
+    },
+    {
+      "name": "flash error text",
+      "event": {
+        "v": 2,
+        "type": "flash",
+        "sid": "3f9a01bc",
+        "seq": 6,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "result": "error",
+        "nv": "locked",
+        "attempt": 1,
+        "lock": "allowed",
+        "err": "NVS unlock failed"
+      }
+    },
+    {
+      "name": "save duplicate reasons",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 9,
+        "app": 20260927,
+        "result": "left",
+        "ref": 5,
+        "sessions": 2,
+        "lock": "disabled",
+        "reasons": [
+          "catastrophic",
+          "catastrophic"
+        ],
+        "opens": 0,
+        "reminderOpens": 1,
+        "cancels": 1,
+        "attempts": 0,
+        "lastFlash": null,
+        "seen": false,
+        "waitS": 3600
+      }
+    },
+    {
+      "name": "save unknown reason",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 9,
+        "app": 20260927,
+        "result": "left",
+        "ref": 5,
+        "sessions": 2,
+        "lock": "disabled",
+        "reasons": [
+          "because"
+        ],
+        "opens": 0,
+        "reminderOpens": 1,
+        "cancels": 1,
+        "attempts": 0,
+        "lastFlash": null,
+        "seen": false,
+        "waitS": 3600
+      }
+    },
+    {
+      "name": "save carries board",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 8,
+        "app": 20260927,
+        "result": "saved",
+        "ref": 0,
+        "sessions": 1,
+        "lock": "allowed",
+        "reasons": [],
+        "opens": 1,
+        "reminderOpens": 0,
+        "cancels": 0,
+        "attempts": 1,
+        "lastFlash": "ok",
+        "seen": true,
+        "waitS": 12,
+        "board": "BDM-030"
+      }
+    },
+    {
+      "name": "save unknown result",
+      "event": {
+        "v": 2,
+        "type": "save",
+        "sid": "3f9a01bc",
+        "seq": 8,
+        "app": 20260927,
+        "result": "unknown",
+        "ref": 0,
+        "sessions": 1,
+        "lock": "allowed",
+        "reasons": [],
+        "opens": 1,
+        "reminderOpens": 0,
+        "cancels": 0,
+        "attempts": 1,
+        "lastFlash": "ok",
+        "seen": true,
+        "waitS": 12
+      }
+    },
+    {
+      "name": "rest durS below 10",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 5,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest zero reports",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 0,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest one stick",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest raw samples",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ],
+            "samples": [
+              127,
+              128
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest ex with two values",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest lsb over 256",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 300,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "rest ctx free text",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 10,
+        "app": 20260927,
+        "board": "BDM-030",
+        "ctx": "sofa",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

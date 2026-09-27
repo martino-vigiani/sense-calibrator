@@ -381,7 +381,9 @@ export class DS5 {
     } catch (error) {
       if (error.poisoned) throw unknown(error);
       await new Promise(r => this.timers.setTimeout(r, 500));
-      throw new Error('NVS unlock failed', { cause: error });
+      // `flashStage`: la classe dell'errore per la telemetria v2, che non
+      // porta mai il testo del messaggio.
+      throw Object.assign(new Error('NVS unlock failed', { cause: error }), { flashStage: 'unlock' });
     }
     try {
       await this.nvsLock();
@@ -392,7 +394,7 @@ export class DS5 {
         await this.nvsLock();
       } catch (retryError) {
         if (retryError.poisoned) throw unknown(retryError);
-        throw new Error('NVS lock failed: the memory may still be unlocked', { cause: retryError });
+        throw Object.assign(new Error('NVS lock failed: the memory may still be unlocked', { cause: retryError }), { flashStage: 'lock' });
       }
     }
   }
