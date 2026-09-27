@@ -104,3 +104,7 @@ Exposed on `window` for console debugging:
 - With `?preview=1`, `window.__sensePlaytestOpen()` and `#playtest-demo` open the gameplay lab without HID.
 - `window.__senseCalibSessions()` — dump locally stored calibration sessions.
 - `window.__senseTelemetryV2()` — the v2 events built on this page load and their state (queued, sending, sent, failed, discarded).
+
+## Telemetry server
+
+The server behind `https://subralabs.com/api/calib/` lives in `server/calib-telemetry/` (Express, pm2 `calib-telemetry` on the VPS). Deploy only with `./scripts/deploy-telemetry-server.sh` (tests first; `--dry-run` shows the diff). Its tests run with `npm run test:server`. The public API docs (`openapi.json`, `developers.html`, `privacy.html`) belong to the subralabs.com site, not to this repo. Until 2026-09-27 this code lived in the SubraLabs company monorepo: do not work there.

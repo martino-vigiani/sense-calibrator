@@ -1,0 +1,16 @@
+{
+  "name": "calib-telemetry",
+  "version": "1.0.0",
+  "description": "Anonymous calibration telemetry collector for Sense-Calibrator.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "author": "Martino Vigiani <martino@subralabs.com>",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
