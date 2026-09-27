@@ -2,6 +2,10 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-09-27
+
+- **Results that aren't fully centered now say you can try again.** In the collected telemetry, about 4 in 10 people who ran Quick again right after a result that wasn't centered ended fully centered (16 of 40 back-to-back sessions on the same controller; 2 of 40 got worse). The result panel says so, offers **Run Quick again**, and reminds that nothing is permanent until it's written to memory. When two passes land on the same value, Guided stays the first suggestion, with Quick as a second option.
+
 ## Unreleased — 2026-09-25
 
 Simulator figures in this section are **model-verified**: the real calibration code run against a model of the controller fitted to the collected telemetry. They are not hardware measurements. Hardware checks H0, H10, H11 and H12 have not been run yet. The copy says so wherever it depends on them: the power-off advice (H10) says the temporary calibration "should" be discarded, not that it is, and nothing presents unplugging (H11) as a way out.

@@ -231,7 +231,16 @@ test('outcome-specific copy: within 1 step, Try Guided, lost ground, moved and u
 
   const det = quickOutcomeView({ outcome: 'residual-deterministic', worst: 2.2, beforeWorst: 5 });
   assert.match(det.title, /try Guided/);
-  assert.deepEqual(det.actions.map(a => a.id), ['guided']);
+  assert.deepEqual(det.actions.map(a => a.id), ['guided', 'quick']);
+
+  // Riprovare è incoraggiato dove il risultato non è ancora al pavimento.
+  assert.match(textOf(within), /as many times as you like/);
+  assert.deepEqual(within.actions.map(a => a.id), ['quick']);
+  for (const outcome of ['lost-ground', 'unstable', 'not-centered']) {
+    const v = quickOutcomeView({ outcome, worst: 3.1, beforeWorst: 5, bestWorst: 1.24 });
+    assert.match(textOf(v), /Nothing is permanent until you write it to memory/, outcome);
+  }
+  assert.doesNotMatch(textOf(quickOutcomeView({ outcome: 'centered', worst: 0.555, beforeWorst: 3 })), /as many times/);
 
   const lost = quickOutcomeView({ outcome: 'lost-ground', worst: 3.1, beforeWorst: 5, bestWorst: 1.24 });
   assert.match(textOf(lost), /reached 1\.2% · 1 step, but the controller keeps the last pass, now at 3\.1%/);

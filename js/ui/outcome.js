@@ -331,6 +331,10 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
       'The calibration was applied, but the sticks never held still long enough to measure it. Run the drift test before deciding to save.',
     ], [ACTION.retest]);
   }
+  // Riprovare aiuta: nei dati reali, dopo un risultato non centrato, circa 4 persone su 10
+  // che rilanciano subito Quick finiscono centrate (16 su 40 coppie ravvicinate dello stesso
+  // controller, telemetria al 27 set 2026). Niente è permanente finché non si scrive in memoria.
+  const RETRY = 'You can run it as many times as you like: each try starts from where the sticks are now, and about 4 in 10 people who ran it again ended fully centered. Nothing is permanent until you write it to memory.';
   switch (outcome) {
     case 'centered':
       return view('ok', 'Both sticks centered', [
@@ -339,7 +343,8 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
     case 'within-1-step':
       return view('ok', 'Within 1 step: fine to save', [
         `Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`,
-      ]);
+        RETRY,
+      ], [ACTION.quick]);
     case 'worse-than-start':
       return view('bad', 'Worse than when you started', [
         `Don’t write this to memory. The result is ${fmt(worst)}; the sticks started at ${fmt(beforeWorst)}. Every pass replaces the previous one, so the controller can’t go back to where it started.`,
@@ -349,6 +354,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
       return view('warn', 'An earlier pass was better', [
         `A pass reached ${fmt(bestWorst)}, but the controller keeps the last pass, now at ${fmt(worst)}. Run Quick again to try to get back there; saving now keeps ${pct(worst)}.`,
         revert,
+        RETRY,
       ], [ACTION.quick]);
     case 'worn':
       return view('warn', 'Re-centered as far as a worn sensor allows', [
@@ -358,6 +364,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
     case 'unstable':
       return view('warn', 'The sticks moved during calibration', [
         `Worst stick ${fmt(worst)}. Some samples were skipped because the sticks were moving. Put the controller on a table, hands off, and run it again.`,
+        RETRY,
       ], [ACTION.quick]);
     case 'moved':
       return view('warn', 'Calibration stopped: the sticks weren’t released', [
@@ -365,13 +372,14 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
       ], [ACTION.quick]);
     case 'residual-deterministic':
       return view('warn', 'Quick calibration can’t get closer: try Guided', [
-        `Worst stick ${fmt(worst)}. The last two passes landed on exactly the same value, so another Quick run is unlikely to change it. Guided calibration samples the center differently.`,
-        'You can save this if it’s better than before.',
-      ], [ACTION.guided]);
+        `Worst stick ${fmt(worst)}. The last two passes landed on exactly the same value. Guided calibration samples the center differently.`,
+        'You can save this if it’s better than before, or run Quick again: a fresh try sometimes lands closer.',
+      ], [ACTION.guided, ACTION.quick]);
     default: {
       const improved = isNum(beforeWorst) && beforeWorst - worst > QUICK_REGRESSION_EPS;
       return view('warn', improved ? 'Improved, not fully centered' : 'Not fully centered', [
         `Worst stick ${fmt(worst)}${isNum(beforeWorst) ? `, from ${fmt(beforeWorst)}` : ''}. You can save it if it’s better than before, run Quick again, or try Guided.`,
+        RETRY,
       ], [ACTION.quick, ACTION.guided]);
     }
   }
