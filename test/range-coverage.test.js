@@ -95,6 +95,24 @@ test('zero motion never completes, never allows Finish anyway, and has zero cove
   assert.equal(st.missingDirs.length, 8);
 });
 
+test('audit 10: cardinal jumps with turns and reversal do not count as full edge coverage', () => {
+  const tracker = createRangeTracker();
+  for (const dir of [1, 1, -1]) {
+    for (let turn = 0; turn < 2; turn++) {
+      for (let i = 0; i < 4; i++) {
+        const angle = dir * (turn * 4 + i) * Math.PI / 2;
+        const x = q(Math.cos(angle)), y = q(Math.sin(angle));
+        tracker.push({ lx: x, ly: y, rx: x, ry: y });
+      }
+    }
+  }
+  const status = rangeStatus(tracker, 16000);
+  assert.ok(status.coverage < 0.3, `only ${status.coverage} of the sectors were reached`);
+  assert.equal(status.complete, false);
+  assert.equal(status.finishAnyway, true);
+  assert.match(status.missing.join(' '), /cover more of the edge/);
+});
+
 test('a stick held still on the rim accumulates no turns and no reversals', () => {
   const s = createStickRange();
   let seed = 7;

@@ -22,6 +22,7 @@ const outbox = h => JSON.parse(JSON.stringify(h.window.__senseTelemetryV2()));
 // Upload v1 davvero accettati dal contratto v1 (lo stub dell'harness riceve
 // ogni evento locale, il vero js/telemetry.js li filtra).
 const v1Sent = h => h.uploads.filter(entry => buildCalibrationUpload(entry)).length;
+const halfLsbAxes = xy => xy?.map(stick => stick.map(v => Math.max(-128, Math.min(128, Math.round(v * 2.55))))) ?? null;
 function change(h, id, checked) {
   const box = h.$(id);
   box.checked = checked;
@@ -218,11 +219,13 @@ test('Quick uploads signed half-LSB axes for the baseline, each pass, and the fi
   const event = h.uploadsV2.find(e => e.type === 'quick');
   assert.ok(event, 'the Quick event should pass in-page validation and upload');
   // Regressione telemetry v2: il raggio per passata non conserva asse e segno.
+  const local = h.sessions().filter(e => e.kind === 'quick').at(-1);
   assert.deepEqual(
     { before: event.beforeAxes, passes: event.passAxes, after: event.afterAxes },
-    { before: [[7, -1], [-1, 1]], passes: [[[-1, -1], [1, -1]]], after: [[-1, -1], [1, -1]] },
+    { before: halfLsbAxes(local.before.xy), passes: local.passXY.map(halfLsbAxes), after: halfLsbAxes(local.after.xy) },
     'the uploaded axes retain stick order, axis order, sign, and pass order',
   );
+  assert.ok(event.beforeAxes[0][0] > 0 && event.beforeAxes[0][1] < 0);
 });
 
 test('Quick → Write → Cancel → disconnect: the save event says disconnected after one cancel', async () => {
@@ -340,6 +343,19 @@ test('a guided run: one guided event (done, step 5) that the save period points 
   assert.deepEqual([save.result, save.ref, save.sessions], ['left', g[0].seq, 1]);
 });
 
+test('audit 13: revoking sharing discards v2 sends already queued in the promise chain', async () => {
+  const h = await loadApp();
+  h.eval(`for (let i = 0; i < 3; i++)
+    emitV2(ctx => buildFlashEvent(ctx, { result: 'ok', nv: { status: 'locked' }, attempt: 1, lock: 'allowed' }));
+    setConsent(false); flushV2(false);`);
+  await h.advance(0);
+  assert.equal(h.uploadsV2.length, 0);
+  assert.deepEqual(Array.from(h.window.__senseTelemetryV2(), e => e.state), ['discarded', 'discarded', 'discarded']);
+  h.eval('setConsent(true)');
+  await h.advance(0);
+  assert.equal(h.uploadsV2.length, 0, 'reconsent does not revive pre-revocation events');
+});
+
 test('Guided uploads signed half-LSB axes before and after calibration', async () => {
   const { h, A } = await setup({ drift: [[14, -9], [-2, 3]], seed: 21 });
 
@@ -348,11 +364,13 @@ test('Guided uploads signed half-LSB axes before and after calibration', async (
   const event = h.uploadsV2.find(e => e.type === 'guided');
   assert.ok(event, 'the Guided event should pass in-page validation and upload');
   // Regressione telemetry v2: gli offset radiali non distinguono un asse negativo.
+  const local = h.sessions().filter(e => e.kind === 'wizard').at(-1);
   assert.deepEqual(
     { before: event.beforeAxes, after: event.afterAxes },
-    { before: [[29, -17], [-5, 7]], after: [[1, 1], [-1, 1]] },
+    { before: halfLsbAxes(local.before.xy), after: halfLsbAxes(local.after.xy) },
     'the uploaded axes retain stick order, axis order, and sign',
   );
+  assert.ok(event.beforeAxes[0][0] > 0 && event.beforeAxes[0][1] < 0);
 });
 
 test('a guided Start with a thumb on a stick sends no command and no guided event', async () => {

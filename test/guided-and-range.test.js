@@ -66,6 +66,27 @@ test('a clean guided run takes exactly 4 gated samples and shows before → afte
   assert.equal(buildCalibrationUpload(ev), null, 'wizard events never leave the browser');
 });
 
+test('audit 06: moving final reports cannot become a centered Guided result', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
+  const command = A.command.bind(A);
+  const byte = A.byte.bind(A);
+  let reads = 0;
+  A.command = (id, buf) => {
+    command(id, buf);
+    if (id === 0x82 && buf[0] === 2 && buf[2] === 1)
+      A.byte = (stick, axis, t) => stick === 0 && axis === 0 ? (++reads % 2 ? 115 : 140) : byte(stick, axis, t);
+  };
+  await startWizard(h);
+  for (const c of CORNERS) {
+    await moveToCorner(h, A, c);
+    await h.run(h.click('btn-wizard-next'));
+  }
+  assert.equal(A.counts.end, 1);
+  assert.match(h.$('calib-outcome').innerHTML, /not verified/i);
+  assert.equal(h.$('btn-flash').disabled, false, 'unverified result requires a guarded Write');
+  assert.match(h.$('banner-lock').textContent, /couldn’t be verified/i);
+});
+
 test('Start with a thumb on a stick sends nothing and can still be cancelled', async () => {
   const { h, A } = await setup();
   const thumb = touch(A, { stick: 1, t0: h.clock.now(), dur: 60_000, at: t => 25 * Math.sin(t / 40) });
@@ -393,7 +414,8 @@ test('Finish anyway names the missing directions, needs a confirmation and disab
   let asked = '';
   h.window.confirm = msg => { asked = msg; return false; };
   await h.run(h.click('btn-range-done'));
-  assert.match(asked, /Not reached: R left\./);
+  assert.match(asked, /Still needed:.*R left/);
+  assert.match(asked, /R: cover more of the edge/);
   assert.equal(A.counts.range, 1, 'declined: the session stays open');
   h.window.confirm = () => true;
   await h.run(h.click('btn-range-done'));
@@ -594,7 +616,7 @@ async function finishAnywayThenUnplug({ serial = null, backSerial = serial, mode
   const end = rotate(h, dev, { turns: 1 });
   await h.advance(end - h.clock.now() + 15_500);
   assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
-  assert.equal(h.peek().rangeWriteLock, null);
+  assert.equal(h.peek().rangeWriteLock, 'error', 'an open Range session is locked until rangeEnd confirms closure');
 
   const isRangeEnd = (id, buf) => id === 0x82 && buf[2] === 2 && buf[0] === 2;
   const unplugNow = () => { dev.unplug(); h.hid.fire('disconnect', dev); };

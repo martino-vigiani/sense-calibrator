@@ -144,11 +144,19 @@ test('a skipped Return reports "Not measured", never 0, and does not touch the h
   assert.equal(idle.result.returnTimedOut, true);
   assert.equal(returnText(idle.result.R.ret), 'Not measured');
   assert.ok(idle.result.durationMs >= PRECISION_DEFAULTS.returnCapMs);
-  // Range saltato: "Not measured" anche lì
+  // Range senza letture: "Not measured"; con bordo parziale lo dice.
   const e = createPrecisionTest();
   assert.equal(e.skip(0), false, 'nothing to skip before Return');
   assert.equal(rangeText(null), 'Not measured');
-  assert.equal(rangeText({ coverage: 0.2, circ: 40, under: 1, over: 0 }), 'Not measured');
+  assert.equal(rangeText({ coverage: 0.2, circ: 40, under: 1, over: 0 }), 'Partial result: 20% of the edge measured');
+});
+
+test('audit 16: partial edge coverage has only a partial Range result', () => {
+  for (const coverage of [0.2, 0.5]) {
+    const partial = rangeText({ coverage, circ: 0, under: 0, over: 0 });
+    assert.match(partial, /Partial result/);
+    assert.doesNotMatch(partial, /all around|Falls short|Hits its limit/);
+  }
 });
 
 test('Return rejects a guided release and measures four prescribed flicks per stick', () => {

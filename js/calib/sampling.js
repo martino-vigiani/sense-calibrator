@@ -26,6 +26,7 @@ export const QUICK_STABLE_TIMEOUT = 5000;
 
 // 1 LSB del byte di report in unità normalizzate ([-1, 1]).
 export const STICK_LSB = 1 / 127.5;
+export const MAX_REPORT_GAP_MS = 100;
 
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
 // Ritorna false se il segnale non si stabilizza entro `timeoutMs` (o se
@@ -56,6 +57,7 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
   return new Promise(resolve => {
     const start = source.now();
     const win = [];
+    let continuousStart = null;
     const centerHold = requireCentered ? createQuickCenterHold() : null;
     let unsubscribe = null;
     const done = ok => {
@@ -67,10 +69,17 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
       if (isCancelled?.()) return done(false);
       const now = source.now();
       const sticks = source.sticks;
+      // Un report vecchio non prolunga la tenuta: la finestra riparte dopo un
+      // buco, anche quando il valore prima e dopo il buco è identico.
+      if (win.length && now - win.at(-1).t > MAX_REPORT_GAP_MS) {
+        win.length = 0;
+        continuousStart = null;
+      }
+      if (continuousStart === null) continuousStart = now;
       const centered = centerHold ? centerHold(sticks, now) : true;
       win.push({ ...sticks, t: now });
       while (win.length && win[0].t < now - holdMs) win.shift();
-      if (win.length >= 10 && now - win[0].t >= holdMs * 0.8) {
+      if (win.length >= 10) {
         let maxSpread = 0;
         const center = {};
         for (const a of ['lx', 'ly', 'rx', 'ry']) {
@@ -89,7 +98,9 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
             && Math.hypot(center.rx - near.rx, center.ry - near.ry) <= nearRadius);
         const plausible = maxRadius === null
           || (Math.hypot(center.lx, center.ly) <= maxRadius && Math.hypot(center.rx, center.ry) <= maxRadius);
-        if (centered && nearRef && withinRadius && plausible && maxSpread <= spread) return done({ center });
+        if (centered && nearRef && withinRadius && plausible && maxSpread <= spread) {
+          if (now - continuousStart >= holdMs) return done({ center });
+        } else continuousStart = now;
       }
       if (now - start >= timeoutMs) done(false);
     };
@@ -113,8 +124,18 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
 // rumoroso di suo.
 export async function measureOffset(source, clock, ms = 1500, { requireCentered = false } = {}) {
   const samples = [];
+  const start = source.now();
+  let firstReport = null;
+  let lastReport = null;
   let stayedCentered = true;
   const onSample = () => {
+    const now = source.now();
+    if (lastReport !== null && now - lastReport > MAX_REPORT_GAP_MS) {
+      samples.length = 0;
+      firstReport = null;
+    }
+    if (firstReport === null) firstReport = now;
+    lastReport = now;
     const sticks = source.sticks;
     if (requireCentered && !sticksWithinQuickCenter(sticks)) stayedCentered = false;
     samples.push({ ...sticks });
@@ -125,10 +146,16 @@ export async function measureOffset(source, clock, ms = 1500, { requireCentered 
   } finally {
     unsubscribe();
   }
-  if (samples.length < 40 || !stayedCentered) return null;
+  // I 40 report minimi da soli non provano la durata nominale della misura.
+  if (samples.length < 40 || !stayedCentered || firstReport === null
+    || lastReport - firstReport < ms - MAX_REPORT_GAP_MS
+    || source.now() - lastReport > MAX_REPORT_GAP_MS
+    || firstReport - start > MAX_REPORT_GAP_MS) return null;
   const { stable, fraction } = extractStableSamples(samples);
   const result = analyzeDrift(stable.length > 40 ? stable : samples);
   result.stableFraction = fraction;
+  const all = analyzeDrift(samples);
+  result.rawNoise = Math.max(all.left.noise, all.right.noise);
   return result;
 }
 

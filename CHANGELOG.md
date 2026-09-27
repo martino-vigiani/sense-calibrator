@@ -2,6 +2,27 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## Unreleased — 2026-09-28 audit safety fixes
+
+These changes are verified with the virtual DualSense and app harness, not with a physical controller. The telemetry v1 payload and v2 contract are unchanged.
+
+1. Center and Range Write locks survive a reconnect and conservatively survive a page reload without storing a device identifier.
+2. Interrupted Guided sessions, including page exit and the interval after `calibEnd` but before verification, keep Write locked or guarded and emit one v2 event.
+3. Interrupted Range sessions, uncertain starts and failed closes keep Write disabled; page exit and disconnect emit one v2 event.
+4. Write counts as saved only when the final NVS status is `locked` or `pending_reboot`. The observed `0x03030201` (`81 03 03 02 01`) is `locked`; any other status keeps the calibration unsaved and reports “Save not confirmed.”
+5. A late flash from one controller cannot query or change the next controller's save state.
+6. Guided requires a stable final measurement before it calls a result verified.
+7. HID reply decoding and full calibration command checks run inside the protected transaction, preserving safety flags on malformed replies.
+8. Quick cannot verify a mostly moving signal from a small quiet subset alone.
+9. Holds, offset measurements and drift tests require fresh, continuous HID reports for their stated duration.
+10. Range needs sufficient sector coverage on both sticks before it is complete.
+11. Quick and Guided name and guard a stick that worsened even when the overall worst value improved.
+12. A timed-out Restart poisons the connection, preventing later HID commands on it.
+13. Revoking sharing discards queued events and is checked again immediately before each upload.
+14. A late calibration event cannot claim another controller's save period.
+15. A first-pass stall without a commit no longer claims a commit or raises the unsaved state; its power-cycle lock remains.
+16. The precision test calls low edge coverage partial and gives no global edge verdict.
+
 ## Unreleased — telemetry v2
 
 Needs the telemetry service with `POST /api/calib/v2/events` deployed first; until then the new events get a 404 and are dropped, and nothing else changes.

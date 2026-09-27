@@ -173,6 +173,7 @@ test('guarded baseline rejects even one held report and leaves other measurement
     const clock = { sleep: () => new Promise(resolve => { finishMeasurement = resolve; }) };
     const promise = measureOffset(source, clock, 1000, { requireCentered });
     for (let i = 0; i < 60; i++) {
+      source.t = i * (1000 / 59); // report HID freschi per tutta la durata dichiarata
       source.sticks = { lx: i === 20 ? QUICK_CENTER_RADIUS + 0.1 : 0, ly: 0, rx: 0, ry: 0 };
       source.emit();
     }

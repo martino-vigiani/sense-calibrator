@@ -325,12 +325,15 @@ export function returnText(ret, of = 4) {
 
 // Riga Range per uno stick.
 export function rangeText(rng) {
-  if (!rng || rng.coverage < 0.5 || rng.circ == null) return 'Not measured';
+  if (!rng || !Number.isFinite(rng.coverage) || rng.coverage <= 0) return 'Not measured';
+  // La circolarità dei soli settori raggiunti non descrive la metà non vista.
+  if (rng.coverage < PRECISION_DEFAULTS.rangeCoverage)
+    return `Partial result: ${Math.round(rng.coverage * 100)}% of the edge measured`;
+  if (rng.circ == null) return 'Not measured';
   const pct = `${Math.round(rng.circ)}%`;
-  const partial = rng.coverage < PRECISION_DEFAULTS.rangeCoverage ? ` · ${Math.round(rng.coverage * 100)}% of the edge` : '';
-  if (rng.circ <= CIRCULARITY_NORMAL.max) return `Reaches the edge all around (${pct}, typical ${CIRCULARITY_NORMAL.min}–${CIRCULARITY_NORMAL.max}%)${partial}`;
-  if (rng.under > rng.over) return `Falls short of the edge in places (${pct})${partial}`;
-  return `Hits its limit before the edge, square-ish (${pct})${partial}`;
+  if (rng.circ <= CIRCULARITY_NORMAL.max) return `Reaches the edge all around (${pct}, typical ${CIRCULARITY_NORMAL.min}–${CIRCULARITY_NORMAL.max}%)`;
+  if (rng.under > rng.over) return `Falls short of the edge in places (${pct})`;
+  return `Hits its limit before the edge, square-ish (${pct})`;
 }
 
 // La frase del titolo: una sola, in linguaggio semplice. Prima la

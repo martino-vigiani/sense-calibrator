@@ -306,6 +306,36 @@ test('rangeEnd reports code 3 as alreadyClosed instead of hiding it', async () =
   assert.match((await refused.run(refused.ds5.rangeEnd())).error.message, /Failed to close range/);
 });
 
+test('audit 07: malformed replies retain openSession/committed and cannot masquerade as command status', async () => {
+  for (const [name, call, flag] of [
+    ['begin', ds5 => ds5.calibBegin({ repair: false }), 'openSession'],
+    ['center end', ds5 => ds5.calibEnd(), 'committed'],
+    ['range end', ds5 => ds5.rangeEnd(), 'committed'],
+    ['NVS lock', ds5 => ds5.nvsLock(), 'committed'],
+  ]) {
+    const { dev, ds5, run } = setup();
+    dev.receiveFeatureReport = () => Promise.resolve(new DataView(new Uint8Array([0x83]).buffer));
+    const { error } = await run(call(ds5));
+    assert.equal(error?.[flag], true, `${name}: possible firmware effect survives decode failure`);
+  }
+  const wrongCommand = setup({ reply: healthy({ 0x83: () => [0x83, 9, 9, 3] }) });
+  assert.ok((await wrongCommand.run(wrongCommand.ds5.rangeEnd())).error,
+    'code 3 on another command cannot mean already closed');
+  const wrongReport = setup({ reply: healthy({ 0x81: () => [0x99, ...word(NV.locked)] }) });
+  assert.equal((await wrongReport.run(wrongReport.ds5.queryNvStatus())).ok.status, 'error');
+});
+
+test('audit 12: a timed-out Restart poisons the connection before any later HID command', async () => {
+  const { dev, ds5, run } = setup({ sendFails: (id, bytes) => id === 0x80 && bytes[0] === 1 ? 'hang' : null });
+  const restart = await run(ds5.reboot());
+  assert.equal(restart.ok.sent, false);
+  assert.equal(restart.ok.error.timeout, true);
+  assert.ok(ds5.poisoned);
+  const sent = dev.events.length;
+  await run(ds5.queryNvStatus());
+  assert.equal(dev.events.length, sent, 'late Restart cannot overlap another command');
+});
+
 // ------------------------------------------------------------ info dispositivo
 
 test('boardModel maps 0x09 to BDM-060R', () => {

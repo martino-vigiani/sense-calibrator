@@ -203,6 +203,8 @@ test('flash results are classified from the error flags, never from the message'
   assert.equal(flashResultFor(null, { status: 'locked' }), 'ok');
   assert.equal(flashResultFor(null, { status: 'pending_reboot' }), 'ok');
   assert.equal(flashResultFor(null, { status: 'unlocked' }), 'not-confirmed');
+  for (const status of ['error', 'unknown', null])
+    assert.equal(flashResultFor(null, status ? { status } : null), 'not-confirmed');
   assert.equal(flashResultFor({ nvUnknown: true, flashStage: 'lock' }, null), 'nv-unknown');
   assert.equal(flashResultFor({ flashStage: 'unlock' }, null), 'unlock-failed');
   assert.equal(flashResultFor({ flashStage: 'lock' }, null), 'lock-failed');

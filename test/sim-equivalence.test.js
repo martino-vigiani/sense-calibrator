@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runVariant } from '../ops/sim/run.mjs';
-import { ALLOWED_OUTCOME_CHANGES, goldenRecord, untouchedByWs1 } from '../ops/sim/equivalence.mjs';
+import { DRIFT_MOVE_SPREAD } from '../js/calib/measure.js';
+import { QUICK_REGRESSION_EPS } from '../js/calib/quick.js';
 
 // I golden sono stati prodotti dall'harness PRE-refactor (ops/sim/legacy,
 // app.js monolitico al commit 40a08ed) sulla popolazione sintetica, perché la
@@ -12,44 +13,28 @@ import { ALLOWED_OUTCOME_CHANGES, goldenRecord, untouchedByWs1 } from '../ops/si
 // WS1 (quick-safety) cambia il comportamento di proposito: niente comandi su
 // una partenza già centrata, tenuta prima di ogni passata, campioni solo dopo
 // una finestra stabile e vicina al riferimento in sessione, verifica stabile,
-// tetto al 15%. Il confronto campo per campo resta quindi solo dove nessuna di
-// queste regole può intervenire: una sola passata, partenza ≥ 1.2, nessun
-// evento instabile, residuo sotto il tetto. Lì la sessione deve essere
-// identica, perché la tenuta della passata 1 è la seconda tenuta di sempre e il
-// primo campione fissa il riferimento senza attese aggiuntive. Su tutte le
-// sessioni valgono gli invarianti di sicurezza.
+// tetto al 15%. Audit 09 richiede ora 300 ms interamente osservati per ogni
+// tenuta, invece dei precedenti 240 ms. Questo sposta la fase del rumore
+// sintetico perfino nelle sessioni prima dette "untouched": le mediane byte
+// esatte del legacy non sono più una invariante. Restano i limiti di sicurezza.
 // Risultati "model-verified": codice reale contro un controller simulato.
 //
 // Si esegue la configurazione di PRODUZIONE (variante `baseline`): gli
 // invarianti di sicurezza valgono su quella, compreso il tetto al 15% che la
 // variante `legacyStop` (seme di `bestWorst` e tetto della regola di arresto,
-// WS2) disattiverebbe. Sulle sessioni confrontate campo per campo (una sola
-// passata sotto il tetto, quindi arrivata al target) il seme non interviene.
-// L'esito mostrato è cambiato di proposito anche per WS2 (precedenza e nuovi
-// esiti in quick-policy.js): è ammesso solo uno dei cambi elencati qui, e
-// ognuno deve essere coerente con i numeri della sessione.
-const OUTCOME_CHANGES = ALLOWED_OUTCOME_CHANGES;
+// WS2) disattiverebbe. Gli esiti possono cambiare anche per il confronto
+// per stick di audit 11. I golden fissano popolazione, seed e partenza.
 
 for (const scenario of ['normal', 'hold']) {
-  test(`runQuick matches the pre-refactor harness where no WS1 rule applies and keeps the safety invariants elsewhere (synthetic, ${scenario})`, async () => {
+  test(`runQuick preserves safety invariants on the legacy synthetic population (${scenario})`, async () => {
     const golden = JSON.parse(await readFile(new URL(`./fixtures/sim-golden-synthetic-${scenario}.json`, import.meta.url), 'utf8'));
     assert.equal(golden.generatedBy, 'legacy');
     const sessions = await runVariant({ n: golden.n, seed: golden.seed, scenario, population: 'synthetic', impl: 'module', variant: 'baseline' });
     assert.equal(sessions.length, golden.sessions.length);
-    let compared = 0;
     for (let i = 0; i < sessions.length; i++) {
       const r = sessions[i];
       const g = golden.sessions[i];
-      if (untouchedByWs1(g)) {
-        compared++;
-        const got = goldenRecord(r);
-        assert.deepEqual({ ...got, outcome: null }, { ...g, outcome: null }, `session ${i}`);
-        if (got.outcome !== g.outcome) {
-          const check = OUTCOME_CHANGES[`${g.outcome}>${got.outcome}`];
-          assert.ok(check, `session ${i}: unexpected outcome change ${g.outcome} → ${got.outcome}`);
-          assert.ok(check(got), `session ${i}: ${g.outcome} → ${got.outcome} does not match the session`);
-        }
-      }
+      assert.equal(r.i, g.i, `session ${i}: same synthetic controller`);
       const { begin, sample, end } = r.counts;
       if (r.outcome === 'stalled') {
         // la passata abbandonata non viene mai chiusa con calibEnd
@@ -64,7 +49,14 @@ for (const scenario of ['normal', 'hold']) {
         assert.equal(begin + sample + end, 0, `session ${i}: no command on an already-centered start`);
       }
       if (r.s.after && Math.max(...r.s.after.off) >= 15) assert.equal(r.outcome, 'catastrophic', `session ${i}`);
+      if (r.s.before?.off && r.s.after?.off
+        && r.s.after.off.some((after, j) => after - r.s.before.off[j] > QUICK_REGRESSION_EPS)
+        && !['catastrophic', 'moved', 'stalled', 'error', 'unverified'].includes(r.outcome))
+        assert.equal(r.outcome, 'worse-than-start', `session ${i}: a stick worsened`);
+      if (r.s.gate !== undefined) {
+        assert.ok(r.s.gate <= DRIFT_MOVE_SPREAD, `session ${i}: gate <= movement spread`);
+        assert.ok(r.s.gateMax <= DRIFT_MOVE_SPREAD, `session ${i}: widest gate <= movement spread`);
+      }
     }
-    if (scenario === 'normal') assert.ok(compared >= 15, `${compared} sessions compared field by field`);
   });
 }

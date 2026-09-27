@@ -264,7 +264,9 @@ export async function runQuick({
     const beforeWorst = Math.max(before.left.offset, before.right.offset);
     const beforeNoise = Math.max(before.left.noise, before.right.noise);
     const stableEnough = r => (r.stableFraction ?? 1) >= DRIFT_MIN_STABLE
-      || Math.max(r.left.noise, r.right.noise) <= p.verifyNoiseRatio * beforeNoise;
+      || ((r.stableFraction ?? 0) >= 0.2
+        && Number.isFinite(r.rawNoise) && Number.isFinite(before.rawNoise)
+        && r.rawNoise <= p.verifyNoiseRatio * before.rawNoise);
     if (beforeNoise >= p.noisyStartPct) {
       // Solo un invito: il gate adattivo non cambia per questo.
       onProgress({ phase: 'noisy', noise: beforeNoise });
@@ -438,7 +440,7 @@ export async function runQuick({
           ? 'this pass was not committed, but an earlier calibration step is active and unsaved'
           : 'nothing was committed';
         log(`Pass ${pass} abandoned after ${taken} of ${p.samplesPerPass} samples: ${earlier}. Turn the controller off before trying again.`);
-        return { session, outcome: 'stalled', committed: true, needsPowerCycle: true, worst: null, beforeWorst, bestWorst, pass, committedBefore: committedAny };
+        return { session, outcome: 'stalled', committed: committedAny, needsPowerCycle: true, worst: null, beforeWorst, bestWorst, pass, committedBefore: committedAny };
       }
       await clock.sleep(p.endDelayMs);
       ensureCurrent();
@@ -561,7 +563,13 @@ export async function runQuick({
     // tornare alla migliore. L'esito lo dice invece di annunciare come
     // risultato un numero che non è il migliore ottenuto.
     const maxNoise = result && worst !== null ? Math.max(result.left.noise, result.right.noise) : null;
-    const outcome = stop ?? classifyOutcome({ worst, beforeWorst, bestWorst, maxNoise, unstableEvents: session.unstableEvents, passes: session.passes }, p);
+    let outcome = stop ?? classifyOutcome({ worst, beforeWorst, bestWorst, maxNoise, unstableEvents: session.unstableEvents, passes: session.passes }, p);
+    // Il massimo può migliorare mentre lo stick prima sano peggiora molto.
+    // Il firmware monta entrambi: il confronto con l'inizio è per stick.
+    if (stop === null && result && [
+      result.left.offset - before.left.offset,
+      result.right.offset - before.right.offset,
+    ].some(delta => delta > p.regressionEps) && outcome !== 'catastrophic') outcome = 'worse-than-start';
     return { session, outcome, committed: true, worst, beforeWorst, bestWorst };
   } catch (error) {
     // La RAM del controller è cambiata se una passata precedente ha già chiuso

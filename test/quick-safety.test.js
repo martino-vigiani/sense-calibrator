@@ -141,6 +141,52 @@ test('measureOffset reports the stable fraction of its samples', async () => {
   assert.equal(r.stableFraction, 1);
 });
 
+test('audit 09: a report gap cannot complete a 300 ms hold or a stale offset measurement', async () => {
+  const source = scriptedSource();
+  let resolved = false;
+  const hold = waitForStable(source, idleClock, { holdMs: 300, timeoutMs: 1000 });
+  hold.then(() => { resolved = true; });
+  source.emit(36, { lx: 0, ly: 0, rx: 0, ry: 0 });
+  source.t = 240;
+  source.emit(4);
+  await Promise.resolve();
+  assert.equal(resolved, false, 'a 208 ms gap cannot make nine fresh reports a hold');
+  source.t = 1100;
+  source.emit(4);
+  assert.equal(await hold, false);
+
+  const measureSource = scriptedSource();
+  let finish;
+  const measurement = measureOffset(measureSource, { sleep: () => new Promise(r => { finish = r; }) }, 1000);
+  measureSource.emit(300, { lx: 0, ly: 0, rx: 0, ry: 0 });
+  measureSource.t = 1000;
+  finish();
+  assert.equal(await measurement, null, 'readings from the first 300 ms cannot represent 1 s');
+
+  const clock = new VClock();
+  const dev = makeDevice(clock);
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  h.eval('startDriftTest()');
+  await h.advance(300);
+  dev.stopped = true;
+  await h.advance(4000);
+  assert.match(h.$('drift-status').textContent, /Interrupted/i);
+});
+
+test('audit 08: a small quiet minority cannot verify a mostly moving Quick result', async () => {
+  const quietMinority = {
+    left: { offset: 0.55, noise: 0, x: 0, y: 0 },
+    right: { offset: 0.55, noise: 0, x: 0, y: 0 },
+    stableFraction: 0.17,
+  };
+  const h = scripted({ verifies: [quietMinority] });
+  const res = await h.run({ params: { maxPasses: 1, verifyAttempts: 1 } });
+  assert.equal(h.events.filter(e => e === 'end').length, 1);
+  assert.equal(res.outcome, 'unverified');
+  assert.equal(res.session.passXY[0], null);
+});
+
 // ---------------------------------------------------------------- passata (1)(2)(3)
 
 test('a thumb that lands on the rim right after calibBegin never becomes the in-session reference', async () => {
@@ -182,7 +228,7 @@ test('a pass that cannot collect 12 samples is abandoned without calibEnd and ne
   });
   assert.equal(res.outcome, 'stalled');
   assert.equal(res.needsPowerCycle, true);
-  assert.equal(res.committed, true, 'the open session leaves the RAM state unknown: unsaved');
+  assert.equal(res.committed, false, 'opening a session is not a commit');
   assert.equal(res.session.aborted, 'stalled');
   assert.deepEqual([dev.counts.begin, dev.counts.end], [1, 0], 'never calibEnd with fewer than 12 samples');
   assert.ok(dev.counts.sample < 12);
@@ -192,6 +238,31 @@ test('a pass that cannot collect 12 samples is abandoned without calibEnd and ne
   assert.ok(prompt && prompt.t - begin >= QUICK_DEFAULTS.stallMs && prompt.t - begin < QUICK_DEFAULTS.stallMs + 6000);
   assert.ok(clock.now() - begin >= QUICK_DEFAULTS.stallMs + QUICK_DEFAULTS.stallGraceMs);
   assert.ok(clock.now() - begin < QUICK_DEFAULTS.stallMs + QUICK_DEFAULTS.stallGraceMs + 6000);
+});
+
+test('audit 15: first-pass stall reports no commit while retaining the power-cycle lock', async () => {
+  const { res, dev } = await simRun({
+    hook: (d, clk) => onCommand(d, 'sample', 2, () => {
+      d.touches.push({ stick: 0, t0: clk.now() + 10, dur: 120_000, tail: 100, amp: [8, 0] });
+    }),
+  });
+  assert.equal(res.outcome, 'stalled');
+  assert.equal(dev.counts.end, 0);
+  assert.equal(res.committed, false);
+  assert.equal(res.committedBefore, false);
+  assert.equal(res.needsPowerCycle, true);
+});
+
+test('audit 11: Quick names a worsening stick even when the maximum improves', async () => {
+  const h = scripted({ verifies: [{
+    left: { offset: 0.55, noise: 0.2, x: 0, y: 0 },
+    right: { offset: 1.8, noise: 0.2, x: 0.018, y: 0 },
+    stableFraction: 1,
+  }] });
+  const res = await h.run({ params: { maxPasses: 1 } });
+  assert.equal(res.beforeWorst, 2.4);
+  assert.equal(res.worst, 1.8);
+  assert.equal(res.outcome, 'worse-than-start');
 });
 
 test('Cancel during the stall prompt abandons the pass at once', async () => {
@@ -387,7 +458,7 @@ test('app: an already-centered start keeps the modal open, sends nothing, and of
   assert.equal(h.peek().unsaved, true);
 });
 
-test('app: a stalled pass leaves unsaved set and blocks every command until the controller is reconnected', async () => {
+test('app: a first-pass stall leaves no commit and blocks every command until a power cycle', async () => {
   const { h, dev } = await appWith({
     hook: (d, clock) => onCommand(d, 'sample', 2, () => {
       d.touches.push({ stick: 0, t0: clock.now() + 10, dur: 600_000, tail: 100, amp: [8, 0] });
@@ -401,7 +472,7 @@ test('app: a stalled pass leaves unsaved set and blocks every command until the 
   await h.click('btn-quick-cancel');
   await h.run(running);
   assert.equal(dev.counts.end, 0);
-  assert.equal(h.peek().unsaved, true);
+  assert.equal(h.peek().unsaved, false, 'no calibEnd or repair commit occurred');
   assert.equal(h.peek().busy, false);
   assert.match(h.$('calib-outcome').innerHTML, /never settled/);
   assert.equal(h.$('btn-flash').disabled, true, 'Write is off until the controller is power-cycled');
@@ -475,11 +546,11 @@ test('an HID error inside an open session needs a power cycle but is not a commi
   assert.equal(res.needsPowerCycle, true);
 });
 
-test('an error before calibBegin succeeds leaves no session open', async () => {
+test('a refused begin and malformed repair reply keep the possible commit and open-session lock', async () => {
   const { res } = await scriptedRun(() => [0x83, 0, 0, 0]); // begin rifiutato due volte, riparazione rifiutata
   assert.equal(res.outcome, 'error');
-  assert.equal(res.committed, false);
-  assert.equal(res.needsPowerCycle, undefined);
+  assert.equal(res.committed, true, 'the malformed repair reply follows a possible calibEnd commit');
+  assert.equal(res.needsPowerCycle, true);
 });
 
 test('app: an HID error mid-pass blocks every command until a power cycle and never says nothing changed', async () => {

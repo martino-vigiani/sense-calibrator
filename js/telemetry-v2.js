@@ -22,7 +22,7 @@ import { EVENTS_V2_SCHEMA } from './telemetry-v2-schema.js';
 export const EVENTS_V2_ENDPOINT = 'https://subralabs.com/api/calib/v2/events';
 // Data della release che produce gli eventi (YYYYMMDD). Va aggiornata a ogni
 // rilascio che cambia cosa si misura, così il report separa le versioni.
-export const TELEMETRY_APP_BUILD = 20260927;
+export const TELEMETRY_APP_BUILD = 20260928;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una
 // più nuova, l'avviso ricompare prima che partano le categorie nuove.
@@ -230,7 +230,7 @@ export const nvStatusFor = nv => (NV_STATUSES.has(nv?.status) ? nv.status : null
 // Classe dell'esito di un flash, dall'errore di DS5.flash() (flashStage) e
 // dallo stato NVS riletto. Mai il messaggio dell'errore: è testo libero.
 export function flashResultFor(error, nv) {
-  if (!error) return nv?.status === 'unlocked' ? 'not-confirmed' : 'ok';
+  if (!error) return nv?.status === 'locked' || nv?.status === 'pending_reboot' ? 'ok' : 'not-confirmed';
   if (error.nvUnknown) return 'nv-unknown';
   if (error.flashStage === 'unlock') return 'unlock-failed';
   if (error.flashStage === 'lock') return 'lock-failed';

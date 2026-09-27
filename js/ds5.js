@@ -213,13 +213,15 @@ export class DS5 {
   }
 
   // Coppia richiesta/risposta sotto mutex e timeout.
-  request(reportId, data, replyId, { commits = false } = {}) {
+  request(reportId, data, replyId, { commits = false, decode = view => view } = {}) {
     return this.exclusive(async () => {
       let sent = false;
       try {
         await this.sendFeature(reportId, data);
         sent = true;
-        return await this.recvFeature(replyId);
+        // Il decode resta nella stessa transazione: una risposta troncata o
+        // incoerente arriva DOPO l'invio e deve conservare i flag di sicurezza.
+        return decode(await this.recvFeature(replyId));
       } catch (error) {
         throw this.settleFailure(error, commits, sent);
       }
@@ -239,10 +241,20 @@ export class DS5 {
   // Invia un comando 0x82 e verifica la risposta su 0x83.
   // Ritorna { ok, word, code } — code è il byte di stato finale.
   async calibCommand(payload, expected, options = {}) {
-    const data = await this.request(0x82, payload, 0x83, options);
-    const word = data.getUint32(0, false);
-    const code = data.getUint8(3);
-    return { ok: word === expected, word, code };
+    return this.request(0x82, payload, 0x83, {
+      ...options,
+      decode: data => {
+        if (data.byteLength < 4) throw new Error('Calibration reply is truncated');
+        const word = data.getUint32(0, false);
+        const code = data.getUint8(3);
+        const header = word >>> 8;
+        // 0x83000000 è il rifiuto dell'avvio di una sessione già aperta.
+        // Gli altri comandi non possono interpretare un byte finale isolato.
+        if (header !== (expected >>> 8) && !(payload[0] === 1 && word === 0x83000000))
+          throw new Error(`Calibration reply does not match command (0x${word.toString(16)})`);
+        return { ok: word === expected, word, code };
+      },
+    });
   }
 
   // Se una calibrazione precedente si è interrotta a metà (controller scollegato,
@@ -291,6 +303,7 @@ export class DS5 {
     if (!r.ok) {
       const error = new Error(`Failed to start center calibration (0x${r.word.toString(16)})`);
       error.committed = committed;
+      error.openSession = true;
       throw error;
     }
     return { committed };
@@ -317,7 +330,11 @@ export class DS5 {
 
   async rangeBegin() {
     const r = await this.calibCommand([1, 1, 2], 0x83010201);
-    if (!r.ok) throw new Error(`Failed to start range calibration (0x${r.word.toString(16)})`);
+    if (!r.ok) {
+      // Il firmware ha ricevuto Begin: un codice di rifiuto non dimostra che
+      // una sessione precedente sia chiusa. La UI conserva il blocco.
+      throw Object.assign(new Error(`Failed to start range calibration (0x${r.word.toString(16)})`), { maybeReceived: true });
+    }
   }
 
   // code 3 = sessione range già chiusa: non è un errore, ma questo rangeEnd non
@@ -334,8 +351,13 @@ export class DS5 {
   // upstream resta rimandato finché la verifica hardware H3 non lo giustifica.
   async queryNvStatus() {
     try {
-      const data = await this.request(0x80, [3, 3], 0x81);
-      const ret = data.getUint32(1, false);
+      const ret = await this.request(0x80, [3, 3], 0x81, {
+        decode: data => {
+          this.checkNvReply(data, 'NVS status');
+          if (data.byteLength < 5) throw new Error('NVS status reply is truncated');
+          return data.getUint32(1, false);
+        },
+      });
       if (ret === 0x15010100) return { status: 'pending_reboot', raw: ret };
       if (ret === 0x03030201) return { status: 'locked', raw: ret };
       if (ret === 0x03030200) return { status: 'unlocked', raw: ret };
@@ -354,13 +376,15 @@ export class DS5 {
   }
 
   async nvsUnlock() {
-    const view = await this.request(0x80, [3, 2, 101, 50, 64, 12], 0x81, { commits: true });
-    return this.checkNvReply(view, 'NVS unlock');
+    return this.request(0x80, [3, 2, 101, 50, 64, 12], 0x81, {
+      commits: true, decode: view => this.checkNvReply(view, 'NVS unlock'),
+    });
   }
 
   async nvsLock() {
-    const view = await this.request(0x80, [3, 1], 0x81, { commits: true });
-    return this.checkNvReply(view, 'NVS lock');
+    return this.request(0x80, [3, 1], 0x81, {
+      commits: true, decode: view => this.checkNvReply(view, 'NVS lock'),
+    });
   }
 
   // Rende permanente la calibrazione corrente: ciclo unlock → lock della NVS,
@@ -405,7 +429,10 @@ export class DS5 {
   // riavviato nulla, e chi chiama non deve dire il contrario.
   async reboot() {
     try {
-      await this.exclusive(() => this.sendFeature(0x80, [1, 1]));
+      await this.exclusive(async () => {
+        try { await this.sendFeature(0x80, [1, 1]); }
+        catch (error) { throw this.settleFailure(error, false, false); }
+      });
       return { sent: true };
     } catch (error) {
       return { sent: !this.opened, error };

@@ -21,6 +21,8 @@ export const RANGE_DEFAULTS = Object.freeze({
   okRadius: 0.6,
   // Un settore conta se arriva a questa frazione del massimo osservato.
   relThreshold: 0.88,
+  // Quattro estremi cardinali non provano che sia stato percorso il bordo.
+  minCoverage: 0.9,
   // Sotto questo raggio massimo lo stick non si è mosso: copertura 0, e
   // nessuna chiusura (nemmeno "Finish anyway") è ammessa.
   minExtent: 0.5,
@@ -181,8 +183,9 @@ export function stickStatus(s) {
   const reverseTurns = Math.min(s.travel.pos, s.travel.neg) / TAU;
   const reversed = s.reversals > 0 && reverseTurns >= p.minReverseTurns;
   const enoughTurns = turns >= p.minTurns;
+  const coverage = stickCoverage(s);
   return {
-    coverage: stickCoverage(s),
+    coverage,
     dirs,
     maxAbs,
     missingDirs,
@@ -191,7 +194,7 @@ export function stickStatus(s) {
     reverseTurns,
     reversed,
     enoughTurns,
-    complete: moved && missingDirs.length === 0 && enoughTurns && reversed,
+    complete: moved && missingDirs.length === 0 && enoughTurns && reversed && coverage >= p.minCoverage,
   };
 }
 
@@ -226,6 +229,7 @@ export function rangeStatus(tracker, elapsedMs = 0) {
   const missing = [];
   const missingDirs = [];
   for (const [tag, st] of [['L', L], ['R', R]]) {
+    if (st.coverage < tracker.params.minCoverage) missing.push(`${tag}: cover more of the edge`);
     for (const d of st.missingDirs) missingDirs.push(`${tag} ${DIR_NAMES[d]}`);
   }
   missing.push(...missingDirs);

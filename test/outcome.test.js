@@ -26,6 +26,35 @@ const summary = (off, { noise = [0.2, 0.2], xy = null } = {}) => ({
   xy: xy ?? off.map(o => [o, 0]),
 });
 
+test('audit 11: Quick and Guided guard Write when the formerly good stick worsens', () => {
+  const before = summary([10, 0.555]);
+  const after = summary([0.555, 9]);
+  for (const view of [
+    quickOutcomeView({ outcome: 'residual', worst: 9, beforeWorst: 10, bestWorst: 9,
+      committed: true, session: { before, after } }),
+    guidedOutcomeView({ before, after, committed: true }),
+  ]) {
+    assert.equal(view.outcome, 'worse-than-start');
+    assert.equal(writeLockFor({ center: view.center }).mode, 'guarded');
+    assert.match(textOf(view), /right stick|right/i);
+  }
+});
+
+test('audit 11: a centered Guided result still names a worsened axis before saving', () => {
+  const before = summary([1.6, 0.555], { xy: [[1.6, 0], [0.555, 0]] });
+  const after = summary([1.1, 0.555], { xy: [[0, 1.1], [0.555, 0]] });
+  for (const view of [
+    guidedOutcomeView({ before, after }),
+    quickOutcomeView({ outcome: 'centered', worst: 1.1, beforeWorst: 1.6, bestWorst: 1.1,
+      committed: true, session: { before, after } }),
+  ]) {
+    assert.equal(view.outcome, 'centered');
+    assert.equal(writeLockFor({ center: view.center }).mode, 'guarded');
+    assert.match(textOf(view), /left Y axis moved further from center/i);
+    assert.doesNotMatch(textOf(view), /Write it to memory to keep it/);
+  }
+});
+
 test('no quick outcome at 15% or more reads as success, and Write is disabled', () => {
   for (const outcome of OUTCOMES) {
     for (const worst of [QUICK_CATASTROPHIC_PCT, 15.4, 31, 100]) {

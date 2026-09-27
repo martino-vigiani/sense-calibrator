@@ -150,7 +150,9 @@ export const LOCK_REASONS = Object.freeze({
   pinned: { mode: 'disabled', text: 'An axis reads at the very edge. Saving would store a broken calibration.' },
   'range-incomplete': { mode: 'disabled', text: 'The range calibration didn’t cover the whole edge. Run Range calibration again before saving.' },
   'range-already-closed': { mode: 'disabled', text: 'The range session had already closed, so its result is unknown. Run Range calibration again before saving.' },
+  'center-reload': { mode: 'disabled', text: 'A previous calibration result may still be unsafe. Complete and check a new calibration before saving.' },
   'worse-than-start': { mode: 'guarded', text: 'The result is worse than when you started.' },
+  'axis-worse': { mode: 'guarded', text: 'An axis moved further from center than before. Check it before saving.' },
   'lost-ground': { mode: 'guarded', text: 'An earlier pass was better than the result the controller has now.' },
   unverified: { mode: 'guarded', text: 'The last calibration couldn’t be verified. Run the drift test and check the numbers first.' },
 });
@@ -163,16 +165,18 @@ export const LOCK_REASONS = Object.freeze({
 // Ritorna { mode: 'allowed'|'guarded'|'disabled', reasons: [{ code, mode, text }] }.
 // Oltre all'esito, controlla i numeri (rete di sicurezza): un esito futuro o
 // 'moved' non sfugge al tetto del 15% né al confronto con la partenza.
-export function writeLockFor({ center = null, range = null, poisoned = false, needsPowerCycle = false } = {}) {
+export function writeLockFor({ center = null, range = null, poisoned = false, needsPowerCycle = false, centerReload = false } = {}) {
   const codes = [];
+  if (centerReload) codes.push('center-reload');
   if (poisoned) codes.push('poisoned');
   if (needsPowerCycle) codes.push('needs-power-cycle');
   if (center) {
-    const { outcome, worst = null, beforeWorst = null, bestWorst = null, pinned = false, committed = true } = center;
+    const { outcome, worst = null, beforeWorst = null, bestWorst = null, pinned = false, committed = true, regressedSticks = [], axisWorse = false } = center;
     if (outcome === 'stalled' && !needsPowerCycle) codes.push('needs-power-cycle');
     if (outcome === 'catastrophic' || (isNum(worst) && worst >= QUICK_CATASTROPHIC_PCT)) codes.push('catastrophic');
     if (pinned) codes.push('pinned');
-    if (outcome === 'worse-than-start' || (isNum(worst) && isNum(beforeWorst) && worst - beforeWorst > QUICK_REGRESSION_EPS)) codes.push('worse-than-start');
+    if (outcome === 'worse-than-start' || regressedSticks.length || (isNum(worst) && isNum(beforeWorst) && worst - beforeWorst > QUICK_REGRESSION_EPS)) codes.push('worse-than-start');
+    if (axisWorse) codes.push('axis-worse');
     if (outcome === 'lost-ground' || (isNum(worst) && isNum(bestWorst) && worst - bestWorst > QUICK_REGRESSION_EPS)) codes.push('lost-ground');
     if (!isNum(worst) && committed && outcome !== 'stalled' && outcome !== 'catastrophic') codes.push('unverified');
   }
@@ -189,6 +193,9 @@ export function writeLockFor({ center = null, range = null, poisoned = false, ne
 
 const pct = v => `${v.toFixed(1)}%`;
 const fmt = v => (isNum(v) ? formatOffset(v) : '—');
+const regressedSticks = (before, after) => ['left', 'right'].filter((_, i) =>
+  isNum(before?.off?.[i]) && isNum(after?.off?.[i])
+  && after.off[i] - before.off[i] > QUICK_REGRESSION_EPS);
 
 // Azioni che il pannello può offrire. L'app le collega ai bottoni veri, che
 // passano comunque dai loro controlli (NVS, avvelenamento, power cycle).
@@ -254,13 +261,20 @@ function routeFor(worst, pinned) {
 //   run = { outcome, worst, beforeWorst, bestWorst, committed, session? }
 //   (il ritorno di runQuick; `session.before/after` danno le righe per stick)
 export function quickOutcomeView(run, { nvStatus = null } = {}) {
-  const { outcome, worst = null, beforeWorst = null, bestWorst = null, committed = false } = run;
+  const { worst = null, beforeWorst = null, bestWorst = null, committed = false } = run;
   const before = run.session?.before ?? null;
   const after = run.session?.after ?? null;
+  const regressed = regressedSticks(before, after);
+  const worseAxes = axisWorsening(before, after);
+  const axisLine = worseAxes.length
+    ? `The ${worseAxes.map(w => `${w.stick.toLowerCase()} ${w.axis}`).join(', ')} axis moved further from center than before. Run the drift test before saving.`
+    : null;
+  const outcome = regressed.length && run.outcome !== 'catastrophic' ? 'worse-than-start' : run.outcome;
   const pinned = pinnedFromSummary(after);
   const revert = revertAdvice(nvStatus);
   const sticks = stickRows(before, after);
-  const center = { outcome, worst, beforeWorst, bestWorst, pinned, committed };
+  const center = { outcome, worst, beforeWorst, bestWorst, pinned, committed,
+    regressedSticks: regressed, axisWorse: worseAxes.length > 0 };
   const view = (tone, title, lines, actions = [], extra = {}) => ({
     kind: 'quick', outcome, tone, title, lines: lines.filter(Boolean), sticks, actions, center, repair: false, ...extra,
   });
@@ -338,17 +352,21 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
   const RETRY = 'You can run it as many times as you like: each try starts from where the sticks are now, and about 4 in 10 people who ran it again ended fully centered. Nothing is permanent until you write it to memory.';
   switch (outcome) {
     case 'centered':
-      return view('ok', 'Both sticks centered', [
-        `Worst stick ${fmt(worst)}, the measurement limit. Write it to memory to keep it after the controller turns off.`,
-      ]);
+      return view(worseAxes.length ? 'warn' : 'ok',
+        worseAxes.length ? 'Both sticks centered: check before saving' : 'Both sticks centered',
+        worseAxes.length
+          ? [`Worst stick ${fmt(worst)}, the measurement limit.`, axisLine]
+          : [`Worst stick ${fmt(worst)}, the measurement limit. Write it to memory to keep it after the controller turns off.`]);
     case 'within-1-step':
-      return view('ok', 'Within 1 step: fine to save', [
+      return view(worseAxes.length ? 'warn' : 'ok',
+        worseAxes.length ? 'Within 1 step: check before saving' : 'Within 1 step: fine to save', [
         `Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`,
+        axisLine,
         RETRY,
       ], [ACTION.quick]);
     case 'worse-than-start':
       return view('bad', 'Worse than when you started', [
-        `Don’t write this to memory. The result is ${fmt(worst)}; the sticks started at ${fmt(beforeWorst)}. Every pass replaces the previous one, so the controller can’t go back to where it started.`,
+        `Don’t write this to memory. ${regressed.length ? `The ${regressed.join(' and ')} stick worsened. ` : ''}The worst stick is ${fmt(worst)}; it started at ${fmt(beforeWorst)}. Every pass replaces the previous one.`,
         revert ?? 'Run Quick again with the controller on a table and both sticks released.',
       ], [ACTION.quick]);
     case 'lost-ground':
@@ -393,7 +411,10 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   const beforeWorst = worstOfSummary(before);
   const worst = worstOfSummary(after);
   const pinned = pinnedFromSummary(after);
-  const center = { outcome: 'guided', worst, beforeWorst, bestWorst: beforeWorst, pinned, committed };
+  const regressed = regressedSticks(before, after);
+  const worseAxes = axisWorsening(before, after);
+  const center = { outcome: 'guided', worst, beforeWorst, bestWorst: beforeWorst, pinned, committed,
+    regressedSticks: regressed, axisWorse: worseAxes.length > 0 };
   const sticks = stickRows(before, after);
   const revert = revertAdvice(nvStatus);
   const view = (outcome, tone, title, lines, actions = [], extra = {}) => ({
@@ -431,19 +452,26 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   }
   // Stessa regola della rapida, con la partenza come migliore punto noto.
   const noise = Array.isArray(after?.noise) && after.noise.every(isNum) ? Math.max(...after.noise) : null;
-  const outcome = classifyOutcome({ worst, beforeWorst, bestWorst: beforeWorst, maxNoise: noise, unstableEvents: 0, passes: [worst] }, QUICK_DEFAULTS);
+  const outcome = regressed.length ? 'worse-than-start'
+    : classifyOutcome({ worst, beforeWorst, bestWorst: beforeWorst, maxNoise: noise, unstableEvents: 0, passes: [worst] }, QUICK_DEFAULTS);
   if (outcome === 'worse-than-start') {
     return view(outcome, 'bad', 'Worse than when you started', [
-      `Don’t write this to memory. The result is ${fmt(worst)}; the sticks started at ${fmt(beforeWorst)}.`,
+      `Don’t write this to memory. ${regressed.length ? `The ${regressed.join(' and ')} stick worsened. ` : ''}The worst stick is ${fmt(worst)}; it started at ${fmt(beforeWorst)}.`,
       revert ?? 'Run Guided again, releasing both sticks fully before each Continue.',
     ], [ACTION.guided]);
   }
   // Un asse peggiorato va detto anche quando il raggio dello stick migliora.
-  const axisLine = axisWorsening(before, after).length
-    ? `The ${axisWorsening(before, after).map(w => `${w.stick.toLowerCase()} ${w.axis}`).join(', ')} axis moved further from center than before, even though the stick as a whole improved.`
+  const axisLine = worseAxes.length
+    ? `The ${worseAxes.map(w => `${w.stick.toLowerCase()} ${w.axis}`).join(', ')} axis moved further from center than before, even though the stick as a whole improved.`
     : null;
-  if (outcome === 'centered') return view(outcome, 'ok', 'Both sticks centered', [`Worst stick ${fmt(worst)}, the measurement limit. Write it to memory to keep it.`]);
-  if (outcome === 'within-1-step') return view(outcome, 'ok', 'Within 1 step: fine to save', [`Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`, axisLine]);
+  if (outcome === 'centered') return view(outcome, worseAxes.length ? 'warn' : 'ok',
+    worseAxes.length ? 'Both sticks centered: check before saving' : 'Both sticks centered',
+    worseAxes.length
+      ? [`Worst stick ${fmt(worst)}, the measurement limit.`, axisLine, 'Run the drift test before saving.']
+      : [`Worst stick ${fmt(worst)}, the measurement limit. Write it to memory to keep it.`]);
+  if (outcome === 'within-1-step') return view(outcome, worseAxes.length ? 'warn' : 'ok',
+    worseAxes.length ? 'Within 1 step: check before saving' : 'Within 1 step: fine to save',
+    [`Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`, axisLine]);
   if (outcome === 'worn') {
     return view(outcome, 'warn', 'Re-centered as far as a worn sensor allows', [
       `Worst stick ${fmt(worst)}. The signal wanders even at rest: calibration can re-center the stick, but the noise will stay.`,
@@ -457,14 +485,14 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
 }
 
 // Esito del range. `incomplete` copre anche "Finish anyway" (WS7).
-export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, error = null, committed = false } = {}) {
-  const range = { incomplete, alreadyClosed: alreadyClosed || (!!error && committed) };
+export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, error = null, committed = false, leftOpen = false } = {}) {
+  const range = { incomplete, alreadyClosed: alreadyClosed || (!!error && (committed || leftOpen)) };
   const view = (tone, title, lines, actions = []) => ({ kind: 'range', outcome: 'range', tone, title, lines, sticks: [], actions, range, repair: false });
   if (error && isPoisonError(error)) return view('bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines]);
   if (error) {
-    return view(committed ? 'bad' : 'warn', 'Range calibration failed', [
+    return view(committed || leftOpen ? 'bad' : 'warn', 'Range calibration failed', [
       `The controller reported: ${String(error.message ?? error).replace(/\.+$/, '')}.`,
-      committed ? 'Its result is unknown, so Write is off until you run Range calibration again.' : 'Nothing was changed on the controller.',
+      committed || leftOpen ? 'The range session may still be open. Write is off until a complete Range calibration replaces it.' : 'Nothing was changed on the controller.',
     ], [ACTION.range]);
   }
   if (alreadyClosed) {
