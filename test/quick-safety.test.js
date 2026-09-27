@@ -174,6 +174,118 @@ test('audit 09: a report gap cannot complete a 300 ms hold or a stale offset mea
   assert.match(h.$('drift-status').textContent, /Interrupted/i);
 });
 
+test('B2: a moving window followed by 300 ms stillness completes without a second hold', async () => {
+  const source = scriptedSource();
+  let doneAt = null;
+  const hold = waitForStable(source, idleClock, { holdMs: 300, timeoutMs: 2000 });
+  hold.then(() => { doneAt = source.t; });
+  for (; source.t < 1700 && doneAt === null; source.t += 4) {
+    source.sticks = { lx: source.t < 1000 ? (source.t % 8 ? 0.2 : -0.2) : 0, ly: 0, rx: 0, ry: 0 };
+    for (const fn of [...source.listeners]) fn();
+    await Promise.resolve();
+  }
+  assert.ok(await hold);
+  assert.ok(doneAt >= 1290 && doneAt <= 1320, `hold ended at ${doneAt} ms`);
+});
+
+test('N1: one report gap restarts an offset window, with a finite retry budget', async () => {
+  const source = scriptedSource();
+  const sleepers = [];
+  const measurement = measureOffset(source, { sleep: () => new Promise(r => sleepers.push(r)) }, 1000);
+  source.emit(400, { lx: 0.02, ly: 0, rx: 0, ry: 0 });
+  source.t += 200;
+  source.emit(400);
+  sleepers.shift()();
+  await Promise.resolve();
+  assert.equal(sleepers.length, 1, 'one gap starts another full window');
+  source.emit(1000);
+  sleepers.shift()();
+  const result = await measurement;
+  assert.ok(result && result.left.offset > 1.5, 'the fresh full window is measured');
+  assert.equal(source.listeners.size, 0, 'no reports sampled after the window expires');
+});
+
+test('N1: a gap on the last retry cannot validate its trailing partial window', async () => {
+  let wall = 0, reportTime = 0;
+  const listeners = new Set();
+  const sleepers = [];
+  const source = {
+    sticks: { lx: 0.02, ly: 0, rx: 0, ry: 0 },
+    now: () => wall,
+    get reportTime() { return reportTime; },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+  };
+  const emit = t => {
+    wall = t;
+    reportTime = t - 20; // report HID arrivato 20 ms prima del callback
+    for (const fn of [...listeners]) fn();
+  };
+  const measurement = measureOffset(source, { sleep: () => new Promise(r => sleepers.push(r)) }, 1000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const start = wall;
+    emit(start);
+    emit(start + 101); // gap reale: nessun report per oltre 100 ms
+    for (let t = start + 105; t <= start + 1005; t += 4) emit(t);
+    sleepers.shift()();
+    await Promise.resolve();
+  }
+  assert.equal(await measurement, null);
+  assert.equal(listeners.size, 0);
+});
+
+test('N1: report event time keeps a main-thread delay from looking like a device gap', async () => {
+  let handledAt = 0, reportAt = 0;
+  const listeners = new Set();
+  const source = { sticks: { lx: 0, ly: 0, rx: 0, ry: 0 }, now: () => handledAt,
+    get reportTime() { return reportAt; },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); } };
+  let finished = false;
+  const hold = waitForStable(source, idleClock, { holdMs: 300, timeoutMs: 2000 });
+  hold.then(() => { finished = true; });
+  for (let i = 0; i <= 76 && !finished; i++) {
+    reportAt = i * 4;
+    handledAt = reportAt + (i >= 25 ? 200 : 0);
+    for (const fn of [...listeners]) fn();
+    await Promise.resolve();
+  }
+  assert.ok(await hold);
+  assert.equal(listeners.size, 0);
+});
+
+test('N1: a single HID gap restarts Quick startup and drift-test windows', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: DRIFTING });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  h.eval('startDriftTest()');
+  await h.advance(800);
+  dev.stopped = true;
+  await h.advance(200);
+  dev.stopped = false; dev.schedule();
+  await h.advance(3400);
+  assert.ok(h.peek().lastDriftResult, 'a fresh full drift window was measured');
+  assert.doesNotMatch(h.$('drift-status').textContent, /Interrupted/);
+
+  await h.click('btn-quick');
+  const go = h.click('btn-quick-go');
+  await h.advance(700);
+  dev.stopped = true;
+  await h.advance(200);
+  dev.stopped = false; dev.schedule();
+  await h.run(go);
+  assert.ok(dev.counts.begin >= 1, 'the startup measurement restarted and calibration began');
+});
+
+test('N1: the app forwards a plausible HID event timestamp to the sampler', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock);
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  const reportAt = clock.now() - 40;
+  h.eval(`onInputReport({ reportId: 1, data: new DataView(new Uint8Array(64).buffer), timeStamp: ${reportAt} })`);
+  assert.equal(h.eval('lastStickReportAt'), reportAt);
+});
+
 test('audit 08: a small quiet minority cannot verify a mostly moving Quick result', async () => {
   const quietMinority = {
     left: { offset: 0.55, noise: 0, x: 0, y: 0 },
@@ -253,7 +365,7 @@ test('audit 15: first-pass stall reports no commit while retaining the power-cyc
   assert.equal(res.needsPowerCycle, true);
 });
 
-test('audit 11: Quick names a worsening stick even when the maximum improves', async () => {
+test('B1: Quick keeps the worst-stick verdict when the other stick worsens below the starting worst', async () => {
   const h = scripted({ verifies: [{
     left: { offset: 0.55, noise: 0.2, x: 0, y: 0 },
     right: { offset: 1.8, noise: 0.2, x: 0.018, y: 0 },
@@ -262,7 +374,17 @@ test('audit 11: Quick names a worsening stick even when the maximum improves', a
   const res = await h.run({ params: { maxPasses: 1 } });
   assert.equal(res.beforeWorst, 2.4);
   assert.equal(res.worst, 1.8);
-  assert.equal(res.outcome, 'worse-than-start');
+  assert.equal(res.outcome, 'residual');
+});
+
+test('N2: an unstable final Quick measurement above 15% remains catastrophic', async () => {
+  const dangerous = { left: { offset: 22, noise: 8, x: 0.22, y: 0 },
+    right: { offset: 0.6, noise: 0.2, x: 0, y: 0 }, stableFraction: 0.1 };
+  const h = scripted({ verifies: [dangerous, dangerous] });
+  const res = await h.run({ params: { maxPasses: 1, verifyAttempts: 2 } });
+  assert.equal(res.outcome, 'catastrophic');
+  assert.ok(res.worst >= 15);
+  assert.equal(h.events.filter(e => e === 'end').length, 1);
 });
 
 test('Cancel during the stall prompt abandons the pass at once', async () => {

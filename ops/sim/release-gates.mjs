@@ -256,16 +256,14 @@ export function evaluateRun({ load, boot = 1000, ws1Rate = null }) {
   return rows;
 }
 
-async function realDataGates({ workers }) {
+async function realDataGates({ workers, params = {} }) {
   const rows = [];
   const gate = (id, metric, value, threshold, pass) => rows.push({ id, metric, value, threshold, pass, info: false });
-  const { runVariant } = await import('./run.mjs');
-  const { restrictedCompare } = await import('./equivalence.mjs');
-  const common = { n: 1785, seed: 1, scenario: 'normal', population: 'real', workers };
-  const legacy = await runVariant({ ...common, impl: 'legacy' });
-  const mod = await runVariant({ ...common, impl: 'module', variant: 'baseline' });
-  const eq = restrictedCompare(legacy, mod);
-  gate('2', 'WS0 equivalence, restricted to sessions no WS1 rule touches (seed 1)', `${eq.compared - eq.fieldDiffs}/${eq.compared} identical, unexpected outcome changes ${eq.unexpectedOutcomeChanges}`, 'all identical, 0 unexpected', eq.fieldDiffs === 0 && eq.unexpectedOutcomeChanges === 0 && eq.compared > 0);
+  const { goldenGate } = await import('./equivalence.mjs');
+  const eq = await goldenGate({ params });
+  gate('2', 'Exact field comparison to reviewed synthetic golden (seed 7, normal + hold)',
+    `${eq.compared - eq.changedSessions}/${eq.compared} identical, changed fields ${eq.changedFields}, outcome changes ${eq.outcomeChanges}`,
+    '800/800 identical, 0 changed fields/outcomes', eq.compared === 800 && eq.changedFields === 0 && eq.outcomeChanges === 0);
 
   const { QUICK_DEFAULTS } = await import('../../js/calib/quick.js');
   const { VARIANTS } = await import('./variants.mjs');
@@ -349,7 +347,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(proces
     cache.clear();
   }
   if (!opts['skip-real']) {
-    const rows = await realDataGates({ workers: opts.workers });
+    const rows = await realDataGates({ workers: opts.workers, params: opts.params });
     report.real = rows;
     printRows('gates 2, 4 and 5 [model-verified equivalence, real-data replay, report v2 figures]', rows);
     const { PLAN_CORRECTIONS } = await import('./report-figures.mjs');

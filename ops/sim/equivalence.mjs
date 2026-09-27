@@ -7,12 +7,10 @@
 //        [--population real|synthetic] [--workers 4] [--write-golden file]
 //        [--restricted 1]
 //
-// `--restricted 1` (gate 2 del piano §4.2, dopo WS1/WS2): WS1 e WS2 cambiano
-// il comportamento di proposito, quindi il confronto campo per campo vale solo
-// sulle sessioni che nessuna regola WS1 può toccare (`untouchedByWs1`, la
-// stessa di test/sim-equivalence.test.js); lì l'esito può cambiare solo come
-// in ALLOWED_OUTCOME_CHANGES. Senza il flag il confronto è quello completo del
-// refactor WS0 (oggi fallisce per costruzione: 685/1785 sul reale).
+// `--restricted 1` (gate 2): confronto esatto con due golden sintetici
+// aggiornati dopo la tenuta completa di 300 ms. Il vecchio filtro
+// `untouchedByWs1` non è più valido: anche quelle sessioni cambiano fase dei
+// campioni. `restrictedCompare` resta per la diagnosi storica col legacy.
 //
 // Campi confrontati: l'intero oggetto sessione (tranne `t`, il timestamp, e
 // `passXY`, nuova sola osservazione telemetrica senza effetto sulla policy),
@@ -53,7 +51,69 @@ export const ALLOWED_OUTCOME_CHANGES = {
   'residual>within-1-step': r => Math.max(...r.s.after.off) <= 1.25,
   'residual>residual-deterministic': r => r.s.passes.length >= 2 && r.s.passes.at(-1) === r.s.passes.at(-2),
   'worn>worse-than-start': r => Math.max(...r.s.after.off) - Math.max(...r.s.before.off) > 0.8,
+  // Una tenuta di 300 ms osservati cambia la fase del rumore sintetico:
+  // questi tre esiti sono ammessi solo con i numeri che li giustificano.
+  'centered>within-1-step': r => Math.max(...r.s.after.off) <= 1.25,
+  'centered>preflight': r => r.s.aborted === 'preflight' && r.counts.begin === 0,
+  'centered>worn': r => Math.max(...(r.s.after?.noise ?? [])) > QUICK_DEFAULTS.noiseWorn,
 };
+
+const GOLDEN_CASES = ['normal', 'hold'];
+const GOLDEN_COMMON = Object.freeze({ n: 400, seed: 7, population: 'synthetic', workers: 1 });
+const goldenPath = scenario => new URL(`../../test/fixtures/sim-golden-synthetic-${scenario}.json`, import.meta.url);
+
+// Diff ricorsivo: non nasconde un cambio di campioni o comandi dietro una
+// mediana d'esito uguale. `passXY` è solo telemetria ed è già escluso da
+// goldenRecord; tutti gli altri campi restano confrontati.
+export function fieldDiffs(expected, actual, path = '') {
+  if (Object.is(expected, actual)) return [];
+  if (expected && actual && typeof expected === 'object' && typeof actual === 'object'
+    && Array.isArray(expected) === Array.isArray(actual)) {
+    const keys = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+    return [...keys].flatMap(k => fieldDiffs(expected[k], actual[k], `${path}${Array.isArray(expected) ? `[${k}]` : `.${k}`}`));
+  }
+  return [path || '$'];
+}
+
+export function compareGolden(golden, sessions) {
+  const examples = [];
+  let changedSessions = 0, changedFields = 0, outcomeChanges = 0;
+  if (golden.sessions.length !== sessions.length) throw new Error('golden session count differs');
+  for (let i = 0; i < sessions.length; i++) {
+    const fields = fieldDiffs(golden.sessions[i], goldenRecord(sessions[i]));
+    if (fields.length) {
+      changedSessions++;
+      changedFields += fields.length;
+      if (examples.length < 3) examples.push({ i, fields });
+    }
+    if (golden.sessions[i].outcome !== sessions[i].outcome) outcomeChanges++;
+  }
+  return { compared: sessions.length, changedSessions, changedFields, outcomeChanges, examples };
+}
+
+export async function goldenGate({ refresh = false, params = {} } = {}) {
+  const cases = {};
+  let compared = 0, changedSessions = 0, changedFields = 0, outcomeChanges = 0;
+  for (const scenario of GOLDEN_CASES) {
+    const common = { ...GOLDEN_COMMON, scenario };
+    const sessions = await runVariant({ ...common, impl: 'module', variant: 'baseline', params });
+    if (refresh) fs.writeFileSync(goldenPath(scenario), JSON.stringify({
+      label: MODEL_LABEL, generatedBy: 'module', regeneratedFor: '300 ms observed hold and round-two safety fixes',
+      ...common, sessions: sessions.map(goldenRecord),
+    }) + '\n');
+    const golden = JSON.parse(fs.readFileSync(goldenPath(scenario), 'utf8'));
+    if (golden.generatedBy !== 'module' || golden.n !== common.n || golden.seed !== common.seed
+      || golden.scenario !== scenario || golden.population !== common.population)
+      throw new Error(`wrong golden metadata for ${scenario}`);
+    const result = compareGolden(golden, sessions);
+    cases[scenario] = result;
+    compared += result.compared;
+    changedSessions += result.changedSessions;
+    changedFields += result.changedFields;
+    outcomeChanges += result.outcomeChanges;
+  }
+  return { label: MODEL_LABEL, mode: 'golden', cases, compared, changedSessions, changedFields, outcomeChanges };
+}
 
 // Confronto ristretto: `legacy` e `mod` sono due uscite di run appaiate.
 export function restrictedCompare(legacy, mod) {
@@ -80,7 +140,7 @@ export function restrictedCompare(legacy, mod) {
 }
 
 function parseArgs(argv) {
-  const opts = { n: 1785, seed: 1, scenario: 'normal', population: 'real', workers: 1, 'write-golden': null, restricted: null };
+  const opts = { n: 1785, seed: 1, scenario: 'normal', population: 'real', workers: 1, 'write-golden': null, restricted: null, 'refresh-golden': null };
   for (let k = 0; k < argv.length; k += 2) {
     const flag = argv[k].replace(/^--/, '');
     if (!(flag in opts)) throw new Error(`unknown flag --${flag}`);
@@ -91,17 +151,17 @@ function parseArgs(argv) {
 
 if (process.argv[1]?.endsWith('equivalence.mjs')) {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.restricted) {
+    const res = await goldenGate({ refresh: opts['refresh-golden'] === '1' });
+    console.log(JSON.stringify(res, null, 2));
+    process.exitCode = res.changedFields || res.outcomeChanges ? 1 : 0;
+  } else {
   const common = { n: opts.n, seed: opts.seed, scenario: opts.scenario, population: opts.population, workers: opts.workers };
   const t0 = Date.now();
   const legacy = await runVariant({ ...common, impl: 'legacy' });
   const t1 = Date.now();
   const mod = await runVariant({ ...common, impl: 'module' });
   const t2 = Date.now();
-  if (opts.restricted) {
-    const res = restrictedCompare(legacy, mod);
-    console.log(JSON.stringify({ label: MODEL_LABEL, mode: 'restricted', ...common, sessions: legacy.length, ...res }, null, 2));
-    process.exitCode = res.fieldDiffs || res.unexpectedOutcomeChanges ? 1 : 0;
-  } else {
     let outcomeDiff = 0, fullDiff = 0;
     const durDeltas = new Map();
     for (let i = 0; i < legacy.length; i++) {

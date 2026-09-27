@@ -66,6 +66,19 @@ test('a clean guided run takes exactly 4 gated samples and shows before → afte
   assert.equal(buildCalibrationUpload(ev), null, 'wizard events never leave the browser');
 });
 
+test('N1: one HID gap restarts the Guided first measurement before any command', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
+  await h.click('btn-wizard');
+  const start = h.click('btn-wizard-next');
+  await h.advance(650);
+  A.stopped = true;
+  await h.advance(200);
+  A.stopped = false; A.schedule();
+  await h.run(start);
+  assert.equal(A.counts.begin, 1);
+  assert.equal(h.peek().wizard.phase, 'corner');
+});
+
 test('audit 06: moving final reports cannot become a centered Guided result', async () => {
   const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
   const command = A.command.bind(A);
@@ -140,6 +153,61 @@ test('Continue without reaching the corner takes no sample and does not wait', a
   await h.run(h.click('btn-wizard-next'));
   assert.equal(A.counts.sample, 0);
   assert.match(h.$('wizard-msg').innerHTML, /The right stick didn’t reach the corner/);
+});
+
+test('N5: two misses at one Guided corner offer a safe stop without calibEnd', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-cancel'), false);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  assert.match(h.$('wizard-msg').innerHTML, /Stop and turn off controller/);
+  h.confirmAnswer = true;
+  await h.run(h.click('btn-wizard-cancel'));
+  assert.deepEqual([A.counts.begin, A.counts.sample, A.counts.end], [1, 0, 0]);
+  assert.ok(A.cal, 'the partial session stays open, never committed');
+  assert.equal(h.eval('powerCycleApplies()'), true);
+  assert.equal(h.$('btn-flash').disabled, true);
+  assert.match(h.$('calib-outcome').innerHTML, /hold PS for 10 s/);
+  assert.equal(h.eval('tabPowerCycleFlag()'), true);
+});
+
+test('N2: an unstable final Guided measurement above 15% still disables Write', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
+  const command = A.command.bind(A);
+  const byte = A.byte.bind(A);
+  let reads = 0;
+  A.command = (id, buf) => {
+    command(id, buf);
+    if (id === 0x82 && buf[0] === 2 && buf[2] === 1)
+      A.byte = (stick, axis, t) => stick === 0 && axis === 0 ? (++reads % 2 ? 90 : 105) : byte(stick, axis, t);
+  };
+  await startWizard(h);
+  for (const c of CORNERS) {
+    await moveToCorner(h, A, c);
+    await h.run(h.click('btn-wizard-next'));
+  }
+  assert.equal(A.counts.end, 1);
+  assert.equal(h.peek().lastWizardComparison.afterWorst >= 15, true);
+  assert.match(h.$('calib-outcome').innerHTML, /Don’t save this result/);
+  assert.equal(h.$('btn-flash').disabled, true);
+  const modal = h.eval(`wizardResultHtml({ measured: true, worse: false, afterWorst: 16,
+    sticks: [{ name: 'Left', beforeLabel: '20%', afterLabel: '16%' },
+      { name: 'Right', beforeLabel: '0.6%', afterLabel: '15.8%' }],
+    stickWorse: [{ name: 'Right', beforeLabel: '0.6%', afterLabel: '15.8%' }], axisWorse: [] }, false)`);
+  assert.match(modal, /15% safety ceiling.*Don’t write it to memory/s);
+  assert.doesNotMatch(modal, /check this change/);
+});
+
+test('N4: a Range reload lock tells the user to power off before retrying', async () => {
+  const clock = new VClock();
+  const A = makeDevice(clock);
+  const session = new Map([['sense-range-write-lock-in-tab', '1']]);
+  const h = await loadApp({ clock, authorized: [A], session });
+  await h.advance(5000);
+  assert.match(h.$('btn-flash').title, /turn the controller off \(hold PS for 10 s\) before trying again/i);
+  assert.equal(h.$('btn-flash').disabled, true);
 });
 
 test('a thumb held at Continue produces 0 samples; after 2 timeouts the escape is offered', async () => {

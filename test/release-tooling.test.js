@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import { VARIANTS } from '../ops/sim/variants.mjs';
 import { convergedWorseCheck } from '../ops/sim/replay-sequences.mjs';
-import { restrictedCompare, untouchedByWs1 } from '../ops/sim/equivalence.mjs';
+import { ALLOWED_OUTCOME_CHANGES, compareGolden, restrictedCompare, untouchedByWs1 } from '../ops/sim/equivalence.mjs';
 
 // Strumenti dei gate di rilascio (ops/sim, solo sviluppo) su righe sintetiche:
 // la telemetria reale non entra nei test.
@@ -46,6 +46,25 @@ test('restricted equivalence compares only untouched sessions and flags any fiel
   const relabeled = legacy.map(r => structuredClone(r));
   relabeled[0].outcome = 'worn';
   assert.equal(restrictedCompare(legacy, relabeled).unexpectedOutcomeChanges, 1);
+});
+
+test('B3: golden comparison detects one changed field even when the outcome matches', () => {
+  const rec = { i: 0, s: { before: { off: [2, 0.555] }, passes: [0.55], after: { off: [0.555, 0.555] } },
+    outcome: 'centered', calibEnds: 1, trueQuant: 0.555, counts: { begin: 1, sample: 12, end: 1 } };
+  const golden = { sessions: [structuredClone(rec)] };
+  const same = compareGolden(golden, [{ ...rec, s: { ...rec.s, passXY: [[[0, 0], [0, 0]]] } }]);
+  assert.equal(same.changedFields, 0, 'telemetry-only axes are excluded');
+  const changed = structuredClone(rec);
+  changed.counts.sample = 11;
+  assert.deepEqual(compareGolden(golden, [changed]).examples[0].fields, ['.counts.sample']);
+});
+
+test('B3: historical outcome allowances require the corresponding measured condition', () => {
+  const record = { s: { after: { off: [1.24, 0.555], noise: [0.2, 0.2] }, aborted: 'preflight' }, counts: { begin: 0 } };
+  assert.equal(ALLOWED_OUTCOME_CHANGES['centered>within-1-step'](record), true);
+  assert.equal(ALLOWED_OUTCOME_CHANGES['centered>preflight'](record), true);
+  assert.equal(ALLOWED_OUTCOME_CHANGES['centered>worn'](record), false);
+  assert.equal(ALLOWED_OUTCOME_CHANGES['centered>preflight']({ ...record, counts: { begin: 1 } }), false);
 });
 
 test('gate 3.3 compares counts against the paired baseline, and the WS1 forced-hold reference is recorded', async () => {

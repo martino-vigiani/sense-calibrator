@@ -7,6 +7,7 @@
 //   source = { subscribe(fn) → unsubscribe, sticks, now() }
 //     `subscribe` notifica ogni nuovo input report; `sticks` è l'ultimo valore
 //     letto ({ lx, ly, rx, ry }); `now()` è il tempo in ms (performance.now).
+//     `reportTime` opzionale è il timestamp dell'ultimo evento HID.
 //   clock = { sleep(ms), setTimeout(fn, ms), clearTimeout(id) }
 //
 // Mai campionare su un timer: i timer della pagina sono throttlati nelle tab in
@@ -27,6 +28,8 @@ export const QUICK_STABLE_TIMEOUT = 5000;
 // 1 LSB del byte di report in unità normalizzate ([-1, 1]).
 export const STICK_LSB = 1 / 127.5;
 export const MAX_REPORT_GAP_MS = 100;
+export const MAX_MEASURE_GAP_RETRIES = 2;
+const sampleTime = source => Number.isFinite(source.reportTime) ? source.reportTime : source.now();
 
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
 // Ritorna false se il segnale non si stabilizza entro `timeoutMs` (o se
@@ -67,7 +70,7 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
     };
     const onSample = () => {
       if (isCancelled?.()) return done(false);
-      const now = source.now();
+      const now = sampleTime(source);
       const sticks = source.sticks;
       // Un report vecchio non prolunga la tenuta: la finestra riparte dopo un
       // buco, anche quando il valore prima e dopo il buco è identico.
@@ -100,7 +103,7 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
           || (Math.hypot(center.lx, center.ly) <= maxRadius && Math.hypot(center.rx, center.ry) <= maxRadius);
         if (centered && nearRef && withinRadius && plausible && maxSpread <= spread) {
           if (now - continuousStart >= holdMs) return done({ center });
-        } else continuousStart = now;
+        }
       }
       if (now - start >= timeoutMs) done(false);
     };
@@ -123,40 +126,52 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
 // della baseline per distinguere una mano in movimento da uno stick che è
 // rumoroso di suo.
 export async function measureOffset(source, clock, ms = 1500, { requireCentered = false } = {}) {
-  const samples = [];
-  const start = source.now();
-  let firstReport = null;
-  let lastReport = null;
-  let stayedCentered = true;
-  const onSample = () => {
-    const now = source.now();
-    if (lastReport !== null && now - lastReport > MAX_REPORT_GAP_MS) {
-      samples.length = 0;
-      firstReport = null;
+  // Un singolo buco invalida solo la finestra corrente. Ogni tentativo ha
+  // una durata e una sottoscrizione proprie: dopo il timeout non si legge né
+  // si campiona più nulla. Il numero di nuove finestre è limitato.
+  for (let attempt = 0; attempt <= MAX_MEASURE_GAP_RETRIES; attempt++) {
+    const samples = [];
+    const start = source.now();
+    let firstReport = null;
+    let lastReport = null;
+    let stayedCentered = true;
+    let gap = false;
+    const onSample = () => {
+      const now = sampleTime(source);
+      if (lastReport !== null && now - lastReport > MAX_REPORT_GAP_MS) {
+        gap = true;
+        samples.length = 0;
+        firstReport = null;
+      }
+      if (firstReport === null) firstReport = now;
+      lastReport = now;
+      const sticks = source.sticks;
+      if (requireCentered && !sticksWithinQuickCenter(sticks)) stayedCentered = false;
+      samples.push({ ...sticks });
+    };
+    const unsubscribe = source.subscribe(onSample);
+    try {
+      await clock.sleep(ms);
+    } finally {
+      unsubscribe();
     }
-    if (firstReport === null) firstReport = now;
-    lastReport = now;
-    const sticks = source.sticks;
-    if (requireCentered && !sticksWithinQuickCenter(sticks)) stayedCentered = false;
-    samples.push({ ...sticks });
-  };
-  const unsubscribe = source.subscribe(onSample);
-  try {
-    await clock.sleep(ms);
-  } finally {
-    unsubscribe();
+    if (gap) {
+      if (attempt < MAX_MEASURE_GAP_RETRIES) continue;
+      return null;
+    }
+    // I 40 report minimi da soli non provano la durata nominale della misura.
+    if (samples.length < 40 || !stayedCentered || firstReport === null
+      || lastReport - firstReport < ms - MAX_REPORT_GAP_MS
+      || source.now() - lastReport > MAX_REPORT_GAP_MS
+      || firstReport - start > MAX_REPORT_GAP_MS) return null;
+    const { stable, fraction } = extractStableSamples(samples);
+    const result = analyzeDrift(stable.length > 40 ? stable : samples);
+    result.stableFraction = fraction;
+    const all = analyzeDrift(samples);
+    result.rawNoise = Math.max(all.left.noise, all.right.noise);
+    return result;
   }
-  // I 40 report minimi da soli non provano la durata nominale della misura.
-  if (samples.length < 40 || !stayedCentered || firstReport === null
-    || lastReport - firstReport < ms - MAX_REPORT_GAP_MS
-    || source.now() - lastReport > MAX_REPORT_GAP_MS
-    || firstReport - start > MAX_REPORT_GAP_MS) return null;
-  const { stable, fraction } = extractStableSamples(samples);
-  const result = analyzeDrift(stable.length > 40 ? stable : samples);
-  result.stableFraction = fraction;
-  const all = analyzeDrift(samples);
-  result.rawNoise = Math.max(all.left.noise, all.right.noise);
-  return result;
+  return null;
 }
 
 // Sorgente minima basata su un Set di listener: la usano la pagina (alimentata
@@ -165,13 +180,15 @@ export function createStickSource(now) {
   const listeners = new Set();
   const source = {
     sticks: { lx: 0, ly: 0, rx: 0, ry: 0 },
+    reportTime: null,
     now,
     subscribe(fn) {
       listeners.add(fn);
       return () => { listeners.delete(fn); };
     },
-    push(sticks) {
+    push(sticks, timestamp = now()) {
       source.sticks = sticks;
+      source.reportTime = timestamp;
       for (const fn of listeners) fn();
     },
     get listenerCount() { return listeners.size; },

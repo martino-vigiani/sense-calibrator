@@ -16,6 +16,7 @@ import {
 } from './calib/measure.js';
 import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
+import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
 import {
@@ -817,6 +818,7 @@ let lastBattery = 0;
 // report HID: continuano ad arrivare anche quando i timer della pagina sono
 // throttlati (finestra in background durante la calibrazione).
 const stickListeners = new Set();
+let lastStickReportAt = null;
 function notifyStickSample() {
   for (const fn of stickListeners) fn();
 }
@@ -829,6 +831,7 @@ const stickSource = {
     return () => { stickListeners.delete(fn); };
   },
   get sticks() { return sticks; },
+  get reportTime() { return lastStickReportAt; },
   now: () => performance.now(),
 };
 // Arrow function, non i riferimenti nudi: `window.setTimeout` chiamato come
@@ -845,6 +848,12 @@ function onInputReport(event) {
   const parsed = parseSticks(event.reportId, event.data);
   if (!parsed) return;
   const d = event.data;
+  const handledAt = performance.now();
+  // Il timestamp dell'evento risale al report, non al momento in cui il main
+  // thread riesce a gestirlo. Rifiutiamo formati epoch o valori impossibili.
+  const eventAt = event.timeStamp;
+  lastStickReportAt = Number.isFinite(eventAt) && eventAt > 0
+    && eventAt <= handledAt + 50 && eventAt >= handledAt - 60_000 ? eventAt : handledAt;
   sticks = parsed;
   notifyStickSample();
   playtest?.feedSample(sticks, performance.now());
@@ -953,6 +962,7 @@ function startDriftTest(auto = false) {
     firstReportAt: null,
     deadline: performance.now() + DRIFT_TEST_MS,
     retries: 0,
+    gapRetries: 0,
     auto,
   };
   const card = $('drift-card');
@@ -966,12 +976,19 @@ function startDriftTest(auto = false) {
 
 function driftSample() {
   const test = driftTest;
-  const now = performance.now();
+  const now = lastStickReportAt ?? performance.now();
   if (test.lastReportAt !== null && now - test.lastReportAt > MAX_REPORT_GAP_MS) {
     // Dopo un buco il test non può unire due tratti separati come se fossero
-    // tre secondi continui di letture.
+    // tre secondi continui di letture. Una singola lacuna riavvia la finestra.
+    if (++test.gapRetries > DRIFT_MAX_RETRIES) {
+      finishDriftTest(null);
+      $('drift-status').textContent = 'Interrupted: stick readings stopped repeatedly. Check the USB connection and run the test again.';
+      return;
+    }
     test.samples = [];
     test.firstReportAt = null;
+    test.deadline = performance.now() + DRIFT_TEST_MS;
+    $('drift-status').textContent = 'Readings paused. Retrying the measurement…';
   }
   if (test.firstReportAt === null) test.firstReportAt = now;
   test.lastReportAt = now;
@@ -1024,6 +1041,8 @@ function evaluateDriftTest() {
     if (driftTest.retries < DRIFT_MAX_RETRIES) {
       driftTest.retries += 1;
       driftTest.samples = [];
+      driftTest.firstReportAt = null;
+      driftTest.lastReportAt = null;
       driftTest.deadline = performance.now() + DRIFT_TEST_MS;
       $('drift-status').textContent = 'Movement detected. Retrying: don’t touch the sticks…';
       if (!driftRaf) driftRaf = requestAnimationFrame(driftTick);
@@ -1187,12 +1206,18 @@ let rangeState = null;
 const TAB_CENTER_LOCK_KEY = 'sense-center-write-lock-in-tab';
 const centerWriteLocks = new Map();
 try {
-  if (tabStore()?.getItem(TAB_CENTER_LOCK_KEY))
-    centerWriteLocks.set(null, { center: null, view: null, reload: true, exempt: new Set() });
+  const previous = tabStore()?.getItem(TAB_CENTER_LOCK_KEY);
+  if (previous)
+    centerWriteLocks.set(null, { center: null, view: null, reload: true,
+      mode: previous === 'guarded' ? 'guarded' : 'disabled', exempt: new Set() });
 } catch { /* storage negato: la pagina corrente conserva comunque i blocchi */ }
 function syncCenterLockFlag() {
   try {
-    if (centerWriteLocks.size) tabStore()?.setItem(TAB_CENTER_LOCK_KEY, '1');
+    if (centerWriteLocks.size) {
+      const disabled = [...centerWriteLocks.values()].some(lock => lock.reload
+        ? lock.mode !== 'guarded' : writeLockFor({ center: lock.center }).mode === 'disabled');
+      tabStore()?.setItem(TAB_CENTER_LOCK_KEY, disabled ? '1' : 'guarded');
+    }
     else tabStore()?.removeItem(TAB_CENTER_LOCK_KEY);
   } catch { /* nessun identificativo viene salvato */ }
 }
@@ -1210,6 +1235,12 @@ function rememberCenterResult(view, key = deviceKey) {
   // Un nuovo risultato completo sostituisce il vecchio solo per lo stesso
   // controller. Su reload non possiamo riconoscere la chiave salata perduta.
   const mode = writeLockFor({ center: view.center }).mode;
+  // Una calibrazione completa e verificata sostituisce il risultato ignoto
+  // ereditato dal reload; i blocchi espliciti di altri controller restano.
+  if (view.center.committed && Number.isFinite(view.center.worst)
+    && !['error', 'unverified', 'stalled', 'moved'].includes(view.outcome)) {
+    if (centerWriteLocks.get(null)?.reload) centerWriteLocks.delete(null);
+  }
   if (mode !== 'allowed' && view.center.outcome !== 'stalled')
     centerWriteLocks.set(key, { center: view.center, view, reload: false, exempt: new Set() });
   else if (mode === 'allowed') {
@@ -1225,10 +1256,14 @@ function reapplyCenterWriteLock() {
   if (lock.center && lock.view) {
     centerState = lock.center;
     lastCenterView = lock.view;
-    showOutcome(lock.view);
+    showOutcome({ ...lock.view, kind: 'previous-result', center: null,
+      title: `Previous result: ${lock.view.title}`,
+      lines: ['This result was measured before the controller disconnected. Run the drift test to check its current state.', ...lock.view.lines] });
   } else {
     showOutcome({ kind: 'reminder', tone: 'warn', title: 'Previous result needs checking',
-      lines: ['Write is off until a new calibration is measured and checked.'],
+      lines: [lock.mode === 'guarded'
+        ? 'Write needs confirmation because a previous result needs checking. Run the drift test before saving.'
+        : 'Write is off until a new calibration is measured and checked.'],
       sticks: [], actions: [], repair: false });
   }
 }
@@ -1262,7 +1297,7 @@ function currentWriteLock() {
     : rangeState;
   return writeLockFor({
     center: centerState ?? centerLockFor(deviceKey)?.center ?? null,
-    centerReload: centerLockFor(deviceKey)?.reload === true,
+    centerReload: centerLockFor(deviceKey)?.reload ? centerLockFor(deviceKey).mode : false,
     range,
     poisoned: !!ds5?.poisoned,
     needsPowerCycle: powerCycleApplies(),
@@ -1533,6 +1568,10 @@ async function doFlash() {
     closeSaveChapter('saved');
     setUnsaved(false);
     markTabUnsaved(false);
+    centerWriteLocks.delete(deviceKey);
+    if (centerWriteLocks.get(null)?.reload) centerWriteLocks.delete(null);
+    syncCenterLockFlag();
+    centerState = null;
     if (nv?.status === 'pending_reboot') {
       toast('Saved. The controller needs a restart: use the "Restart" button.', 5000);
     } else {
@@ -2472,6 +2511,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
       // Angolo non raggiunto: nessuna attesa e nessun campione. Non conta come
       // timeout (non è uno stick che non si ferma).
       w.cornerMisses += 1;
+      w.cornerMissesAtStep += 1;
       const what = gate.missing.length === 2
         ? 'Neither stick reached the corner.'
         : `The ${gate.missing[0]} stick didn’t reach the corner.`;
@@ -2480,7 +2520,13 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
       const short = (gate.axes ?? []).filter(m => m.axes.length === 1)
         .map(m => `the ${m.side} stick needs to go further ${m.axes[0] === 'x' ? 'sideways' : (WIZARD_CORNERS[i].ty < 0 ? 'up' : 'down')}`);
       const hint = short.length ? ` Push all the way into the corner: ${short.join(', and ')}.` : ' Push both sticks all the way into the corner.';
-      wizardShowCorner(i, `<b>${what}</b>${hint} No sample was taken.`);
+      const exit = w.cornerMissesAtStep >= 2
+        ? ' If this corner cannot be reached, choose <b>Stop and turn off controller</b>. No partial sample will be committed.' : '';
+      wizardShowCorner(i, `<b>${what}</b>${hint} No sample was taken.${exit}`);
+      if (w.cornerMissesAtStep >= 2) {
+        $('btn-wizard-cancel').textContent = 'Stop and turn off controller';
+        $('btn-wizard-cancel').classList.remove('hidden');
+      }
     } else {
       wizardTimeout(w, 'The sticks are not resting where they started.');
     }
@@ -2489,6 +2535,8 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   await w.controller.calibSample();
   ensure();
   w.samples += 1;
+  w.cornerMissesAtStep = 0;
+  $('btn-wizard-cancel').classList.add('hidden');
   w.gateTimedOut = false;
   $('btn-wizard-escape').classList.add('hidden');
   if (i < WIZARD_CORNERS.length - 1) {
@@ -2516,7 +2564,8 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   // La mediana di uno stick in movimento può cadere al centro per caso.
   // Conserviamo la frazione stabile prima della sintesi e non la chiamiamo
   // verifica quando la misura grezza non supera il gate del test drift.
-  const after = measuredAfter && measuredAfter.stableFraction >= DRIFT_MIN_STABLE
+  const catastrophic = measuredAfter && Math.max(measuredAfter.left.offset, measuredAfter.right.offset) >= QUICK_CATASTROPHIC_PCT;
+  const after = measuredAfter && (measuredAfter.stableFraction >= DRIFT_MIN_STABLE || catastrophic)
     ? summarizeResult(measuredAfter) : null;
   ensure();
   ops.endOp(w.op);
@@ -2548,10 +2597,17 @@ function wizardResultHtml(cmp, escaped) {
   const rows = cmp.sticks.map(s => `${esc(s.name)}: ${esc(s.beforeLabel)} → <b>${esc(s.afterLabel)}</b>`).join('<br>');
   let tail;
   if (!cmp.measured) tail = 'The result could not be measured (the sticks were moving): check it with the drift test.';
-  else if (cmp.worse) {
+  else if (cmp.afterWorst >= QUICK_CATASTROPHIC_PCT) {
+    tail = '<b>This result reached the 15% safety ceiling.</b> Don’t write it to memory.'
+      + (lastNvStatus === 'locked' ? ' Turn the controller off (hold PS for 10 s), which should discard it.'
+        : ' Run Guided again, releasing both sticks fully before each Continue.');
+  } else if (cmp.worse) {
     // Il consiglio di spegnere solo con la memoria confermata `locked` (C0-11).
     tail = '<b>This is worse than before.</b> Don’t write it to memory'
       + (lastNvStatus === 'locked' ? ': turn the controller off (hold PS for 10 s), which should discard it.' : '.');
+  } else if (cmp.stickWorse?.length) {
+    const changes = cmp.stickWorse.map(s => `${esc(s.name.toLowerCase())} stick ${esc(s.beforeLabel)} → ${esc(s.afterLabel)}`).join(', ');
+    tail = `<b>Per-stick change: ${changes}.</b> The worst stick improved; check this change with the drift test before saving.`;
   } else if (cmp.axisWorse?.length) {
     // Il raggio può migliorare mentre un asse peggiora: va detto per nome.
     const axes = cmp.axisWorse.map(w => `${esc(w.stick.toLowerCase())} ${w.axis}`).join(', ');
@@ -2729,13 +2785,39 @@ function wizardEscape() {
   else $('wizard-msg').innerHTML = note;
 }
 
+// Un angolo irraggiungibile non deve intrappolare l'utente. Non mandiamo
+// calibEnd con campioni mancanti: lasciamo la sessione aperta, blocchiamo
+// altri comandi e chiediamo uno spegnimento vero del controller.
+function stopWizardAtCorner() {
+  const w = wizard;
+  if (!w || w.phase !== 'corner' || w.running || w.cornerMissesAtStep < 2) return;
+  if (!confirm('Stop this calibration and turn the controller off (hold PS for 10 s)? The partial session cannot be saved or continued after stopping. No incomplete calibration will be committed.')) return;
+  w.interrupted = true;
+  w.tracker = null;
+  w.reported = true;
+  markPowerCycle(w.controller, w.key);
+  emitCalibV2(ctx => buildGuidedEvent(ctx, {
+    outcome: 'error', committed: !!w.committed, needsPowerCycle: true,
+    step: w.step, before: w.before, after: null, timeouts: w.timeouts,
+    escaped: w.escaped, durMs: performance.now() - w.startedAt,
+  }), { device: w.device, controller: w.controller, epoch: w.op?.epoch });
+  recordEvent('wizard', { done: false, step: w.step, before: w.before ?? null,
+    samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses,
+    escaped: w.escaped, aborted: 'corner-unreachable' });
+  ops.endOp(w.op);
+  wizard = null;
+  closeModal('modal-wizard');
+  showOutcome(guidedOutcomeView({ before: w.before, error: new Error('The requested corner could not be reached'),
+    committed: !!w.committed, leftOpen: true }, { nvStatus: lastNvStatus }));
+}
+
 function openWizard() {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
   cancelDriftTest();
   wizard = {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
-    samples: 0, timeouts: 0, cornerMisses: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
+    samples: 0, timeouts: 0, cornerMisses: 0, cornerMissesAtStep: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
     running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
@@ -2743,9 +2825,10 @@ function openWizard() {
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
   $('btn-wizard-escape').classList.add('hidden');
-  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started it <b>cannot be cancelled</b>: don’t close the page and don’t disconnect the controller.';
+  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started, keep the page open and the controller connected. If the same corner cannot be reached twice, Stop will ask you to turn the controller off without committing a partial calibration.';
   $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
+  $('btn-wizard-cancel').textContent = 'Cancel';
   resetHandsOff();
   openModal('modal-wizard');
 }
@@ -2813,10 +2896,10 @@ function rangeLockMessage(reason) {
   }
   if (reason === 'error') {
     return 'Writing to memory is disabled: the range calibration failed after it may have changed the controller. '
-      + `Repeat the range calibration before writing.${off}`;
+      + 'If the session may still be open, turn the controller off (hold PS for 10 s) before trying again. Repeat the range calibration before writing.';
   }
   if (reason === 'reload')
-    return 'Writing to memory is disabled: a previous range session may still be incomplete. Complete Range calibration before saving.';
+    return 'Writing to memory is disabled: a previous range session may still be open or incomplete. Turn the controller off (hold PS for 10 s) before trying again, then complete Range calibration before saving.';
   return `Writing to memory is disabled: the range calibration was finished incomplete. Repeat the range calibration.${off}`;
 }
 
@@ -3006,6 +3089,7 @@ async function startRange() {
     if (ds5 === controller) {
       closeModal('modal-range');
       toast(error.maybeReceived ? 'Range start was not confirmed. Write is off until a complete Range calibration.'
+        + ' The session may still be open: turn the controller off (hold PS for 10 s) before trying again.'
         : `Failed to start range calibration: ${error.message}`, 5000);
     }
     return;
@@ -3543,7 +3627,10 @@ $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
 $('btn-quick-go').addEventListener('click', quickCalibrate);
 
 $('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
-$('btn-wizard-cancel').addEventListener('click', () => closeModal('modal-wizard'));
+$('btn-wizard-cancel').addEventListener('click', () => {
+  if (wizard?.phase === 'corner') stopWizardAtCorner();
+  else closeModal('modal-wizard');
+});
 $('btn-wizard-next').addEventListener('click', wizardNext);
 $('btn-wizard-escape').addEventListener('click', wizardEscape);
 

@@ -236,6 +236,52 @@ test('catastrophic, then an already-centered Quick: Write is enabled again and t
   assert.ok(h.$('banner-lock').classList.contains('hidden'));
 });
 
+test('N3: guarded reload lock stays guarded and confirmed save clears its tab flag', async () => {
+  const session = new Map([['sense-center-write-lock-in-tab', 'guarded']]);
+  const clock = new VClock();
+  const A = makeDevice(clock, { drift: DRIFTING });
+  const h = await loadApp({ clock, authorized: [A], session });
+  await h.advance(5000);
+  assert.equal(h.eval('currentWriteLock().mode'), 'guarded');
+  assert.equal(h.$('btn-flash').disabled, false);
+  await h.click('btn-flash');
+  h.$('flash-ack').checked = true;
+  h.$('flash-ack').dispatch('change');
+  await h.run(h.click('btn-flash-go'));
+  assert.equal(session.has('sense-center-write-lock-in-tab'), false);
+  assert.equal(h.eval('currentWriteLock().mode'), 'allowed');
+});
+
+test('N3: a complete new center result clears a reload-only flag', async () => {
+  const session = new Map([['sense-center-write-lock-in-tab', '1']]);
+  const clock = new VClock();
+  const A = makeDevice(clock, { drift: DRIFTING });
+  const h = await loadApp({ clock, authorized: [A], session });
+  await h.advance(5000);
+  assert.equal(h.$('btn-flash').disabled, true);
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  assert.equal(h.eval('centerState?.outcome'), 'centered');
+  assert.equal(session.has('sense-center-write-lock-in-tab'), false);
+  assert.equal(h.$('btn-flash').disabled, false);
+});
+
+test('N3: reconnect labels a locked outcome as the previous result', async () => {
+  const clock = new VClock();
+  const A = withSerial(makeDevice(clock, { drift: DRIFTING }), 'PREVIOUS-A');
+  const h = await loadApp({ clock, authorized: [A], chooser: [A] });
+  await h.advance(5000);
+  h.eval(`showOutcome(quickOutcomeView({ outcome: 'worse-than-start', worst: 4, beforeWorst: 2,
+    bestWorst: 2, committed: true, session: {} }))`);
+  h.confirmAnswer = true;
+  await h.run(h.click('btn-disconnect'));
+  A.open(); A.stopped = false; A.schedule();
+  await h.run(h.click('btn-connect'));
+  await h.advance(5000);
+  assert.match(h.$('calib-outcome').innerHTML, /Previous result: Worse than when you started/);
+  assert.equal(h.eval('currentWriteLock().mode'), 'guarded');
+});
+
 // ---- Review 2: segno scritto prima di calibBegin, avvio senza risposta,
 // Restart che non arriva al controller. Tutto model-verified.
 

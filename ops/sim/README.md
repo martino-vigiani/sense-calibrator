@@ -30,7 +30,7 @@ input reports use while a calibration session is open).
 | `variants.mjs` | Named `params` overrides; `baseline` must stay empty. `legacyStop` restores the stop rule before quick-stopping-policy (paired comparisons, pre-refactor goldens); `plateau1` is the plateau-continuation candidate |
 | `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
-| `equivalence.mjs` | Runs the pre-refactor harness and `runQuick` on the same sessions and diffs them. `--restricted 1` (release gate 2) compares only the sessions no WS1 rule can touch (`untouchedByWs1`, shared with `test/sim-equivalence.test.js`) and allows only the WS2 outcome changes in `ALLOWED_OUTCOME_CHANGES` |
+| `equivalence.mjs` | Gate 2 (`--restricted 1`) compares every field of 400 normal and 400 hold synthetic sessions, seed 7, to the reviewed module golden, excluding only telemetry-only `passXY`. The full historical pre-refactor comparison remains available without `--restricted`. `restrictedCompare` and `ALLOWED_OUTCOME_CHANGES` describe that historical diagnostic, not an equivalence claim for the new timing. |
 | `release-gates.mjs` | Release gates of the plan §4.2 in one command: builds the baseline (and optionally WS1) tree with `git archive` plus this `ops/sim`, runs the fit × seed × scenario matrix on both trees (cached by a source hash), and prints every number next to its threshold with PASS/FAIL, plus gate 2 (restricted equivalence), gate 4 (real-data replay) and gate 5 (report v2 figures) |
 | `report-figures.mjs` | Gate 5: builds the quality report v2 from `SENSE_TELEMETRY` (PG, PGP, ALL, MC, boards, lattice) plus the replay's converged-worse count, and compares each with the plan §1 figure; prints aggregates only |
 | `range-sweep.mjs` | WS7: range coverage of one synthetic turn (8-bit quantized, stored range 0.8–1.4× off, 60/250 Hz), old rule against `js/calib/range-coverage.js`. No telemetry |
@@ -44,6 +44,26 @@ The telemetry file is gitignored and never enters the repository, not even in
 derived form. Scripts read it from `SENSE_TELEMETRY`, or from
 `data/telemetry/sessions.jsonl` in the checkout. `npm test` uses only the
 synthetic population and committed golden files, so it runs in CI.
+
+### Gate 2 rebaseline (second audit, 2026-09-28)
+
+The 300 ms fully observed hold changes the phase of synthetic noise even for
+sessions once called `untouchedByWs1`. With the old pre-refactor reference,
+1,016 of 1,031 restricted real-template sessions changed fields; 29 changed
+outcome (`centered → within-1-step` 22, `centered → preflight` 4,
+`centered → worn` 3). Those differences are **model-verified**, not hardware
+evidence and not a pass of the old equivalence criterion. The explicit
+`ALLOWED_OUTCOME_CHANGES` checks require a measured one-step result, a
+preflight with no Begin, or noise above the worn threshold respectively.
+The revised gate pins the corrected algorithm on 800 synthetic sessions and
+compares before/after medians, pass counts, gate values, command counts,
+true residual and outcomes field by field. Regenerate only after reviewing a
+deliberate algorithm change:
+
+```sh
+node ops/sim/equivalence.mjs --restricted 1 --refresh-golden 1
+node ops/sim/equivalence.mjs --restricted 1
+```
 
 ## Commands
 
@@ -77,11 +97,11 @@ node ops/sim/release-gates.mjs --baseline 57621c0 --ws1 26732b0 --dir /tmp/sense
 node ops/sim/release-gates.mjs --baseline 57621c0 --dir /tmp/sense-gates \
   --params '{"refToleranceLsb":1000}' --runs-only normal,one-step
 
-# refactor equivalence against the pre-refactor app.js (full, then restricted to
-# the sessions no WS1 rule can touch)
+# Historical pre-refactor comparison (diagnostic; full equivalence no longer
+# expected after the 300 ms hold). Gate 2 uses the corrected synthetic golden.
 node ops/sim/equivalence.mjs --n 1785 --workers 4
 node ops/sim/equivalence.mjs --n 714 --scenario hold --workers 4
-node ops/sim/equivalence.mjs --n 1785 --workers 4 --restricted 1
+node ops/sim/equivalence.mjs --restricted 1
 ```
 
 `replay-sequences.mjs` also prints `convergedWorse`: the sessions the previous

@@ -474,9 +474,11 @@ export async function runQuick({
         ensureCurrent();
         if (r && !stableEnough(r))
           log(`Pass ${pass}: verification unsettled (noise ${Math.max(r.left.noise, r.right.noise).toFixed(1)}%, at rest ${beforeNoise.toFixed(1)}%).`);
+        // Anche una misura instabile sopra il tetto non può diventare un
+        // risultato positivo solo perché la frazione stabile è bassa.
+        if (r && Math.max(r.left.offset, r.right.offset) >= p.catastrophicPct) implausible = r;
         if (!r || !stableEnough(r)) continue;
         if (Math.max(r.left.offset, r.right.offset) < p.catastrophicPct) result = r;
-        else if (!released) implausible = r;
       }
       onProgress({ bar: base + 100 / p.maxPasses });
       if (!result && implausible) {
@@ -564,12 +566,9 @@ export async function runQuick({
     // risultato un numero che non è il migliore ottenuto.
     const maxNoise = result && worst !== null ? Math.max(result.left.noise, result.right.noise) : null;
     let outcome = stop ?? classifyOutcome({ worst, beforeWorst, bestWorst, maxNoise, unstableEvents: session.unstableEvents, passes: session.passes }, p);
-    // Il massimo può migliorare mentre lo stick prima sano peggiora molto.
-    // Il firmware monta entrambi: il confronto con l'inizio è per stick.
-    if (stop === null && result && [
-      result.left.offset - before.left.offset,
-      result.right.offset - before.right.offset,
-    ].some(delta => delta > p.regressionEps) && outcome !== 'catastrophic') outcome = 'worse-than-start';
+    // Il verdetto principale confronta il peggiore dei due stick: un altro
+    // stick può peggiorare pur restando molto meglio del peggiore iniziale.
+    // Il pannello lo segnala separatamente prima di Write.
     return { session, outcome, committed: true, worst, beforeWorst, bestWorst };
   } catch (error) {
     // La RAM del controller è cambiata se una passata precedente ha già chiuso

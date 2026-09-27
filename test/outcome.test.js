@@ -26,18 +26,32 @@ const summary = (off, { noise = [0.2, 0.2], xy = null } = {}) => ({
   xy: xy ?? off.map(o => [o, 0]),
 });
 
-test('audit 11: Quick and Guided guard Write when the formerly good stick worsens', () => {
-  const before = summary([10, 0.555]);
-  const after = summary([0.555, 9]);
+test('B1: a worsened stick below the starting worst is a named caution, not a worse-than-start result', () => {
+  const before = summary([9.03, 0.555]);
+  const after = summary([0.555, 2]);
   for (const view of [
-    quickOutcomeView({ outcome: 'residual', worst: 9, beforeWorst: 10, bestWorst: 9,
+    quickOutcomeView({ outcome: 'residual', worst: 2, beforeWorst: 9.03, bestWorst: 2,
       committed: true, session: { before, after } }),
     guidedOutcomeView({ before, after, committed: true }),
   ]) {
-    assert.equal(view.outcome, 'worse-than-start');
+    assert.equal(view.outcome, 'residual');
     assert.equal(writeLockFor({ center: view.center }).mode, 'guarded');
-    assert.match(textOf(view), /right stick|right/i);
+    assert.ok(writeLockFor({ center: view.center }).reasons.some(r => r.code === 'stick-worse'));
+    assert.match(textOf(view), /Per-stick change: right stick 0\.6%.* → 2\.0%/i);
+    assert.doesNotMatch(textOf(view), /Worse than when you started|Don’t write this to memory/);
   }
+});
+
+test('N4: a failed Range that may be open requires a power cycle before retry', () => {
+  const failed = rangeOutcomeView({ error: new Error('lost reply'), leftOpen: true });
+  assert.match(textOf(failed), /turn the controller off \(hold PS for 10 s\) before trying again/i);
+  assert.equal(writeLockFor({ range: failed.range }).mode, 'disabled');
+});
+
+test('N3: a reload preserves a guarded center lock as guarded', () => {
+  const lock = writeLockFor({ centerReload: 'guarded' });
+  assert.equal(lock.mode, 'guarded');
+  assert.equal(lock.reasons[0].code, 'center-reload-guarded');
 });
 
 test('audit 11: a centered Guided result still names a worsened axis before saving', () => {

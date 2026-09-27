@@ -39,7 +39,7 @@
 
 import { DRIFT_MIN_STABLE, DRIFT_MOVE_SPREAD } from './measure.js';
 import { QUICK_STABLE_SPREAD, STICK_LSB, waitForStable } from './sampling.js';
-import { CENTERED_MAX, formatOffset } from './lattice.js';
+import { CENTERED_MAX, FLOOR_PCT, formatOffset } from './lattice.js';
 
 export const WIZARD_DEFAULTS = Object.freeze({
   spread: QUICK_STABLE_SPREAD,
@@ -280,6 +280,7 @@ export function wizardComparison(before, after, params = {}) {
     afterWorst,
     measured,
     worse: measured && afterWorst - beforeWorst > p.worseEps,
+    stickWorse: sticks.filter(s => s.after !== null && s.after > FLOOR_PCT + 0.01 && s.delta > p.worseEps),
     centered: afterWorst !== null && afterWorst < CENTERED_MAX,
     axisWorse: axisWorsening(before, after, params),
   };
@@ -298,7 +299,10 @@ export function axisWorsening(before, after, params = {}) {
     ['X', 'Y'].forEach((axis, j) => {
       const bv = b[i]?.[j], av = a[i]?.[j];
       if (!Number.isFinite(bv) || !Number.isFinite(av)) return;
-      if (Math.abs(av) - Math.abs(bv) > p.worseEps) out.push({ stick, axis, before: bv, after: av });
+      // La mediana di un asse può essere 0 fra i byte 127 e 128: un asse
+      // ancora entro il pavimento del reticolo non è peggiorato davvero.
+      if (Math.abs(av) > FLOOR_PCT + 0.01 && Math.abs(av) - Math.abs(bv) > p.worseEps)
+        out.push({ stick, axis, before: bv, after: av });
     });
   });
   return out;

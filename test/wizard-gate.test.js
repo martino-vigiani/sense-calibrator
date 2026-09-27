@@ -346,3 +346,14 @@ test('an axis that moved away from center is reported even when the stick improv
   assert.deepEqual(axisWorsening({ xy: [[0.4, 0.4], [0.4, 0.4]] }, { xy: [[1.18, 0.4], [0.4, 0.4]] }), []);
   assert.deepEqual(axisWorsening(null, after), []);
 });
+
+test('B1/N6: floor medians do not trigger axis worsening, while a milder stick change stays separate', () => {
+  const before = { off: [9.03, 0.555], xy: [[9.03, 0], [0, 0]] };
+  const after = { off: [0.555, 2], xy: [[0.392, 0.392], [2, 0]] };
+  const cmp = wizardComparison(before, after);
+  assert.equal(cmp.worse, false);
+  assert.deepEqual(cmp.stickWorse.map(s => s.name), ['Right']);
+  assert.deepEqual(axisWorsening({ xy: [[0, 0], [0, 0]] }, { xy: [[0.555, 0], [0, 0]] }), []);
+  assert.deepEqual(axisWorsening({ xy: [[0, 0], [0, 0]] }, { xy: [[0.555, 0], [0, 0]] }, { worseEps: 0 }), []);
+  assert.deepEqual(axisWorsening(before, after), [{ stick: 'Right', axis: 'X', before: 0, after: 2 }]);
+});
