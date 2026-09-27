@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # pull-telemetry.sh — rsync calibration telemetry from the VPS into data/telemetry/
-#   sessions.jsonl   v1 (complete Quick sessions)
-#   events-v2.jsonl  v2 events (from the v2 release on; skipped while it does not exist)
 # Usage: ./scripts/pull-telemetry.sh
+#   sessions.jsonl   v1 (one line per complete Quick calibration)
+#   events-v2.jsonl  v2 events (quick, guided, range, flash, save, rest)
 set -euo pipefail
 
 REMOTE_USER="martino"
@@ -17,11 +17,11 @@ rsync -az --progress \
   "${LOCAL_DIR}/sessions.jsonl"
 echo "v1 lines received: $(wc -l < "${LOCAL_DIR}/sessions.jsonl")"
 
-if ssh "${REMOTE_USER}@${REMOTE_HOST}" test -f "${REMOTE_DIR}/events-v2.jsonl"; then
-  rsync -az --progress \
-    "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/events-v2.jsonl" \
-    "${LOCAL_DIR}/events-v2.jsonl"
+# Il file v2 nasce alla prima richiesta valida dopo il deploy del 27 set 2026:
+# finché non esiste, la sua assenza non è un errore.
+if rsync -az "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/events-v2.jsonl" \
+     "${LOCAL_DIR}/events-v2.jsonl" 2>/dev/null; then
   echo "v2 lines received: $(wc -l < "${LOCAL_DIR}/events-v2.jsonl")"
 else
-  echo "v2: no events-v2.jsonl on the server yet"
+  echo "v2 events: none on the server yet"
 fi
