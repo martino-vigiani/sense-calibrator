@@ -102,6 +102,33 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         "$ref": "#/$defs/Percent"
       }
     },
+    "HalfLsb": {
+      "description": "Signed axis residual in half-LSB units of the 8-bit stick report (1 = 0.5 LSB = 0.392% of full travel; bytes 127 and 128 map to -1 and +1). Clamped to 64 LSB in either direction.",
+      "type": "integer",
+      "minimum": -128,
+      "maximum": 128
+    },
+    "AxisPair": {
+      "description": "[x, y] signed residuals for one stick, in half-LSB units.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/HalfLsb"
+      }
+    },
+    "StickAxes": {
+      "description": "[[left x, left y], [right x, right y]] signed residuals from the per-axis median, or null when not measured.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/AxisPair"
+      }
+    },
     "DurationS": {
       "description": "Whole seconds, capped at one hour.",
       "type": "integer",
@@ -224,8 +251,11 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         "needsPowerCycle",
         "truncated",
         "before",
+        "beforeAxes",
         "after",
+        "afterAxes",
         "passes",
+        "passAxes",
         "durS"
       ],
       "properties": {
@@ -292,8 +322,14 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         "before": {
           "$ref": "#/$defs/StickPair"
         },
+        "beforeAxes": {
+          "$ref": "#/$defs/StickAxes"
+        },
         "after": {
           "$ref": "#/$defs/StickPair"
+        },
+        "afterAxes": {
+          "$ref": "#/$defs/StickAxes"
         },
         "passes": {
           "description": "Verified worst offset after each pass, null for an unverified pass.",
@@ -306,6 +342,14 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
             ],
             "minimum": 0,
             "maximum": 200
+          }
+        },
+        "passAxes": {
+          "description": "Per-axis residual after each Quick pass, in the same order and count as passes; null for an unverified pass.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/StickAxes"
           }
         },
         "durS": {
@@ -330,7 +374,9 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         "needsPowerCycle",
         "step",
         "before",
+        "beforeAxes",
         "after",
+        "afterAxes",
         "timeouts",
         "escaped",
         "durS"
@@ -379,8 +425,14 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         "before": {
           "$ref": "#/$defs/StickPair"
         },
+        "beforeAxes": {
+          "$ref": "#/$defs/StickAxes"
+        },
         "after": {
           "$ref": "#/$defs/StickPair"
+        },
+        "afterAxes": {
+          "$ref": "#/$defs/StickAxes"
         },
         "timeouts": {
           "$ref": "#/$defs/Count"

@@ -300,6 +300,21 @@ test('an unverified pass is excluded from bestWorst, cannot converge, and the ne
   assert.deepEqual(h.events.slice(firstEnd + 1, firstEnd + 4), ['verify', 'hold', 'verify']);
 });
 
+test('an unverified Quick pass keeps a null axis slot before the next measured pass', async () => {
+  // Regressione telemetry v2: senza la posizione nulla, gli assi della seconda
+  // verifica verrebbero attribuiti alla prima passata non verificata.
+  const measured = {
+    left: { offset: 2, noise: 0.2, x: 0.02, y: -0.01 },
+    right: { offset: 0.6, noise: 0.2, x: -0.006, y: 0 },
+  };
+  const h = scripted({ verifies: [null, null, measured] });
+
+  const { session } = await h.run({ params: { maxPasses: 2 } });
+
+  assert.deepEqual(session.passes, [null, 2], 'the first verification has no trusted radius');
+  assert.deepEqual(session.passXY, [null, [[2, -1], [-0.6, 0]]], 'axis readings stay aligned to pass 2');
+});
+
 test('a failed hold before pass 2 sends nothing more and reports the applied pass-1 result', async () => {
   // tenute: preflight, passata 1, passata 2 (fallisce)
   const h = scripted({ holds: [true, true, false], verifies: [middling] });

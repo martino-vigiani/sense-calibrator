@@ -12,6 +12,9 @@
 //      p95 e massimo della distanza dalla mediana, escursioni al minuto,
 //      offset della mediana, cadenza dei report; per scheda e per stato
 //      (prima della calibrazione, non salvata, salvata).
+//   3. Quale asse conserva il residuo? Valore finale firmato per asse e scheda;
+//      passate Quick adiacenti che ripetono lo stesso valore non nullo, senza
+//      confondere una norma radiale uguale con lo stesso asse e segno.
 //
 // Solo aggregati: mai un sid, un seq o un evento singolo in uscita. Ogni riga
 // passa dal validatore del contratto (lo stesso del server e della pagina):
@@ -24,6 +27,9 @@ export const DEFAULT_EVENTS_CONFIG = Object.freeze({ minimumCohortSize: 5, since
 
 const CALIB_TYPES = new Set(['quick', 'guided', 'range']);
 const P95_BUCKETS = [0.5, 1, 1.5, 2, 3, 4, 6, 8, 10];
+const AXES = Object.freeze([
+  ['lx', 0, 0], ['ly', 0, 1], ['rx', 1, 0], ['ry', 1, 1],
+]);
 
 const round = (value, digits = 3) => (value === null ? null : Math.round(value * 10 ** digits) / 10 ** digits);
 function quantiles(values) {
@@ -41,6 +47,95 @@ function histogram(values, edges) {
   return bins;
 }
 const inc = (obj, key, by = 1) => { obj[key] = (obj[key] ?? 0) + by; };
+const axisValue = (measurement, stick, axis) => {
+  const value = measurement?.[stick]?.[axis];
+  return Number.isInteger(value) ? value : null;
+};
+
+// I vecchi eventi v2, già raccolti prima dell'aggiunta degli assi, non
+// contengono nessuno dei nuovi campi. Completiamo solo quel formato intero:
+// una riga parziale o con valori fuori contratto continua a essere scartata.
+function withLegacyAxes(event) {
+  if (event.type === 'quick' && ['beforeAxes', 'afterAxes', 'passAxes'].every(k => !Object.hasOwn(event, k))) {
+    return { event: { ...event, beforeAxes: null, afterAxes: null, passAxes: Array.isArray(event.passes) ? event.passes.map(() => null) : [] }, legacy: true };
+  }
+  if (event.type === 'guided' && ['beforeAxes', 'afterAxes'].every(k => !Object.hasOwn(event, k))) {
+    return { event: { ...event, beforeAxes: null, afterAxes: null }, legacy: true };
+  }
+  return { event, legacy: false };
+}
+
+function finalAxisBlock(list, minimum) {
+  const rows = list.filter(e => AXES.some(([, stick, axis]) => axisValue(e.afterAxes, stick, axis) !== null));
+  const base = { events: list.length, withMeasurement: rows.length };
+  if (rows.length < minimum) return { ...base, suppressed: true };
+  const byAxis = {};
+  for (const [name, stick, axis] of AXES) {
+    const values = rows.map(e => axisValue(e.afterAxes, stick, axis)).filter(v => v !== null);
+    if (values.length < minimum) { byAxis[name] = { n: values.length, suppressed: true }; continue; }
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+    byAxis[name] = {
+      n: values.length,
+      negative: values.filter(v => v < 0).length,
+      zero: values.filter(v => v === 0).length,
+      positive: values.filter(v => v > 0).length,
+      distribution: [...counts].sort(([a], [b]) => a - b).map(([halfLsb, n]) => ({ halfLsb, n })),
+    };
+  }
+  return { ...base, byAxis };
+}
+
+function quickRepeatBlock(list, minimum) {
+  const axes = Object.fromEntries(AXES.map(([name]) => [name, { comparablePairs: 0, bothNonzeroPairs: 0, exactRepeats: 0 }]));
+  const runs = { comparable: 0, eligible: 0, withExactRepeat: 0 };
+  const adjacentPairs = { comparable: 0, withBothNonzero: 0, withExactRepeat: 0 };
+  for (const event of list) {
+    let runComparable = false;
+    let runEligible = false;
+    let runRepeat = false;
+    for (let i = 1; i < event.passes.length; i++) {
+      // Un passaggio senza verifica non forma una coppia, anche se la misura
+      // firmata fosse presente per errore: l'esito osservabile è il vincolo.
+      if (event.passes[i - 1] === null || event.passes[i] === null) continue;
+      let pairComparable = false;
+      let pairEligible = false;
+      let pairRepeat = false;
+      for (const [name, stick, axis] of AXES) {
+        const previous = axisValue(event.passAxes?.[i - 1], stick, axis);
+        const current = axisValue(event.passAxes?.[i], stick, axis);
+        if (previous === null || current === null) continue;
+        pairComparable = true;
+        axes[name].comparablePairs++;
+        if (previous !== 0 && current !== 0) {
+          pairEligible = true;
+          axes[name].bothNonzeroPairs++;
+          if (previous === current) {
+            pairRepeat = true;
+            axes[name].exactRepeats++;
+          }
+        }
+      }
+      if (pairComparable) { adjacentPairs.comparable++; runComparable = true; }
+      if (pairEligible) { adjacentPairs.withBothNonzero++; runEligible = true; }
+      if (pairRepeat) { adjacentPairs.withExactRepeat++; runRepeat = true; }
+    }
+    if (runComparable) runs.comparable++;
+    if (runEligible) runs.eligible++;
+    if (runRepeat) runs.withExactRepeat++;
+  }
+  const base = { quickRuns: list.length, eligibleRuns: runs.eligible };
+  if (runs.eligible < minimum) return { ...base, suppressed: true };
+  return {
+    ...base,
+    runs: { ...runs, rateAmongEligible: round(runs.withExactRepeat / runs.eligible) },
+    adjacentPairs: { ...adjacentPairs, rateAmongBothNonzero: round(adjacentPairs.withExactRepeat / adjacentPairs.withBothNonzero) },
+    byAxis: Object.fromEntries(Object.entries(axes).map(([name, counts]) => [name, {
+      ...counts,
+      rateAmongBothNonzero: counts.bothNonzeroPairs >= minimum ? round(counts.exactRepeats / counts.bothNonzeroPairs) : null,
+    }])),
+  };
+}
 
 // Perché un periodo non si è chiuso con un salvataggio. L'ordine conta: un
 // flash tentato e fallito spiega più di un Cancel precedente.
@@ -60,7 +155,7 @@ function rateBlock(counts, minimum) {
 }
 
 export function parseEventLines(text, { since = null } = {}) {
-  const input = { lines: 0, blank: 0, invalidJson: 0, invalidEvent: 0, beforeCutoff: 0, accepted: 0 };
+  const input = { lines: 0, blank: 0, invalidJson: 0, invalidEvent: 0, beforeCutoff: 0, accepted: 0, legacyAxes: 0 };
   const events = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) { input.blank += 1; continue; }
@@ -69,13 +164,15 @@ export function parseEventLines(text, { since = null } = {}) {
     try { record = JSON.parse(line); } catch { input.invalidJson += 1; continue; }
     if (!record || typeof record !== 'object' || Array.isArray(record)) { input.invalidEvent += 1; continue; }
     // Il server aggiunge solo il giorno di ricezione; tutto il resto è l'evento.
-    const { receivedDay, ...event } = record;
+    const { receivedDay, ...rawEvent } = record;
+    const { event, legacy } = withLegacyAxes(rawEvent);
     if (typeof receivedDay !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(receivedDay) || validateEventV2(event) !== null) {
       input.invalidEvent += 1;
       continue;
     }
     if (since && receivedDay < since) { input.beforeCutoff += 1; continue; }
     input.accepted += 1;
+    if (legacy) input.legacyAxes += 1;
     events.push({ ...event, receivedDay });
   }
   return { input, events };
@@ -96,6 +193,8 @@ export function buildEventsReport(text, options = {}) {
   const save2 = { opensFromBlock: 0, opensFromReminder: 0, cancels: 0, periodsWithReminderOpen: 0, periods: 0 };
   const flash = { byResult: {}, byNv: {}, byLock: {}, attempts: {} };
   const restAll = [];
+  const finalAxes = [];
+  const quickForRepeats = [];
 
   for (const list of bySid.values()) {
     list.sort((a, b) => a.seq - b.seq);
@@ -118,6 +217,8 @@ export function buildEventsReport(text, options = {}) {
       } else if (e.type === 'rest') {
         restAll.push(e);
       } else if (CALIB_TYPES.has(e.type)) {
+        if (e.type === 'quick' || e.type === 'guided') finalAxes.push(e);
+        if (e.type === 'quick') quickForRepeats.push(e);
         const key = `${e.type}:${e.outcome}`;
         if (!e.committed) { inc(calibrations.notCommitted, key); continue; }
         inc(calibrations.byTypeOutcome, key);
@@ -177,6 +278,11 @@ export function buildEventsReport(text, options = {}) {
     for (const e of list) (out[key(e)] ??= []).push(e);
     return Object.fromEntries(Object.entries(out).sort().map(([k, v]) => [k, restBlock(v)]));
   };
+  const axisGroupBy = (list, key, block) => {
+    const out = {};
+    for (const e of list) (out[key(e)] ??= []).push(e);
+    return Object.fromEntries(Object.entries(out).sort().map(([k, v]) => [k, block(v, config.minimumCohortSize)]));
+  };
 
   return {
     schema: EVENTS_REPORT_SCHEMA,
@@ -214,6 +320,18 @@ export function buildEventsReport(text, options = {}) {
       byState: groupBy(restAll, e => e.state),
       byContext: groupBy(restAll, e => e.ctx),
     },
+    residualAxes: {
+      unit: 'signed half-LSB per axis (2 units = 1 HID byte step = 0.784%)',
+      final: {
+        all: finalAxisBlock(finalAxes, config.minimumCohortSize),
+        byBoard: axisGroupBy(finalAxes, e => e.board ?? 'unknown', finalAxisBlock),
+      },
+      quickPassRepeats: {
+        definition: 'adjacent verified passes; exact same nonzero signed value on the same axis',
+        all: quickRepeatBlock(quickForRepeats, config.minimumCohortSize),
+        byBoard: axisGroupBy(quickForRepeats, e => e.board ?? 'unknown', quickRepeatBlock),
+      },
+    },
   };
 }
 
@@ -224,6 +342,7 @@ export async function createEventsReportFromFile({ inputPath, ...options }) {
 export function formatEventsSummary(report) {
   const q = report.saving.byType.quick;
   const rest = report.restNoise.all;
+  const repeats = report.residualAxes.quickPassRepeats.all;
   const pct = v => (v === null || v === undefined ? 'n/a' : `${(v * 100).toFixed(1)}%`);
   return [
     `events ${report.input.accepted} (invalid ${report.input.invalidEvent + report.input.invalidJson})`,
@@ -231,5 +350,6 @@ export function formatEventsSummary(report) {
     `quick saved ${q ? `${q.saved}/${q.n} (${pct(q.saveRate)})` : 'n/a'}`,
     `rest windows ${rest.n}`,
     rest.suppressed ? 'noise suppressed' : `right p95 median ${rest.right.p95Lsb.p50} LSB`,
+    repeats.suppressed ? `axis repeats suppressed (${repeats.eligibleRuns} eligible Quick runs)` : `axis repeats ${repeats.runs.withExactRepeat}/${repeats.runs.eligible} eligible Quick runs (${pct(repeats.runs.rateAmongEligible)})`,
   ].join(' · ');
 }

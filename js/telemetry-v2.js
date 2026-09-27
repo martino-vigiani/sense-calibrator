@@ -13,8 +13,8 @@
 // il confronto dei KPI: le sessioni Quick complete partono su v1 E su v2.
 //
 // Privacy per costruzione: nessun seriale, chiave del controller, testo libero
-// o orario del client. `sid` è casuale per caricamento di pagina (lo stesso
-// SESSION_ID degli eventi locali), `seq` ordina gli eventi della visita, `app`
+// o orario del client. `sid` è casuale per caricamento di pagina e distinto
+// dal SESSION_ID degli eventi locali; `seq` ordina gli eventi della visita, `app`
 // è la data della release. Il giorno di ricezione lo aggiunge il server.
 
 import { EVENTS_V2_SCHEMA } from './telemetry-v2-schema.js';
@@ -26,7 +26,7 @@ export const TELEMETRY_APP_BUILD = 20260927;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una
 // più nuova, l'avviso ricompare prima che partano le categorie nuove.
-export const TELEMETRY_SCOPE = 2;
+export const TELEMETRY_SCOPE = 3;
 
 /* ------------------------------ validatore ------------------------------ */
 
@@ -117,7 +117,16 @@ function check(root, schema, value, path, errors) {
 // Ritorna null se l'evento rispetta il contratto, altrimenti il primo errore.
 export function validateEventV2(event, schema = EVENTS_V2_SCHEMA) {
   const errors = [];
-  return check(schema, schema, event, '$', errors) ? null : (errors[0] ?? '$: invalid');
+  if (!check(schema, schema, event, '$', errors)) return errors[0] ?? '$: invalid';
+  if (event.type === 'quick') {
+    // Il sottoinsieme JSON Schema condiviso non confronta lunghezze tra campi:
+    // questa verifica evita di attribuire un asse alla passata sbagliata.
+    if (event.passAxes.length !== event.passes.length) return '$.passAxes: must match passes length';
+    if (event.passes.some((value, i) => value === null && event.passAxes[i] !== null)) {
+      return '$.passAxes: unverified pass must be null';
+    }
+  }
+  return null;
 }
 
 /* ------------------------------ builders ------------------------------ */
@@ -135,6 +144,14 @@ const pair = result => {
   if (!Array.isArray(off) || off.length !== 2 || !off.every(isNum)) return null;
   return [pct(off[0]), pct(off[1])];
 };
+// La mediana di un numero pari di report può cadere tra due byte: l'intero
+// in mezzi LSB conserva quel valore e il segno. `xy` è già misurato in % da
+// summarizeResult; 2.55 converte 1% in 2.55 mezzi LSB, senza altri report HID.
+const axesFromXY = xy => {
+  if (!Array.isArray(xy) || xy.length !== 2 || !xy.every(stick => Array.isArray(stick) && stick.length === 2 && stick.every(isNum))) return null;
+  return xy.map(stick => stick.map(value => clamp(Math.round(value * 2.55), -128, 128)));
+};
+const axes = result => axesFromXY(result?.xy);
 const seconds = ms => (isNum(ms) ? clamp(Math.round(ms / 1000), 0, 3600) : 0);
 const count = (value, max = 50) => (Number.isInteger(value) ? clamp(value, 0, max) : 0);
 const board = value => (BOARDS.has(value) ? value : null);
@@ -165,8 +182,11 @@ export function buildQuickEvent(ctx, { session, outcome, start = 'normal', commi
     needsPowerCycle: needsPowerCycle === true,
     truncated: session?.truncated != null,
     before: pair(session?.before),
+    beforeAxes: axes(session?.before),
     after: pair(session?.after),
+    afterAxes: axes(session?.after),
     passes,
+    passAxes: passes.map((value, i) => value === null ? null : axesFromXY(session?.passXY?.[i])),
     durS: seconds(durMs),
   };
 }
@@ -180,7 +200,9 @@ export function buildGuidedEvent(ctx, { outcome, committed, needsPowerCycle, ste
     needsPowerCycle: needsPowerCycle === true,
     step: Number.isInteger(step) ? clamp(step, 0, 5) : 0,
     before: pair(before),
+    beforeAxes: axes(before),
     after: pair(after),
+    afterAxes: axes(after),
     timeouts: count(timeouts),
     escaped: escaped === true,
     durS: seconds(durMs),

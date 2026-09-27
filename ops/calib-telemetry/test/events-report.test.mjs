@@ -13,7 +13,14 @@ import { parseArgs, runCli } from '../events-report-cli.mjs';
 const FIXTURES = JSON.parse(fs.readFileSync(new URL('../contract/events-v2.fixtures.json', import.meta.url), 'utf8'));
 const base = type => structuredClone(FIXTURES.valid.find(f => f.event.type === type).event);
 
-const quick = (sid, seq, extra = {}) => ({ ...base('quick'), sid, seq, ...extra });
+const quick = (sid, seq, extra = {}) => {
+  const e = { ...base('quick'), sid, seq, ...extra };
+  if (!Object.hasOwn(extra, 'beforeAxes')) e.beforeAxes = null;
+  if (!Object.hasOwn(extra, 'afterAxes')) e.afterAxes = null;
+  if (!Object.hasOwn(extra, 'passAxes')) e.passAxes = e.passes.map(() => null);
+  return e;
+};
+const guided = (sid, seq, extra = {}) => ({ ...base('guided'), sid, seq, ...extra });
 const save = (sid, seq, extra = {}) => ({ ...base('save'), sid, seq, ...extra });
 const flash = (sid, seq, extra = {}) => ({ ...base('flash'), sid, seq, ...extra });
 const rest = (sid, seq, p95, extra = {}) => {
@@ -82,6 +89,91 @@ test('rest noise: quantiles and histograms per stick', () => {
   assert.equal(right.p95Histogram.reduce((a, b) => a + b.n, 0), 6);
   assert.equal(right.p95Histogram.find(b => b.lt === 1).n, 2);
   assert.ok(r.restNoise.byBoard['BDM-030'].n === 6);
+});
+
+test('signed final residuals retain half-step sign and axis, grouped by board', () => {
+  const events = [
+    quick('11111111', 0, { board: 'BDM-030', afterAxes: [[3, -1], [2, 0]] }),
+    quick('22222222', 0, { board: 'BDM-030', afterAxes: [[-3, 1], [0, 0]] }),
+    guided('33333333', 0, { board: 'BDM-020', afterAxes: [[-1, 2], [0, -2]] }),
+    quick('44444444', 0, { board: 'BDM-020', afterAxes: null }),
+  ];
+  const r = buildEventsReport(events.map(e => line(e)).join('\n'), { minimumCohortSize: 1 });
+  assert.equal(r.input.invalidEvent, 0);
+  assert.equal(r.residualAxes.final.byBoard['BDM-030'].withMeasurement, 2);
+  assert.deepEqual(r.residualAxes.final.byBoard['BDM-030'].byAxis.lx.distribution, [
+    { halfLsb: -3, n: 1 }, { halfLsb: 3, n: 1 },
+  ]);
+  assert.deepEqual(r.residualAxes.final.byBoard['BDM-030'].byAxis.ly.distribution, [
+    { halfLsb: -1, n: 1 }, { halfLsb: 1, n: 1 },
+  ]);
+  assert.deepEqual(r.residualAxes.final.byBoard['BDM-020'].byAxis.ry.distribution, [{ halfLsb: -2, n: 1 }]);
+  assert.equal(r.residualAxes.final.byBoard['BDM-020'].events, 2);
+  assert.equal(r.residualAxes.final.byBoard['BDM-020'].withMeasurement, 1);
+});
+
+test('Quick repeat counts use adjacent verified pairs and exact nonzero signed axes', () => {
+  const events = [
+    quick('11111111', 0, {
+      board: 'BDM-030', passes: [2, 2, 2],
+      passAxes: [[[3, -1], [0, 0]], [[3, -1], [2, 0]], [[3, 1], [2, 0]]],
+    }),
+    // Una verifica mancante interrompe la sequenza: passata 1 e 3 non sono adiacenti.
+    quick('22222222', 0, {
+      board: 'BDM-030', passes: [2, null, 2],
+      passAxes: [[[3, 1], [0, 0]], null, [[3, 1], [0, 0]]],
+    }),
+    quick('33333333', 0, {
+      board: 'BDM-020', passes: [2, 2],
+      passAxes: [[[0, 0], [0, 0]], [[0, 0], [0, 0]]],
+    }),
+    quick('44444444', 0, {
+      board: 'BDM-030', passes: [2, 2],
+      passAxes: [[[1, 0], [1, 0]], [[-1, 0], [1, 0]]],
+    }),
+    quick('55555555', 0, {
+      board: 'BDM-020', passes: [2, 2],
+      passAxes: [[[1, 0], [0, 0]], [[-1, 0], [0, 0]]],
+    }),
+  ];
+  const r = buildEventsReport(events.map(e => line(e)).join('\n'), { minimumCohortSize: 1 });
+  assert.equal(r.input.invalidEvent, 0);
+  const repeats = r.residualAxes.quickPassRepeats.all;
+  assert.deepEqual(repeats.runs, { comparable: 4, eligible: 3, withExactRepeat: 2, rateAmongEligible: 0.667 });
+  assert.deepEqual(repeats.adjacentPairs, { comparable: 5, withBothNonzero: 4, withExactRepeat: 3, rateAmongBothNonzero: 0.75 });
+  assert.deepEqual(repeats.byAxis.lx, { comparablePairs: 5, bothNonzeroPairs: 4, exactRepeats: 2, rateAmongBothNonzero: 0.5 });
+  assert.deepEqual(repeats.byAxis.ly, { comparablePairs: 5, bothNonzeroPairs: 2, exactRepeats: 1, rateAmongBothNonzero: 0.5 });
+  assert.deepEqual(repeats.byAxis.ry, { comparablePairs: 5, bothNonzeroPairs: 0, exactRepeats: 0, rateAmongBothNonzero: null });
+  assert.equal(repeats.byAxis.rx.exactRepeats, 2);
+  assert.equal(r.residualAxes.quickPassRepeats.byBoard['BDM-020'].runs.withExactRepeat, 0);
+});
+
+test('old v2 events without any axis fields are validated after null migration; partial new rows are rejected', () => {
+  const oldQuick = quick('11111111', 0);
+  delete oldQuick.beforeAxes;
+  delete oldQuick.afterAxes;
+  delete oldQuick.passAxes;
+  const oldGuided = guided('22222222', 0);
+  delete oldGuided.beforeAxes;
+  delete oldGuided.afterAxes;
+  const partial = quick('33333333', 0);
+  delete partial.passAxes;
+  const malformed = { ...oldQuick, sid: '44444444', serial: 'must-be-rejected' };
+  const r = buildEventsReport([oldQuick, oldGuided, partial, malformed].map(e => line(e)).join('\n'), { minimumCohortSize: 1 });
+  assert.equal(r.input.accepted, 2);
+  assert.equal(r.input.legacyAxes, 2);
+  assert.equal(r.input.invalidEvent, 2);
+  assert.equal(r.residualAxes.final.all.withMeasurement, 0);
+  assert.equal(r.residualAxes.quickPassRepeats.all.eligibleRuns, 0);
+});
+
+test('axis distributions and repeat rates are suppressed below the cohort size', () => {
+  const r = buildEventsReport(line(quick('11111111', 0, {
+    afterAxes: [[1, -1], [0, 0]], passes: [2, 2],
+    passAxes: [[[1, -1], [0, 0]], [[1, -1], [0, 0]]],
+  })), { minimumCohortSize: 2 });
+  assert.deepEqual(r.residualAxes.final.all, { events: 1, withMeasurement: 1, suppressed: true });
+  assert.deepEqual(r.residualAxes.quickPassRepeats.all, { quickRuns: 1, eligibleRuns: 1, suppressed: true });
 });
 
 test('lines outside the contract are counted and dropped, never read', () => {

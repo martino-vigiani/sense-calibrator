@@ -33,8 +33,8 @@ const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 // Stessi valori in subralabs-v2/code/calib-telemetry/calib-telemetry-v2.test.js.
 const CONTRACT_SHA256 = {
-  schema: '8171c93399b3be72fec2950fb6152229ab041bf95e8a2375c762de58ff5a049f',
-  fixtures: 'd47a67e7fe3a0f65d3dad3397b9b84fedbe8f31be29adcc040e130cc6e9e119c',
+  schema: '5a6680ac74c197056266572c57d3610213bbf5ae69c80a51ea5c1d07c728bbf0',
+  fixtures: '9312abed48d68882a8061863db7c164952c51170807919fb093cdcf5a3c267d5',
 };
 
 const CTX = { sid: '3f9a01bc', seq: 0, board: 'BDM-030', fw: 16777258 };
@@ -115,25 +115,58 @@ test('a real runQuick session maps to a valid quick event with rounded offsets a
   res.session.sid = 'local123';
   const event = buildQuickEvent(CTX, { session: res.session, outcome: res.outcome, committed: res.committed, durMs: 23_456 });
   assert.equal(validateEventV2(event), null);
-  assert.deepEqual(Object.keys(event).sort(), ['after', 'app', 'before', 'board', 'committed', 'durS', 'fw', 'needsPowerCycle',
-    'outcome', 'passes', 'seq', 'sid', 'start', 'truncated', 'type', 'v']);
+  assert.deepEqual(Object.keys(event).sort(), ['after', 'afterAxes', 'app', 'before', 'beforeAxes', 'board', 'committed', 'durS', 'fw', 'needsPowerCycle',
+    'outcome', 'passAxes', 'passes', 'seq', 'sid', 'start', 'truncated', 'type', 'v']);
   assert.equal(event.outcome, res.outcome);
   assert.equal(event.durS, 23);
   assert.equal(event.app, TELEMETRY_APP_BUILD);
   assert.equal(event.passes.length, res.session.passes.length);
+  assert.equal(event.passAxes.length, event.passes.length);
+  assert.deepEqual(event.passAxes, res.session.passXY.map(xy => xy?.map(stick => stick.map(value => Math.min(128, Math.max(-128, Math.round(value * 2.55))))) ?? null));
+  assert.deepEqual(event.beforeAxes, res.session.before.xy.map(stick => stick.map(value => Math.min(128, Math.max(-128, Math.round(value * 2.55))))));
+  assert.deepEqual(event.afterAxes, res.session.after.xy.map(stick => stick.map(value => Math.min(128, Math.max(-128, Math.round(value * 2.55))))));
   for (const v of [...event.before, ...event.after, ...event.passes]) assert.equal(v, Math.round(v * 100) / 100);
   assert.ok(!JSON.stringify(event).includes('free text'));
 });
 
 test('quick builder: unknown outcomes, boards and firmware never pass through as text', () => {
   const event = buildQuickEvent({ ...CTX, board: 'Custom <b>', fw: 1.5 }, {
-    session: { passes: [null, 2.345678, 999], before: { off: [4.2, 'x'] }, after: null, truncated: 'time-limit' },
+    session: { passes: [null, 2.345678, 999], passXY: [[[9, 0], [0, 0]], null, [[100, -100], [0, 0]]],
+      before: { off: [4.2, 'x'], xy: [[9, 0], [0, 0]] }, after: null, truncated: 'time-limit' },
     outcome: 'weird', start: 'forced', committed: true, durMs: 9e9,
   });
   assert.equal(validateEventV2(event), null);
   assert.deepEqual([event.board, event.fw, event.outcome, event.before, event.after, event.truncated, event.durS],
     [null, null, 'error', null, null, true, 3600]);
   assert.deepEqual(event.passes, [null, 2.35, 200]);
+  assert.deepEqual(event.passAxes, [null, null, [[128, -128], [0, 0]]]);
+  assert.deepEqual([event.beforeAxes, event.afterAxes], [[[23, 0], [0, 0]], null]);
+});
+
+test('per-axis residuals retain sign and half steps; unavailable readings stay null and passes align', () => {
+  const event = buildQuickEvent(CTX, { session: {
+    before: { off: [0.55, 0.55], xy: [[-0.392, 0.392], [-1.176, 1.176]] },
+    after: { off: [0.55, 0.55], xy: [[0, -0.392], [0.392, 0]] },
+    passes: [0.55, null, 1.24],
+    passXY: [[[0.392, -0.392], [-0.392, 0.392]], [[99, 99], [99, 99]]],
+  }, outcome: 'unverified' });
+  assert.equal(validateEventV2(event), null);
+  assert.deepEqual(event.beforeAxes, [[-1, 1], [-3, 3]]);
+  assert.deepEqual(event.afterAxes, [[0, -1], [1, 0]]);
+  assert.deepEqual(event.passAxes, [[[1, -1], [-1, 1]], null, null]);
+  assert.equal(event.passAxes.length, event.passes.length);
+  assert.deepEqual(event.passAxes.map((value, i) => value === null ? i : null).filter(value => value !== null), [1, 2]);
+});
+
+test('malformed per-axis readings are discarded as a whole measurement', () => {
+  const event = buildGuidedEvent(CTX, {
+    outcome: 'done', committed: true, needsPowerCycle: false, step: 5,
+    before: { off: [1, 1], xy: [[1, Infinity], [0, 0]] },
+    after: { off: [1, 1], xy: [[1, 2], null] },
+    timeouts: 0, escaped: false, durMs: 1_000,
+  });
+  assert.equal(validateEventV2(event), null);
+  assert.deepEqual([event.beforeAxes, event.afterAxes], [null, null]);
 });
 
 test('guided, range, flash and save builders produce valid events', () => {
@@ -144,6 +177,7 @@ test('guided, range, flash and save builders produce valid events', () => {
   });
   assert.equal(validateEventV2(guided), null);
   assert.deepEqual([guided.before, guided.after], [[22.4, 0.56], [1.24, 0.56]]);
+  assert.deepEqual([guided.beforeAxes, guided.afterAxes], [[[3, 5], [8, 10]], null]);
 
   const range = buildRangeEvent(CTX, { outcome: 'incomplete', committed: true, coverage: [0.917, 1], turns: [2.46, 3.1], allEdges: false, durMs: 31_200 });
   assert.equal(validateEventV2(range), null);
@@ -224,7 +258,7 @@ test('uploadEventV2 posts exactly the event as JSON with keepalive, and rejects 
   }), /HTTP 429/);
 });
 
-test('the consent scope is 2 and the app build is inside the contract range', () => {
-  assert.equal(TELEMETRY_SCOPE, 2);
+test('the consent scope is 3 and the app build is inside the contract range', () => {
+  assert.equal(TELEMETRY_SCOPE, 3);
   assert.equal(validateEventV2({ ...FIXTURES.valid[0].event, app: TELEMETRY_APP_BUILD }), null);
 });

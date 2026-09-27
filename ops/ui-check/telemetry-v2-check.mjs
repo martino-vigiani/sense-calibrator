@@ -150,6 +150,9 @@ function validAll(events, label) {
   check(types.join() === 'quick,flash,save', `2: Write adds flash and save (${types})`);
   const [q, f, s] = v2(sent);
   check(s?.result === 'saved' && s?.ref === q?.seq && f?.result === 'ok', '2: save says saved and points at the quick event');
+  check(q?.beforeAxes?.length === 2 && q?.afterAxes?.length === 2 && q?.passAxes?.length === q?.passes?.length
+    && q.passAxes.length > 0 && JSON.stringify(q.passAxes.at(-1)) === JSON.stringify(q.afterAxes),
+  '2: Quick sends measured signed axes, with the final pass matching after');
   // Il test drift automatico dopo il salvataggio e poi 35 s fermi.
   await page.waitForTimeout(36_000);
   const rest = v2(sent).filter(e => e.type === 'rest');
@@ -200,7 +203,7 @@ function validAll(events, label) {
 // compreso, è stato provato a parte (27 set 2026) contro un server locale
 // senza intercettazione: OPTIONS e POST application/json arrivano entrambi.
 {
-  const { context, page, sent } = await freshPage({ 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2', 'sense-telemetry-consent': '1' });
+  const { context, page, sent } = await freshPage({ 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '3', 'sense-telemetry-consent': '1' });
   check(!(await noticeVisible(page)), '5: no notice once the current description was accepted');
   await runQuick(page);
   await page.waitForTimeout(800);
@@ -213,7 +216,7 @@ function validAll(events, label) {
   await context.close();
 }
 {
-  const { context, page, sent } = await freshPage({ 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2', 'sense-telemetry-consent': '1' });
+  const { context, page, sent } = await freshPage({ 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '3', 'sense-telemetry-consent': '1' });
   await runQuick(page);
   await page.waitForTimeout(800);
   const before = sent.length;

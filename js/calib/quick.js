@@ -213,8 +213,16 @@ export async function runQuick({
     fw: meta.fw ?? null,
     before: null,
     passes: [],
+    passXY: [],
     after: null,
     unstableEvents: 0,
+  };
+  // Il solo raggio di `passes` perde asse e segno: affianchiamo la mediana per
+  // asse già usata per la verifica, senza campionare o comandare altro all'HID.
+  // Anche una passata non verificata occupa una posizione in entrambi gli array.
+  const recordPass = (worst, result = null) => {
+    session.passes.push(worst === null ? null : +worst.toFixed(2));
+    session.passXY.push(result ? summarizeResult(result).xy : null);
   };
   // Dopo ogni await: se il controller non è più quello di partenza, nessun
   // altro comando. Prima il ciclo leggeva il `ds5` globale e, dopo un replug a
@@ -421,7 +429,7 @@ export async function runQuick({
         // meno di samplesPerPass campioni. La sessione resta aperta nel
         // firmware, quindi il controller va spento e riacceso prima di
         // qualunque altro comando.
-        session.passes.push(null);
+        recordPass(null);
         session.aborted = 'stalled';
         // "Nulla è stato scritto" vale solo per QUESTA passata: un calibEnd di
         // una passata precedente (o la riparazione di calibBegin) ha già
@@ -475,7 +483,7 @@ export async function runQuick({
         result = implausible;
         worst = Math.max(result.left.offset, result.right.offset);
         lastVerified = result;
-        session.passes.push(+worst.toFixed(2));
+        recordPass(worst, result);
         log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%, beyond what Quick calibration can correct.`);
         stop = 'catastrophic';
         break;
@@ -489,7 +497,7 @@ export async function runQuick({
         worst = null;
         prevWorst = null;
         lastVerified = null;
-        session.passes.push(null);
+        recordPass(null);
         session.verifyFailures = (session.verifyFailures ?? 0) + 1;
         log(`Pass ${pass}: not enough stable samples to verify the result.`);
         if (pass < p.maxPasses) onProgress({ phase: 'next', pass, worst: null });
@@ -497,7 +505,7 @@ export async function runQuick({
       }
       worst = Math.max(result.left.offset, result.right.offset);
       lastVerified = result;
-      session.passes.push(+worst.toFixed(2));
+      recordPass(worst, result);
       // `otherWorst`: lo stick migliore. Se è già al pavimento, le passate
       // oltre la regola precedente sono limitate (rischiano di rovinarlo).
       const otherWorst = Math.min(result.left.offset, result.right.offset);

@@ -253,7 +253,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
   hid.chooser.push(...chooser);
   // "Avviso letto" vuol dire l'avviso attuale: v1 (notice) e v2 (scope).
   const store = new Map(Object.entries({
-    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2' } : {}),
+    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '3' } : {}),
     ...storage,
   }));
   const uploads = [];

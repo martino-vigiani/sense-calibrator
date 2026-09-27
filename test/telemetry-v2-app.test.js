@@ -53,7 +53,7 @@ test('first visit: nothing leaves the browser until Keep sharing, then v1 and v2
   await h.advance(50);
   assert.equal(v1Sent(h), 1, 'the complete Quick session on v1, unchanged');
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
-  assert.equal(h.store.get('sense-telemetry-scope'), '2');
+  assert.equal(h.store.get('sense-telemetry-scope'), '3');
   assert.equal(h.store.get('sense-telemetry-consent'), '1');
   // da qui gli eventi partono subito
   await h.click('btn-flash');
@@ -91,6 +91,22 @@ test('a v1 sharer sees the notice again, with what changed, and even v1 waits fo
   assert.equal(h.uploadsV2.length, 0);
   await h.click('btn-notice-ok');
   await h.advance(50);
+  assert.equal(v1Sent(h), 1);
+  assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
+});
+
+test('a v2 sharer sees the updated axis description before anything leaves', async () => {
+  const { h } = await setup({
+    telemetryNoticeSeen: false,
+    storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2', 'sense-telemetry-consent': '1' },
+  });
+  assert.equal(h.visible('telemetry-notice'), true);
+  assert.equal(h.visible('notice-changed'), true);
+  await quick(h);
+  assert.equal(h.uploads.length + h.uploadsV2.length, 0);
+  await h.click('btn-notice-ok');
+  await h.advance(50);
+  assert.equal(h.store.get('sense-telemetry-scope'), '3');
   assert.equal(v1Sent(h), 1);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
 });
@@ -163,7 +179,7 @@ test('ticking the footer box later accepts the current description and sends fro
     storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-consent': '0' },
   });
   change(h, 'telemetry-consent-footer', true);
-  assert.equal(h.store.get('sense-telemetry-scope'), '2');
+  assert.equal(h.store.get('sense-telemetry-scope'), '3');
   await quick(h);
   await h.advance(50);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
@@ -192,6 +208,21 @@ test('Quick → Write: quick, flash and save events linked by seq, all valid', a
     ['saved', q.seq, 1, 1, 0, 0, 1, 'ok']);
   const text = JSON.stringify(events);
   assert.doesNotMatch(text, /serial|"t":|E8475|DualSense/i);
+});
+
+test('Quick uploads signed half-LSB axes for the baseline, each pass, and the final reading', async () => {
+  const { h } = await setup();
+
+  await quick(h);
+
+  const event = h.uploadsV2.find(e => e.type === 'quick');
+  assert.ok(event, 'the Quick event should pass in-page validation and upload');
+  // Regressione telemetry v2: il raggio per passata non conserva asse e segno.
+  assert.deepEqual(
+    { before: event.beforeAxes, passes: event.passAxes, after: event.afterAxes },
+    { before: [[7, -1], [-1, 1]], passes: [[[-1, -1], [1, -1]]], after: [[-1, -1], [1, -1]] },
+    'the uploaded axes retain stick order, axis order, sign, and pass order',
+  );
 });
 
 test('Quick → Write → Cancel → disconnect: the save event says disconnected after one cancel', async () => {
@@ -286,15 +317,19 @@ async function moveToCorner(h, dev, corner, ms = 400) {
   await h.advance(ms + 250);
 }
 
-test('a guided run: one guided event (done, step 5) that the save period points at', async () => {
-  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]], seed: 21 });
+async function finishGuided(h, controller) {
   await h.click('btn-wizard');
   await h.run(h.click('btn-wizard-next'));
   for (const c of CORNERS) {
-    await moveToCorner(h, A, c);
+    await moveToCorner(h, controller, c);
     await h.run(h.click('btn-wizard-next'));
   }
   await h.advance(50);
+}
+
+test('a guided run: one guided event (done, step 5) that the save period points at', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]], seed: 21 });
+  await finishGuided(h, A);
   const g = h.uploadsV2.filter(e => e.type === 'guided');
   assert.equal(g.length, 1);
   assert.deepEqual([g[0].outcome, g[0].step, g[0].committed, g[0].escaped, g[0].timeouts], ['done', 5, true, false, 0]);
@@ -303,6 +338,21 @@ test('a guided run: one guided event (done, step 5) that the save period points 
   await h.advance(0);
   const save = h.uploadsV2.find(e => e.type === 'save');
   assert.deepEqual([save.result, save.ref, save.sessions], ['left', g[0].seq, 1]);
+});
+
+test('Guided uploads signed half-LSB axes before and after calibration', async () => {
+  const { h, A } = await setup({ drift: [[14, -9], [-2, 3]], seed: 21 });
+
+  await finishGuided(h, A);
+
+  const event = h.uploadsV2.find(e => e.type === 'guided');
+  assert.ok(event, 'the Guided event should pass in-page validation and upload');
+  // Regressione telemetry v2: gli offset radiali non distinguono un asse negativo.
+  assert.deepEqual(
+    { before: event.beforeAxes, after: event.afterAxes },
+    { before: [[29, -17], [-5, 7]], after: [[1, 1], [-1, 1]] },
+    'the uploaded axes retain stick order, axis order, and sign',
+  );
 });
 
 test('a guided Start with a thumb on a stick sends no command and no guided event', async () => {
@@ -340,8 +390,8 @@ test('Range finished anyway: an incomplete range event, and the save period ends
   assert.deepEqual([save.result, save.lock, save.reasons, save.ref], ['left', 'disabled', ['range-incomplete'], r[0].seq]);
 });
 
-// Il banner corto: al massimo ~40 parole, ogni categoria nominata (Keep sharing
-// accetta lo scope v2), "Details" verso la sezione privacy del README.
+// Il banner corto: al massimo ~40 parole, ogni categoria e il nuovo dato per
+// asse nominati (Keep sharing accetta lo scope 3), "Details" verso il README.
 test('the consent banner is short, names every v2 category and links the full description', async () => {
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -350,6 +400,7 @@ test('the consent banner is short, names every v2 category and links the full de
   const words = body.split(' ').length;
   assert.ok(words <= 42, `${words} words: ${body}`);
   for (const category of [/calibration results/, /whether they were saved/, /resting stick noise/]) assert.match(body, category);
+  assert.match(body, /signed stick positions by axis/);
   assert.match(body, /No serial number or device ID/);
   assert.match(body, /nothing from this visit has been sent yet/);
   assert.match(notice, /href="https:\/\/github\.com\/martino-vigiani\/sense-calibrator#telemetry--privacy"[^>]*>Details</);

@@ -14,7 +14,8 @@
 // in ALLOWED_OUTCOME_CHANGES. Senza il flag il confronto è quello completo del
 // refactor WS0 (oggi fallisce per costruzione: 685/1785 sul reale).
 //
-// Campi confrontati: l'intero oggetto sessione (tranne `t`, il timestamp),
+// Campi confrontati: l'intero oggetto sessione (tranne `t`, il timestamp, e
+// `passXY`, nuova sola osservazione telemetrica senza effetto sulla policy),
 // l'esito, i calibEnd del firmware, il residuo vero e i comandi inviati.
 // `dur` differisce per costruzione di 300 ms sulle sessioni completate: è la
 // pausa prima della chiusura del modale, che resta nella UI di app.js.
@@ -29,7 +30,8 @@ export const outcomeFieldsOf = r => JSON.stringify([r.s.passes, r.s.before, r.s.
 
 // Il golden sintetico conserva i campi che servono al test, non `dur`.
 export function goldenRecord(r) {
-  return { i: r.i, s: r.s, outcome: r.outcome, calibEnds: r.calibEnds, trueQuant: r.trueQuant, counts: r.counts };
+  const { passXY, ...s } = r.s;
+  return { i: r.i, s, outcome: r.outcome, calibEnds: r.calibEnds, trueQuant: r.trueQuant, counts: r.counts };
 }
 
 // Sessioni (del golden/legacy) che nessuna regola WS1 può toccare: una sola

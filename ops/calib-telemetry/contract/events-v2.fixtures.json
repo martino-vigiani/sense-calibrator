@@ -28,7 +28,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -49,7 +91,10 @@
         "before": null,
         "after": null,
         "passes": [],
-        "durS": 4
+        "durS": 4,
+        "beforeAxes": null,
+        "afterAxes": null,
+        "passAxes": []
       }
     },
     {
@@ -76,7 +121,31 @@
           null,
           16.1
         ],
-        "durS": 61
+        "durS": 61,
+        "beforeAxes": [
+          [
+            46,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": null,
+        "passAxes": [
+          null,
+          [
+            [
+              41,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -103,7 +172,27 @@
         ],
         "timeouts": 2,
         "escaped": true,
-        "durS": 95
+        "durS": 95,
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": [
+          [
+            3,
+            1
+          ],
+          [
+            -1,
+            1
+          ]
+        ]
       }
     },
     {
@@ -127,7 +216,18 @@
         "after": null,
         "timeouts": 0,
         "escaped": false,
-        "durS": 40
+        "durS": 40,
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": null
       }
     },
     {
@@ -282,6 +382,46 @@
           }
         ]
       }
+    },
+    {
+      "name": "quick half-LSB signed boundaries",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "unverified",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          70.99,
+          0.39
+        ],
+        "after": null,
+        "passes": [
+          null
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            -128,
+            128
+          ],
+          [
+            0,
+            -1
+          ]
+        ],
+        "afterAxes": null,
+        "passAxes": [
+          null
+        ]
+      }
     }
   ],
   "invalid": [
@@ -387,7 +527,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -418,7 +600,49 @@
           0.55
         ],
         "durS": 23,
-        "serial": "E1234567"
+        "serial": "E1234567",
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -449,7 +673,49 @@
           0.55
         ],
         "durS": 23,
-        "t": "2026-09-27T10:00:00.000Z"
+        "t": "2026-09-27T10:00:00.000Z",
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -478,6 +744,48 @@
         "passes": [
           1.24,
           0.55
+        ],
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
         ]
       }
     },
@@ -508,7 +816,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -538,7 +888,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -568,7 +960,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -598,7 +1032,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -628,7 +1104,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -658,7 +1176,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -688,7 +1248,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -718,7 +1320,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -748,7 +1392,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -779,7 +1465,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -809,7 +1537,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -846,7 +1616,49 @@
           1,
           1
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -875,7 +1687,49 @@
         "passes": [
           "1.2"
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -905,7 +1759,49 @@
           1.24,
           0.55
         ],
-        "durS": 3601
+        "durS": 3601,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -935,7 +1831,49 @@
           1.24,
           0.55
         ],
-        "durS": 23
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
       }
     },
     {
@@ -962,7 +1900,27 @@
         ],
         "timeouts": 2,
         "escaped": true,
-        "durS": 95
+        "durS": 95,
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": [
+          [
+            3,
+            1
+          ],
+          [
+            -1,
+            1
+          ]
+        ]
       }
     },
     {
@@ -990,7 +1948,27 @@
         "timeouts": 2,
         "escaped": true,
         "durS": 95,
-        "passes": []
+        "passes": [],
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": [
+          [
+            3,
+            1
+          ],
+          [
+            -1,
+            1
+          ]
+        ]
       }
     },
     {
@@ -1521,6 +2499,1209 @@
               6
             ]
           }
+        ]
+      }
+    },
+    {
+      "name": "quick missing beforeAxes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick missing afterAxes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick missing passAxes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes one stick",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes three sticks",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes one axis",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            1
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes three axes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            1,
+            -1,
+            3
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes fractional half-LSB",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            0.5,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes over positive bound",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            129,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick beforeAxes under negative bound",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            -129,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick afterAxes string",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            "left"
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick afterAxes partial null",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          null,
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick passAxes ninth entry",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "name": "quick passAxes bad entry",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              129
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "guided missing beforeAxes",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 5,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95,
+        "afterAxes": [
+          [
+            3,
+            1
+          ],
+          [
+            -1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "guided missing afterAxes",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 5,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95,
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "guided afterAxes with object",
+      "event": {
+        "v": 2,
+        "type": "guided",
+        "sid": "3f9a01bc",
+        "seq": 3,
+        "app": 20260927,
+        "board": "BDM-050",
+        "fw": 16777300,
+        "outcome": "done",
+        "committed": true,
+        "needsPowerCycle": false,
+        "step": 5,
+        "before": [
+          22.4,
+          0.55
+        ],
+        "after": [
+          1.24,
+          0.55
+        ],
+        "timeouts": 2,
+        "escaped": true,
+        "durS": 95,
+        "beforeAxes": [
+          [
+            57,
+            1
+          ],
+          [
+            1,
+            -1
+          ]
+        ],
+        "afterAxes": {
+          "lx": 1,
+          "ly": 2,
+          "rx": 3,
+          "ry": 4
+        }
+      }
+    },
+    {
+      "name": "quick passAxes count differs from passes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "name": "quick unverified pass has axes",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20260927,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "centered",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          null,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
         ]
       }
     }

@@ -10,8 +10,9 @@ const DEFAULT_INPUT = 'data/telemetry/events-v2.jsonl';
 function usage() {
   return `Usage: node ops/calib-telemetry/events-report-cli.mjs [options]
 
-Aggregate report of the v2 telemetry events: save rate by calibration outcome
-and resting stick noise distributions. The input JSONL is never changed.
+Aggregate report of the v2 telemetry events: save rate by calibration outcome,
+resting stick noise, signed final axis residuals by board, and exact nonzero
+axis repeats across adjacent verified Quick passes. The input is never changed.
 
 Options:
   --input PATH            events JSONL (default: ${DEFAULT_INPUT})

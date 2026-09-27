@@ -3528,8 +3528,8 @@ function resolveNotice(keepSharing) {
 // apre il link dal telefono. Il flag resta non impostato, così la scelta viene
 // chiesta davvero la prima volta che la pagina si apre su un browser che può
 // usare il tool. L'opt-out nel footer resta comunque visibile e funzionante.
-// Chi aveva già accettato la descrizione v1 (avviso letto, scope < 2) rivede
-// l'avviso una volta, con la riga "what's shared has changed" in testa.
+// Chi aveva già accettato una descrizione precedente (avviso letto, scope
+// inferiore a quello corrente) rivede l'avviso prima dei nuovi campi per asse.
 const noticeReturning = noticeSeen();
 if (navigator.hid && telemetryEnabled() && !scopeAccepted()) {
   noticeOpen = true;

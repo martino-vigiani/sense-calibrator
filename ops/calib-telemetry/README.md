@@ -106,6 +106,42 @@ directory, flushes it, and renames it over the previous report. A failed write
 or rename leaves the previous report intact and removes the temporary file.
 The command refuses to use the input path as the output path.
 
+## Typed v2 events report
+
+`events-report-cli.mjs` reads the separate `events-v2.jsonl` file and writes
+aggregates for saving, resting noise, and signed axis residuals:
+
+```sh
+node ops/calib-telemetry/events-report-cli.mjs \
+  --input data/telemetry/events-v2.jsonl
+```
+
+`residualAxes.final.byBoard` counts the observed `afterAxes` values from Quick
+and Guided events for each of `lx`, `ly`, `rx`, and `ry`. Distribution entries
+are exact signed **half-LSB units**: `-1` means half a byte step below center,
+`2` means one byte step above center. Zero and both signs remain separate.
+`events` includes all Quick and Guided events in the board group;
+`withMeasurement` counts those with at least one final axis value. Each axis's
+`n` is its own measured denominator. Groups below `--minimum-cohort` show
+their event and measurement counts without distributions.
+
+`residualAxes.quickPassRepeats` compares **adjacent verified** Quick passes.
+An axis is eligible only when both values are measured and nonzero; a repeat
+means the same axis has the exact same signed value on both passes. Its
+`byAxis` rates use `bothNonzeroPairs` as denominator. The `runs` rate counts
+Quick runs with at least one such repeat among runs with at least one eligible
+pair; `adjacentPairs` counts pass pairs, so a longer Quick run can contribute
+more than once. A null or unverified pass breaks adjacency. The report also
+groups these counts by board. Repeated zeros do not count as residuals, and
+equal radial percentages with different axes or signs do not count as repeats.
+
+Historical v2 Quick and Guided records that lack **all** the new axis fields
+are filled with null measurements inside this report, then checked against the
+strict current schema. `input.legacyAxes` counts those accepted records;
+partial or malformed new records remain invalid. The current v1
+`sessions.jsonl` has no axis values and cannot supply these distributions or
+repeat rates.
+
 ## VPS deployment
 
 The report is deployed privately, outside every nginx document root:
