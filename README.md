@@ -87,7 +87,9 @@ What is sent, if you share:
 
 The v2 events never contain the serial number, a device identifier (the controller key used for local locks is salted and stays in the page), anything you type, error messages or a client timestamp; the server adds only the day it received the event. Every field is a number, a yes/no or a value from a fixed list, and the page and the server both reject anything else. The exact contract is `ops/calib-telemetry/contract/events-v2.schema.json`, also published in the [OpenAPI document](https://subralabs.com/openapi.json).
 
-Like any web request, the upload reaches the server with network metadata such as your IP address. The telemetry service keeps it in memory only for its per-minute rate limit and never writes it to the telemetry records. The web server in front of it (nginx, behind Cloudflare) keeps standard access logs with the IP address, the requested path and the browser user agent for a limited time, as it does for any page on subralabs.com.
+Like any web request, the upload reaches the server with network metadata such as your IP address. The telemetry service keeps it in memory only for its per-minute rate limit and never writes it to the telemetry records.
+
+The web server in front of the service (nginx on subralabs.com, behind Cloudflare) does keep an access log, as it does for every page of the site, telemetry requests included. For each request it records the IP address, the exact time, the requested path and the browser's user agent. We keep these logs to debug the server and to protect it from abuse, never to analyse the telemetry, and they are deleted after [RETENTION TO CONFIRM BEFORE RELEASE: the nginx log rotation on the VPS]. Cloudflare, which proxies the site, processes the same request data under its own policy.
 
 If you answered the notice before the v2 events existed, it appears once more with the new description: the new events are only sent after you choose **Keep sharing** again. Until then nothing from the visit is sent, including the Quick result you had already agreed to.
 

@@ -339,3 +339,19 @@ test('Range finished anyway: an incomplete range event, and the save period ends
   const save = h.uploadsV2.find(e => e.type === 'save');
   assert.deepEqual([save.result, save.lock, save.reasons, save.ref], ['left', 'disabled', ['range-incomplete'], r[0].seq]);
 });
+
+// Il banner corto: al massimo ~40 parole, ogni categoria nominata (Keep sharing
+// accetta lo scope v2), "Details" verso la sezione privacy del README.
+test('the consent banner is short, names every v2 category and links the full description', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const notice = html.slice(html.indexOf('id="telemetry-notice"'), html.indexOf('class="notice-actions"'));
+  const body = notice.slice(notice.indexOf('<p>')).replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, "'").replace(/\s+/g, ' ').trim();
+  const words = body.split(' ').length;
+  assert.ok(words <= 42, `${words} words: ${body}`);
+  for (const category of [/calibration results/, /whether they were saved/, /resting stick noise/]) assert.match(body, category);
+  assert.match(body, /No serial number or device ID/);
+  assert.match(body, /nothing from this visit has been sent yet/);
+  assert.match(notice, /href="https:\/\/github\.com\/martino-vigiani\/sense-calibrator#telemetry--privacy"[^>]*>Details</);
+  assert.match(notice, /id="notice-changed"[^>]*><b>What&rsquo;s shared has changed\.<\/b>/);
+});

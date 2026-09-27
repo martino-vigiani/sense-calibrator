@@ -375,7 +375,7 @@
   <span>Unofficial tool &middot; use at your own risk.</span>
   <label class="telemetry-label" title="Anonymous: calibration outcomes, saving and resting stick noise; no serial number, device ID, typed text or exact time">
     <input type="checkbox" id="telemetry-consent-footer">
-    <span>Share anonymous calibration results, saving steps and resting stick noise (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
+    <span>Share anonymous telemetry: each calibration&rsquo;s type, outcome and before/after offsets; each Write to memory attempt and, if a result wasn&rsquo;t saved, why (Write locked, cancelled, disconnected, page closed); short summaries of resting stick noise. No serial number, device ID, typed text or exact time (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
   </label>
 </footer>
 
@@ -635,12 +635,10 @@
 <div id="telemetry-notice" class="notice hidden" role="dialog" aria-modal="false" aria-labelledby="notice-title">
   <div class="notice-body">
     <h4 id="notice-title">Help improve the calibration</h4>
-    <p id="notice-changed" class="hidden"><b>What&rsquo;s shared has changed.</b> Until now only complete Quick results were sent.</p>
+    <p id="notice-changed" class="hidden"><b>What&rsquo;s shared has changed.</b></p>
     <p>
-      If you share, the page sends anonymous technical events: the type, outcome and before and after offsets of each calibration, whether it was written to memory (and if not, whether Write was locked, cancelled or the page was closed), and at most 8 short summaries of how much the sticks jitter while nobody touches them. Board revision and firmware are included.
-      Never your serial number, a device ID, anything you type or an exact time. A random code links the events of this visit and is discarded when you close the page. Like any web request, the server can receive network metadata such as an IP address.
-      Sharing is <b>on by default</b>, but nothing from this visit has been sent yet. You can turn it off here.
-      <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">See exactly what&rsquo;s sent</a>.
+      If you share, the page sends anonymous calibration results, whether they were saved, and short resting stick noise summaries. No serial number or device ID. Sharing is <b>on by default</b>; nothing from this visit has been sent yet.
+      <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">Details</a>
     </p>
   </div>
   <div class="notice-actions">
