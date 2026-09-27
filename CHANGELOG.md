@@ -2,6 +2,14 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## Unreleased — telemetry v2
+
+Needs the telemetry service with `POST /api/calib/v2/events` deployed first; until then the new events get a 404 and are dropped, and nothing else changes.
+
+- **Sharing now covers whether calibrations get saved and how noisy resting sticks are.** If you choose to share, the page sends small typed events to a new, versioned endpoint: each Quick, Guided and Range calibration (type, outcome, before → after offsets, pass results, duration), each Write to memory attempt (result class and memory status), how each unsaved calibration ended (saved, disconnected or page closed, with the reason Write was locked and how often the dialog was opened or cancelled), and at most 8 per visit 30-second summaries of how much the sticks jitter while nobody touches them. Never a serial number, device ID, typed text or exact time; a random code links the events of one visit and is discarded with the page. Complete Quick results still go to the old endpoint too, unchanged.
+- **The notice asks again, once.** People who had already answered it see it one more time, headed "What's shared has changed", because the new events are data they did not agree to. Until they answer, nothing from the visit is sent, the old Quick result included; **Don't share** stops all sharing. People who had chosen not to share are not asked again.
+- The share checkboxes and their tooltips describe the new scope.
+
 ## 2026-09-27
 
 - **Results that aren't fully centered now say you can try again.** In the collected telemetry, about 4 in 10 people who ran Quick again right after a result that wasn't centered ended fully centered (16 of 40 back-to-back sessions on the same controller; 2 of 40 got worse). The result panel says so, offers **Run Quick again**, and reminds that nothing is permanent until it's written to memory. When two passes land on the same value, Guided stays the first suggestion, with Quick as a second option.
