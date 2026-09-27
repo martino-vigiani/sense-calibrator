@@ -127,7 +127,11 @@ export function buildEventsReport(text, options = {}) {
         // salvare): non conta né come salvata né come persa.
         const closing = saves.find(s => s.seq > e.seq);
         let reason;
-        if (!closing) reason = 'unknown';
+        // Scollegato a metà: il teardown ha già chiuso il periodo (save
+        // 'disconnected' con un seq PRIMA di questo evento), quindi il primo save
+        // successivo è di un'altra storia.
+        if (e.outcome === 'disconnected') reason = 'disconnected';
+        else if (!closing) reason = 'unknown';
         else if (closing.ref === e.seq) reason = saveReason(closing);
         else if (closing.ref !== null && closing.ref > e.seq) reason = 'superseded';
         else reason = saveReason(closing);

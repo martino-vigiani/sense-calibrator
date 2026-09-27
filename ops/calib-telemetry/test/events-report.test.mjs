@@ -39,6 +39,11 @@ function population() {
     // F: flash fallito, poi pagina chiusa
     quick('ffffffff', 0), flash('ffffffff', 1, { result: 'nv-unknown', nv: null }),
     save('ffffffff', 2, { result: 'left', ref: 0, attempts: 1, lastFlash: 'nv-unknown' }),
+    // H: scollegato a metà Quick: il save 'disconnected' arriva PRIMA dell'evento
+    // quick (teardown), poi un'altra calibrazione salvata nella stessa visita
+    quick('77777777', 0), save('77777777', 1, { result: 'disconnected', ref: 0, attempts: 0, lastFlash: null }),
+    quick('77777777', 2, { outcome: 'disconnected' }),
+    quick('77777777', 3), save('77777777', 4, { ref: 3 }),
     // G: un preflight (nessun commit) e sei finestre di rumore
     quick('99999999', 0, { outcome: 'preflight', committed: false, before: null, after: null, passes: [] }),
     ...[0.5, 0.5, 1, 1, 2, 4].map((p95, i) => rest('99999999', i + 1, p95)),
@@ -51,22 +56,23 @@ function population() {
 test('every committed calibration is joined to the save event that closes its period', () => {
   const r = buildEventsReport(population(), { minimumCohortSize: 1 });
   assert.deepEqual(r.saving.byType.quick.reasons, {
-    'cancelled': 1, 'flash-failed': 1, 'locked:catastrophic': 1, 'saved': 2, 'unknown': 2,
-  }, 'C and the old line with no save event are unknown');
-  assert.equal(r.saving.byType.quick.n, 7);
-  assert.equal(r.saving.byType.quick.saveRate, 0.286);
+    'cancelled': 1, 'disconnected': 2, 'flash-failed': 1, 'locked:catastrophic': 1, 'saved': 3, 'unknown': 2,
+  }, 'C and the old line with no save event are unknown; H is disconnected twice, then saved');
+  assert.equal(r.saving.byType.quick.n, 10);
+  assert.equal(r.saving.byType.quick.saveRate, 0.3);
+  assert.equal(r.saving.byTypeOutcome['quick:disconnected'].reasons.disconnected, 1);
   assert.equal(r.saving.byType['quick:superseded'], 1);
   assert.equal(r.calibrations.notCommitted['quick:preflight'], 1);
   assert.equal(r.saving.byTypeOutcome['quick:catastrophic'].reasons['locked:catastrophic'], 1);
-  assert.deepEqual(r.saving.periods.byResult, { disconnected: 1, left: 2, saved: 2 });
+  assert.deepEqual(r.saving.periods.byResult, { disconnected: 2, left: 2, saved: 3 });
   assert.equal(r.flash.byResult['nv-unknown'], 1);
 });
 
 test('rates and distributions are withheld below the minimum cohort, counts are not', () => {
-  const r = buildEventsReport(population(), { minimumCohortSize: 8 });
+  const r = buildEventsReport(population(), { minimumCohortSize: 11 });
   assert.equal(r.saving.byType.quick.saveRate, null);
-  assert.equal(r.saving.byType.quick.n, 7);
-  assert.deepEqual(r.restNoise.all, { n: 6, suppressed: true });
+  assert.equal(r.saving.byType.quick.n, 10);
+  assert.deepEqual(r.restNoise.all, { n: 6, suppressed: true }, 'six windows, under the cohort of 11');
 });
 
 test('rest noise: quantiles and histograms per stick', () => {
@@ -112,6 +118,6 @@ test('the CLI writes the report atomically with mode 0600 and prints a summary',
   assert.equal(written.schema, 'sense-calibrator.telemetry-events.v2');
   assert.equal(fs.statSync(output).mode & 0o777, 0o600);
   await assert.rejects(runCli(['--input', input, '--output', input]), /must not/);
-  assert.match(formatEventsSummary(written), /^events \d+ \(invalid \d+\) · visits \d+ · quick saved 2\/7/);
+  assert.match(formatEventsSummary(written), /^events \d+ \(invalid \d+\) · visits \d+ · quick saved 3\/10/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
