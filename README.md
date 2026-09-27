@@ -89,7 +89,7 @@ The v2 events never contain the serial number, a device identifier (the controll
 
 Like any web request, the upload reaches the server with network metadata such as your IP address. The telemetry service keeps it in memory only for its per-minute rate limit and never writes it to the telemetry records.
 
-The web server in front of the service (nginx on subralabs.com, behind Cloudflare) does keep an access log, as it does for every page of the site, telemetry requests included. For each request it records the IP address, the exact time, the requested path and the browser's user agent. We keep these logs to debug the server and to protect it from abuse, never to analyse the telemetry, and they are deleted after [RETENTION TO CONFIRM BEFORE RELEASE: the nginx log rotation on the VPS]. Cloudflare, which proxies the site, processes the same request data under its own policy.
+The web server in front of the service (nginx on subralabs.com, behind Cloudflare) does keep an access log, as it does for every page of the site, telemetry requests included. For each request it records the IP address, the exact time, the requested path and the browser's user agent. We keep these logs to debug the server and to protect it from abuse, never to analyse the telemetry, and they are deleted after 14 days (the logs rotate daily and the last 14 are kept). Cloudflare, which proxies the site, processes the same request data under its own policy.
 
 If you accepted an earlier description, the notice appears again when the shared fields change. The updated events are only sent after you choose **Keep sharing** again. Until then nothing from the visit is sent, including the Quick result you had already agreed to.
 
