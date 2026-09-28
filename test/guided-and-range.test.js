@@ -18,7 +18,7 @@ const CORNERS = [
   { tx: 0.7, ty: 0.7 },
 ];
 
-async function setup({ drift, seed = 21, devices = 1 } = {}) {
+async function setup({ drift = [[6, -4], [-3, 3]], seed = 21, devices = 1 } = {}) {
   const clock = new VClock();
   const devs = Array.from({ length: devices }, (_, i) => makeDevice(clock, { seed: seed + i, drift, name: `DualSense ${'AB'[i]}` }));
   const h = await loadApp({ clock, authorized: [devs[0]] });
@@ -797,4 +797,21 @@ test('a new range session restores the "no Cancel" hint after a previous check s
   await h.advance(6000);
   await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   assert.match(h.$('range-exit-hint').textContent, /There is no Cancel/);
+});
+
+test('Guided on sticks already at the floor sends nothing unless forced', async () => {
+  // Telemetria v2 del 28 set: un BDM-010 a 0,6% è uscito da Guided al 13%.
+  const { h, A } = await setup({ drift: [[0.2, -0.3], [-0.1, 0.4]] });
+  await h.click('btn-wizard');
+  const sent = A.commandLog.length;
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.peek().wizard.phase, 'intro');
+  assert.equal(A.counts.begin, 0, 'no calibBegin');
+  assert.equal(A.commandLog.length, sent, 'nothing sent at all');
+  assert.equal(h.peek().busy, false);
+  assert.match(h.$('wizard-msg').innerHTML, /Already centered: nothing was sent/);
+  assert.equal(h.$('btn-wizard-next').textContent, 'Calibrate anyway');
+  // "Calibrate anyway" apre davvero la sessione
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.begin, 1, 'forced run sends calibBegin');
 });

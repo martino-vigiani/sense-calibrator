@@ -1600,6 +1600,8 @@ async function doFlash() {
 let quickPreflightBlocked = false;
 // Partenza già centrata: il prossimo "Calibrate anyway" passa force a runQuick.
 let quickForceNext = false;
+// Stesso principio per Guided: "Calibrate anyway" su stick già centrati.
+let wizardForceNext = false;
 // Recupero opt-in dopo un esito catastrofico (C0-10): una sola passata, con
 // force, e comunque dietro la tenuta entro il 15% di runQuick.
 let quickRecoveryNext = false;
@@ -2680,6 +2682,23 @@ async function wizardNext() {
         return;
       }
       w.before = summarizeResult(measured);
+      // Partenza già al pavimento: come Quick, nessun comando. Una procedura
+      // Guided da stick perfetti può solo lasciarli o spostarli (telemetria v2
+      // del 28 set: 0,6% → 13% su un BDM-010). "Calibrate anyway" la forza.
+      if (!wizardForceNext && Math.max(...w.before.off) < CENTERED_MAX) {
+        ops.endOp(w.op);
+        w.op = null;
+        w.controller = null;
+        wizardForceNext = true;
+        $('btn-wizard-cancel').classList.remove('hidden');
+        $('btn-wizard-cancel').textContent = 'Close';
+        btn.textContent = 'Calibrate anyway';
+        log('Guided calibration: both sticks already centered; nothing sent.');
+        $('wizard-msg').innerHTML = `<b>Already centered: nothing was sent.</b> Both sticks read ${esc(formatOffset(Math.max(...w.before.off)))}, `
+          + 'the measurement limit. Guided calibration can only keep them there or move them off-center.';
+        return;
+      }
+      wizardForceNext = false;
       w.tol = restTolerance(w.before);
       // Il segno di sessione in volo va scritto PRIMA del comando (vedi
       // openSessionGuard): un reload fra due angoli torna bloccato.
@@ -2821,6 +2840,7 @@ function openWizard() {
     running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
+  wizardForceNext = false;
   wizardSetDots(0);
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');

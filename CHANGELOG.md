@@ -2,6 +2,14 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-09-28 (afternoon)
+
+From the first telemetry after the audit release: a controller already centered at 0.6% came out of Guided at 13%, and the result was saved after the "worse than start" confirmation.
+
+- **Guided sends nothing when both sticks are already centered.** Like Quick, it says "Already centered: nothing was sent" and offers **Calibrate anyway**.
+- **A result three steps (2.35 points) or more worse than the start can't be written to memory.** Write is off, not just guarded; smaller regressions still ask for a second confirmation.
+- **After a worse Guided result, the panel suggests Quick first**, which usually brings the sticks back to center.
+
 ## Unreleased — 2026-09-28 audit safety fixes
 
 These changes are verified with the virtual DualSense and app harness, not with a physical controller. The telemetry v1 payload and v2 contract are unchanged.

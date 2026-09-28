@@ -26,6 +26,10 @@ import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../calib/quick-policy.j
 import { QUICK_DEFAULTS, QUICK_REGRESSION_EPS } from '../calib/quick.js';
 import { axisWorsening } from '../calib/wizard-gate.js';
 
+// Oltre questo aumento dello stick peggiore Write è spento, non solo
+// sconsigliato: tre passi del reticolo (3 × 0,784 punti).
+export const MUCH_WORSE_PCT = 3 * LSB_PCT;
+
 // Tasso di riuscita pubblicato nel testo. Viene dal report di qualità v2 di
 // WS3 (ops/calib-telemetry), coorte PG (n=354, generato il 2026-09-25):
 // 267/354 = 75.4% finiscono sotto 1.2% (centrato), 298/354 = 84.2% entro un
@@ -152,6 +156,7 @@ export const LOCK_REASONS = Object.freeze({
   'range-already-closed': { mode: 'disabled', text: 'The range session had already closed, so its result is unknown. Run Range calibration again before saving.' },
   'center-reload': { mode: 'disabled', text: 'A previous calibration result may still be unsafe. Complete and check a new calibration before saving.' },
   'center-reload-guarded': { mode: 'guarded', text: 'A previous calibration result needs checking again before saving.' },
+  'much-worse': { mode: 'disabled', text: 'The result is much worse than when you started. Saving it would make that drift permanent: run Quick calibration to bring the sticks back first.' },
   'worse-than-start': { mode: 'guarded', text: 'The result is worse than when you started.' },
   'stick-worse': { mode: 'guarded', text: 'One stick moved farther from center, although the worst stick improved. Check it before saving.' },
   'axis-worse': { mode: 'guarded', text: 'An axis moved further from center than before. Check it before saving.' },
@@ -179,6 +184,11 @@ export function writeLockFor({ center = null, range = null, poisoned = false, ne
     if (pinned) codes.push('pinned');
     if ((isNum(worst) && isNum(beforeWorst) && worst - beforeWorst > QUICK_REGRESSION_EPS)
       || (outcome === 'worse-than-start' && (!isNum(worst) || !isNum(beforeWorst)))) codes.push('worse-than-start');
+    // Un peggioramento grande non si salva nemmeno con conferma: telemetria v2
+    // del 28 set, un BDM-010 perfetto (0,6%) è uscito da Guided al 13% e
+    // l'utente ha confermato il salvataggio "guarded". Nessun caso d'uso
+    // sensato scrive in memoria uno stick peggiorato di 3 passi o più.
+    if (isNum(worst) && isNum(beforeWorst) && worst - beforeWorst >= MUCH_WORSE_PCT) codes.push('much-worse');
     if (regressedSticks.length && !codes.includes('worse-than-start')) codes.push('stick-worse');
     if (axisWorse) codes.push('axis-worse');
     if (outcome === 'lost-ground' || (isNum(worst) && isNum(bestWorst) && worst - bestWorst > QUICK_REGRESSION_EPS)) codes.push('lost-ground');
@@ -473,8 +483,9 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   if (outcome === 'worse-than-start') {
     return view(outcome, 'bad', 'Worse than when you started', [
       `Don’t write this to memory. ${regressed.length ? `The ${regressed.join(' and ')} stick worsened. ` : ''}The worst stick is ${fmt(worst)}; it started at ${fmt(beforeWorst)}.`,
-      revert ?? 'Run Guided again, releasing both sticks fully before each Continue.',
-    ], [ACTION.guided]);
+      revert,
+      'Quick calibration usually brings the sticks back to center: run it now, with the controller on a table and both sticks released.',
+    ], [ACTION.quick, ACTION.guided]);
   }
   // Un asse peggiorato va detto anche quando il raggio dello stick migliora.
   const axisLine = worseAxes.length

@@ -17,7 +17,7 @@ import { VClock } from '../ops/sim/vclock.mjs';
 // un drift vero.
 const DRIFTING = [[3.2, -0.3], [-0.1, 0.4]];
 
-async function setup({ devices = 1, schedule = [], drift } = {}) {
+async function setup({ devices = 1, schedule = [], drift = [[6, -4], [-3, 3]] } = {}) {
   const clock = new VClock();
   const devs = Array.from({ length: devices }, (_, i) => makeDevice(clock, { seed: 11 + i, name: `DualSense ${'AB'[i]}`, schedule, drift }));
   const h = await loadApp({ clock, authorized: [devs[0]] });
@@ -81,7 +81,7 @@ test('the op gate tags each op with its epoch and ignores stale tokens', () => {
 // ---------------------------------------------------------------- connessione
 
 test('an authorized DualSense is adopted at boot, then the automatic drift test runs', async () => {
-  const { h, A } = await setup();
+  const { h, A } = await setup({ drift: [[0.2, -0.3], [-0.1, 0.4]] });
   assert.equal(h.visible('view-device'), true);
   assert.equal(h.visible('view-hero'), false);
   assert.equal(h.peek().ds5.device, A);

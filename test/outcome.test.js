@@ -695,3 +695,15 @@ test('guided result names an axis that got worse even when the stick improved', 
   });
   assert.doesNotMatch(textOf(ok), /moved further/);
 });
+
+test('a result three steps worse than the start disables Write; a smaller regression only guards it', () => {
+  const big = writeLockFor({ center: { outcome: 'worse-than-start', worst: 12.95, beforeWorst: 0.555 } });
+  assert.equal(big.mode, 'disabled');
+  assert.ok(big.reasons.some(r => r.code === 'much-worse'));
+  const small = writeLockFor({ center: { outcome: 'worse-than-start', worst: 2.0, beforeWorst: 0.555 } });
+  assert.equal(small.mode, 'guarded');
+  const g = guidedOutcomeView({ before: { off: [0.555, 0.555], noise: [0, 0], xy: [[0.4, 0.4], [0.4, 0.4]] },
+    after: { off: [12.95, 3.55], noise: [0, 0], xy: [[12.9, 0.4], [3.5, 0.4]] } });
+  assert.equal(g.actions[0].id, 'quick');
+  assert.match(textOf(g), /Quick calibration usually brings the sticks back/);
+});

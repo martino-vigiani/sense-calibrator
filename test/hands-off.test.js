@@ -177,7 +177,7 @@ test('Quick: a thumb held still in pass 1 turns the meter to "Stick held" once t
 
 test('Guided: sticks still held at the corner never read as at rest', async () => {
   const clock = new VClock();
-  const dev = makeDevice(clock, { seed: 21 });
+  const dev = makeDevice(clock, { seed: 21, drift: [[6, -3], [-2, 2]] });
   const h = await loadApp({ clock, authorized: [dev] });
   await h.advance(5000);
   await h.click('btn-wizard');
