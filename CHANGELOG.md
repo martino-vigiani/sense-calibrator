@@ -2,6 +2,10 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-09-28 (evening)
+
+- **Guided also sends nothing when the worst stick is within one step of center (≤1.25%).** In the telemetry, Guided made nearly centered sticks worse (1.2% → 2.3%, 1.2% → 3.4%); the page now points to Quick for the last step. **Calibrate anyway** still forces it.
+
 ## 2026-09-28 (afternoon)
 
 From the first telemetry after the audit release: a controller already centered at 0.6% came out of Guided at 13%, and the result was saved after the "worse than start" confirmation.

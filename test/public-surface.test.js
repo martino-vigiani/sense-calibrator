@@ -262,6 +262,6 @@ test('the dials offer a ×10 center zoom as a pressed-state toggle', async () =>
   }
   assert.match(app, /const DIAL_ZOOM = 10;/);
   // L'anello tratteggiato dello zoom è il confine del verdetto, dalla tabella unica.
-  assert.match(app, /import \{ CENTERED_MAX, LSB_PCT, formatOffset \} from '\.\/calib\/lattice\.js';/);
+  assert.match(app, /import \{[^}]*\bCENTERED_MAX\b[^}]*\} from '\.\/calib\/lattice\.js';/);
   assert.match(app, /\(CENTERED_MAX \/ 100\) \* k/);
 });

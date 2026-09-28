@@ -815,3 +815,15 @@ test('Guided on sticks already at the floor sends nothing unless forced', async 
   await h.run(h.click('btn-wizard-next'));
   assert.equal(A.counts.begin, 1, 'forced run sends calibBegin');
 });
+
+test('Guided on sticks within one step sends nothing and points to Quick', async () => {
+  // 1,24% sul peggiore: telemetria v2, Guided da qui è finita a 2,3% e 3,4%.
+  const { h, A } = await setup({ drift: [[1.5, 0.3], [-0.1, 0.4]] });
+  await h.click('btn-wizard');
+  await h.run(h.click('btn-wizard-next'));
+  const worst = Math.max(...h.peek().wizard.before.off);
+  assert.ok(worst >= 1.2 && worst <= 1.25, `start at one step, got ${worst}`);
+  assert.equal(A.counts.begin, 0, 'no calibBegin');
+  assert.match(h.$('wizard-msg').innerHTML, /within one step of center: nothing was sent[\s\S]*Quick calibration/);
+  assert.equal(h.$('btn-wizard-next').textContent, 'Calibrate anyway');
+});

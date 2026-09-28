@@ -18,7 +18,7 @@ import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitF
 import { runQuick } from './calib/quick.js';
 import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
-import { CENTERED_MAX, LSB_PCT, formatOffset } from './calib/lattice.js';
+import { CENTERED_MAX, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   quickPreflightRoute, rangeOutcomeView,
@@ -2682,10 +2682,13 @@ async function wizardNext() {
         return;
       }
       w.before = summarizeResult(measured);
-      // Partenza già al pavimento: come Quick, nessun comando. Una procedura
-      // Guided da stick perfetti può solo lasciarli o spostarli (telemetria v2
-      // del 28 set: 0,6% → 13% su un BDM-010). "Calibrate anyway" la forza.
-      if (!wizardForceNext && Math.max(...w.before.off) < CENTERED_MAX) {
+      // Partenza già centrata o entro un passo: nessun comando. Guided da stick
+      // quasi perfetti può solo lasciarli o spostarli: telemetria v2 del 28 set,
+      // 0,6% → 13% (BDM-010) e 1,2% → 2,3% (BDM-020); il 27 set 1,2% → 3,4%.
+      // Quick si ferma solo al pavimento; Guided anche a un passo, perché
+      // per l'ultimo passo Quick è la strada giusta. "Calibrate anyway" la forza.
+      const startWorst = Math.max(...w.before.off);
+      if (!wizardForceNext && startWorst <= WITHIN_ONE_STEP_MAX) {
         ops.endOp(w.op);
         w.op = null;
         w.controller = null;
@@ -2693,9 +2696,14 @@ async function wizardNext() {
         $('btn-wizard-cancel').classList.remove('hidden');
         $('btn-wizard-cancel').textContent = 'Close';
         btn.textContent = 'Calibrate anyway';
-        log('Guided calibration: both sticks already centered; nothing sent.');
-        $('wizard-msg').innerHTML = `<b>Already centered: nothing was sent.</b> Both sticks read ${esc(formatOffset(Math.max(...w.before.off)))}, `
-          + 'the measurement limit. Guided calibration can only keep them there or move them off-center.';
+        const floor = startWorst < CENTERED_MAX;
+        log(`Guided calibration: sticks already ${floor ? 'centered' : 'within one step'}; nothing sent.`);
+        $('wizard-msg').innerHTML = floor
+          ? `<b>Already centered: nothing was sent.</b> Both sticks read ${esc(formatOffset(startWorst))}, `
+            + 'the measurement limit. Guided calibration can only keep them there or move them off-center.'
+          : `<b>Already within one step of center: nothing was sent.</b> The worst stick reads ${esc(formatOffset(startWorst))}. `
+            + 'Guided calibration is for sticks that are far off-center and often makes a nearly centered stick worse. '
+            + 'For the last step, close this and run <b>Quick calibration</b> again.';
         return;
       }
       wizardForceNext = false;
