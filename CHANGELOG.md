@@ -2,6 +2,10 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-09-28 (night)
+
+- **When Quick can't center a stick, the result names the axis that stays off.** For example: "Pass after pass, the left stick’s Y axis stays about 6.5 steps above center; the other axes are centered." Telemetry v2 showed that failed runs almost always leave one axis at the same value while the other three are centered.
+
 ## 2026-09-28 (evening)
 
 - **Guided also sends nothing when the worst stick is within one step of center (≤1.25%).** In the telemetry, Guided made nearly centered sticks worse (1.2% → 2.3%, 1.2% → 3.4%); the page now points to Quick for the last step. **Calibrate anyway** still forces it.

@@ -281,6 +281,47 @@ function routeFor(worst, pinned) {
 // Vista dell'esito della calibrazione rapida.
 //   run = { outcome, worst, beforeWorst, bestWorst, committed, session? }
 //   (il ritorno di runQuick; `session.before/after` danno le righe per stick)
+// Asse che resta fermo fuori centro nelle ultime due passate verificate.
+// Telemetria v2 (27–28 set): quando Quick non centra, quasi sempre un solo
+// asse resta fuori mentre gli altri tre sono al pavimento, e ricade sullo
+// stesso valore (LY −6,5 passi 3 volte su 3) o alterna di un passo (LX 3,5/4,5).
+// Nominarlo dice all'utente che non è "tutto lo stick" a essere storto.
+// `passXY`: per passata [[lx, ly], [rx, ry]] in % (null se non verificata).
+// → [{ side: 'left'|'right', axis: 'X'|'Y', pct, steps, dir }]
+export function stuckAxes(passXY) {
+  const verified = (passXY ?? []).filter(xy => Array.isArray(xy));
+  if (verified.length < 2) return [];
+  const [a, b] = verified.slice(-2);
+  const out = [];
+  ['left', 'right'].forEach((side, i) => {
+    ['X', 'Y'].forEach((axis, j) => {
+      const va = a[i]?.[j], vb = b[i]?.[j];
+      if (!isNum(va) || !isNum(vb)) return;
+      // fuori: oltre mezzo passo dal centro (il pavimento di un asse è mezzo LSB)
+      const off = v => Math.abs(v) > LSB_PCT * 0.75;
+      if (!off(va) || !off(vb) || Math.sign(va) !== Math.sign(vb)) return;
+      // fermo: le due passate distano al massimo un passo
+      if (Math.abs(va - vb) > LSB_PCT + 1e-6) return;
+      const pct = (Math.abs(va) + Math.abs(vb)) / 2;
+      const dir = axis === 'X' ? (vb < 0 ? 'left of' : 'right of') : (vb < 0 ? 'above' : 'below');
+      out.push({ side, axis, pct, steps: Math.round((pct / LSB_PCT) * 2) / 2, dir });
+    });
+  });
+  return out;
+}
+
+function stuckAxisLine(passXY) {
+  const stuck = stuckAxes(passXY);
+  if (!stuck.length) return null;
+  const parts = stuck.map(s => `the ${s.side} stick’s ${s.axis} axis stays about ${s.steps} step${s.steps === 1 ? '' : 's'} ${s.dir} center`);
+  // "gli altri assi sono centrati" solo se lo dice davvero l'ultima passata
+  const last = (passXY ?? []).filter(xy => Array.isArray(xy)).at(-1);
+  const others = ['left', 'right'].flatMap((side, i) => ['X', 'Y'].map((axis, j) => ({ side, axis, v: last?.[i]?.[j] })))
+    .filter(o => !stuck.some(st => st.side === o.side && st.axis === o.axis));
+  const othersCentered = others.every(o => isNum(o.v) && Math.abs(o.v) <= LSB_PCT * 0.75);
+  return `Pass after pass, ${parts.join(' and ')}${othersCentered ? '; the other axes are centered' : ''}. Quick keeps capturing the same position for it.`;
+}
+
 export function quickOutcomeView(run, { nvStatus = null } = {}) {
   const { worst = null, beforeWorst = null, bestWorst = null, committed = false } = run;
   const before = run.session?.before ?? null;
@@ -291,6 +332,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
     ? `The ${worseAxes.map(w => `${w.stick.toLowerCase()} ${w.axis}`).join(', ')} axis moved further from center than before. Run the drift test before saving.`
     : null;
   const outcome = run.outcome;
+  const stuckLine = stuckAxisLine(run.session?.passXY);
   const stickLine = isNum(worst) && isNum(beforeWorst) && worst - beforeWorst <= QUICK_REGRESSION_EPS
     ? stickChangeLine(before, after, regressed) : null;
   const caution = worseAxes.length > 0 || !!stickLine;
@@ -416,12 +458,14 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
     case 'residual-deterministic':
       return view('warn', 'Quick calibration can’t get closer: try Guided', [
         `Worst stick ${fmt(worst)}. The last two passes landed on exactly the same value. Guided calibration samples the center differently.`,
+        stuckLine,
         'You can save this if it’s better than before, or run Quick again: a fresh try sometimes lands closer.',
       ], [ACTION.guided, ACTION.quick]);
     default: {
       const improved = isNum(beforeWorst) && beforeWorst - worst > QUICK_REGRESSION_EPS;
       return view('warn', improved ? 'Improved, not fully centered' : 'Not fully centered', [
         `Worst stick ${fmt(worst)}${isNum(beforeWorst) ? `, from ${fmt(beforeWorst)}` : ''}. You can save it if it’s better than before, run Quick again, or try Guided.`,
+        stuckLine,
         RETRY,
       ], [ACTION.quick, ACTION.guided]);
     }

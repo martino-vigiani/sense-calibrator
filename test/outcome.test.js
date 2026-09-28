@@ -6,7 +6,7 @@ import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
   FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
   guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, render,
-  revertAdvice, stickRows, writeLockFor,
+  revertAdvice, stickRows, stuckAxes, writeLockFor,
 } from '../js/ui/outcome.js';
 import { replayOutcomes } from '../ops/sim/replay-telemetry.mjs';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
@@ -706,4 +706,22 @@ test('a result three steps worse than the start disables Write; a smaller regres
     after: { off: [12.95, 3.55], noise: [0, 0], xy: [[12.9, 0.4], [3.5, 0.4]] } });
   assert.equal(g.actions[0].id, 'quick');
   assert.match(textOf(g), /Quick calibration usually brings the sticks back/);
+});
+
+test('a Quick result names the axis that stays off-center pass after pass', () => {
+  const L = 100 / 127.5, f = 0.5 * L;
+  // telemetria v2: LY −6,5 passi in 3 passate su 3, gli altri assi al pavimento
+  const ly = [[[f, -6.5 * L], [f, f]], [[f, -6.5 * L], [f, f]], [[f, -6.5 * L], [f, f]]];
+  assert.deepEqual(stuckAxes(ly).map(a => [a.side, a.axis, a.steps, a.dir]), [['left', 'Y', 6.5, 'above']]);
+  // alternanza di un passo (LX 3,5/4,5) conta ancora come fermo
+  const lx = [[[3.5 * L, f], [f, f]], [[4.5 * L, f], [f, f]]];
+  assert.deepEqual(stuckAxes(lx).map(a => [a.side, a.axis, a.steps, a.dir]), [['left', 'X', 4, 'right of']]);
+  // un asse che si muove di più passi o cambia segno non è fermo
+  assert.deepEqual(stuckAxes([[[3 * L, f], [f, f]], [[-3 * L, f], [f, f]]]), []);
+  assert.deepEqual(stuckAxes([[[2 * L, f], [f, f]], [[6 * L, f], [f, f]]]), []);
+  // una passata sola o non verificata: nessuna affermazione
+  assert.deepEqual(stuckAxes([[[3 * L, f], [f, f]], null]), []);
+  const v = quickOutcomeView({ outcome: 'residual-deterministic', worst: 5.11, beforeWorst: 4.33,
+    session: { before: null, after: null, passXY: ly } });
+  assert.match(textOf(v), /the left stick’s Y axis stays about 6\.5 steps above center/);
 });
