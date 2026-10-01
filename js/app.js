@@ -3043,6 +3043,7 @@ function resetRangeReadouts(hint) {
     $('range-state-' + side).hidden = inCheck;
     $('range-areas-' + side).hidden = inCheck;
     $('range-areas-' + side).textContent = '';
+    if (inCheck) $('dial-range-' + side).setAttribute('aria-label', `${side === 'l' ? 'Left' : 'Right'} stick range check`);
   }
   if (!inCheck && rangeSession?.tracker) renderRangeProgress(rangeProgress(rangeSession.tracker));
 }

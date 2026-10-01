@@ -935,6 +935,7 @@ main {
 
 /* range */
 
+#modal-range .modal-actions .btn { min-height: 44px; }
 .range-minmax {
   display: flex;
   justify-content: center;

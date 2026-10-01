@@ -172,6 +172,8 @@ test('real app keeps Done off at 100% until both sticks reverse, then clears cal
   assert.equal(h.$('range-requirements-r').hidden, true);
   assert.equal(h.$('range-legend').hidden, true);
   assert.equal(h.$('range-help').hidden, true);
+  assert.equal(h.$('dial-range-l').getAttribute('aria-label'), 'Left stick range check');
+  assert.equal(h.$('dial-range-r').getAttribute('aria-label'), 'Right stick range check');
   assert.equal(h.$('btn-range-done').textContent, 'Skip check');
 });
 
