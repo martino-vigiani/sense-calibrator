@@ -26,10 +26,12 @@ import {
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
+import { rangeProgress, rangeRequirementsHtml } from './ui/range-progress.js';
 import {
   WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
+import { rangeCompletion } from './calib/range-diagnostics.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -206,6 +208,21 @@ class StickDial {
       ctx.strokeStyle = INK;
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      // I settori corti del Range restano distinguibili anche senza colore:
+      // archi tratteggiati sul bordo, alla stessa soglia del tracker. Nel
+      // controllo dopo rangeEnd non c'è una checklist di calibrazione.
+      if (this.shortBins?.length) {
+        ctx.strokeStyle = '#8a4b00';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([3, 3]);
+        for (const bin of this.shortBins) {
+          const from = bin / RANGE_BINS * 2 * Math.PI - Math.PI;
+          ctx.beginPath();
+          ctx.arc(c, c, R, from + 0.01, from + 2 * Math.PI / RANGE_BINS - 0.01);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
     } else {
       // scia
       for (let i = 1; i < this.trail.length; i++) {
@@ -3007,6 +3024,8 @@ function blockedByRangeWriteLock() {
 function useRangeTracker(tracker) {
   dialRangeL.bins = tracker.left.bins;
   dialRangeR.bins = tracker.right.bins;
+  dialRangeL.shortBins = [];
+  dialRangeR.shortBins = [];
 }
 
 function resetRangeReadouts(hint) {
@@ -3014,6 +3033,31 @@ function resetRangeReadouts(hint) {
   $('range-pct').textContent = 'Coverage 0%';
   $('range-minmax').innerHTML = '<span>LX</span><span>LY</span><span>RX</span><span>RY</span>';
   $('range-hint').textContent = hint;
+  lastMinmax = -Infinity;
+  lastRangeHint = -Infinity;
+  const inCheck = !!rangeCheck;
+  $('range-help').hidden = true;
+  $('range-legend').hidden = inCheck;
+  for (const side of ['l', 'r']) {
+    $('range-requirements-' + side).hidden = inCheck;
+    $('range-state-' + side).hidden = inCheck;
+    $('range-areas-' + side).hidden = inCheck;
+    $('range-areas-' + side).textContent = '';
+  }
+  if (!inCheck && rangeSession?.tracker) renderRangeProgress(rangeProgress(rangeSession.tracker));
+}
+
+function renderRangeProgress(view) {
+  for (const [side, stick, dial] of [['l', view.left, dialRangeL], ['r', view.right, dialRangeR]]) {
+    setLive($('range-requirements-' + side), rangeRequirementsHtml(stick), { html: true });
+    setLive($('range-state-' + side), stick.complete ? 'Complete' : 'In progress');
+    setLive($('range-areas-' + side), stick.areasText);
+    const canvas = $('dial-range-' + side);
+    if (canvas.getAttribute('aria-label') !== stick.dialLabel) canvas.setAttribute('aria-label', stick.dialLabel);
+    dial.shortBins = stick.shortBins;
+  }
+  setLive($('range-help'), view.help);
+  $('range-help').hidden = !view.help;
 }
 
 // Passo introduttivo prima di rangeBegin (come Start nel wizard): a sessione
@@ -3075,6 +3119,7 @@ function reportAbandonedRange(session, { now = false } = {}) {
     coverage: [status?.left.coverage ?? 0, status?.right.coverage ?? 0],
     turns: [status?.left.turns ?? 0, status?.right.turns ?? 0],
     allEdges: status?.missingDirs.length === 0,
+    completion: rangeCompletion(status, session.tracker?.params.minCoverage),
     durMs: performance.now() - session.startTs,
   }), { device: session.device, controller: session.controller, epoch: session.op.epoch, now });
   recordEvent('range', { aborted: 'disconnected', incomplete: true, committed: !!session.closing });
@@ -3157,6 +3202,10 @@ function updateRangeUI(ts) {
 
   if (ts - lastMinmax > 120) {
     lastMinmax = ts;
+    // La presentazione crea checklist e descrizioni: bastano gli stessi
+    // 120 ms degli estremi; il gate Done continua a essere letto a ogni rAF.
+    const view = rangeProgress(rangeSession.tracker, ts - rangeSession.startTs);
+    renderRangeProgress(view);
     // Una direzione è "raggiunta" a 0.9 dell'escursione massima dello stesso
     // stick (range-coverage.js): con la vecchia calibrazione un bordo compresso
     // non arriva mai a ±1.0, ma conta che l'utente l'abbia spinto a fondo.
@@ -3173,7 +3222,7 @@ function updateRangeUI(ts) {
       + span('RY', R.min.y, R.max.y, ok(st.right, 'up'), ok(st.right, 'down'));
 
     let hint;
-    if (st.complete) hint = 'All extremes reached, both directions ✓';
+    if (st.complete) hint = view.hint;
     else if (st.degenerate && ts - rangeSession.startTs >= RANGE_DEFAULTS.unlockMs) {
       // Nessuna chiusura con una direzione sotto metà corsa: il range salvato
       // sarebbe degenere. L'unica uscita senza scrivere è spegnere il controller.
@@ -3183,7 +3232,7 @@ function updateRangeUI(ts) {
         + (lastNvStatus === 'locked'
           ? 'To leave without changes, turn the controller off (hold PS for 10 s).'
           : 'The only other way out is to turn the controller off (hold PS for 10 s).');
-    } else hint = `Missing: ${st.missing.join(', ')}`;
+    } else hint = view.hint;
     // #range-hint è role="status": solo traguardi (rangeStatus conta giri
     // interi) e al massimo un cambio al secondo, salvo il completamento. Nel
     // primo giro le quattro direzioni arrivano a ~0.4 s l'una dall'altra: il
@@ -3225,6 +3274,7 @@ async function finishRange() {
     allEdges: st.missingDirs.length === 0,
     turns: [+st.left.turns.toFixed(1), +st.right.turns.toFixed(1)],
     reversed: st.left.reversed && st.right.reversed,
+    completion: rangeCompletion(st, session.tracker.params.minCoverage),
     finishAnyway,
     ms: Math.round(performance.now() - session.startTs),
   };
@@ -3245,6 +3295,7 @@ async function finishRange() {
     emitCalibV2(ctx => buildRangeEvent(ctx, {
       outcome, committed,
       coverage: [rangeStats.covL, rangeStats.covR], turns: rangeStats.turns, allEdges: rangeStats.allEdges,
+      completion: rangeStats.completion,
       durMs: rangeStats.ms,
     }), { device: session.device, controller, epoch: op.epoch });
   };
@@ -3334,7 +3385,7 @@ async function finishRange() {
 // che l'unica uscita è spegnere il controller. Nel controllo successivo è
 // falsa due volte (c'è "Skip check", e spegnere ora butterebbe il range appena
 // applicato), quindi si sostituisce e startRange la rimette.
-const RANGE_EXIT_HINT_SESSION = 'There is no Cancel: this ends when both sticks have covered the whole edge, or when you turn the controller off (hold PS for 10 s).';
+const RANGE_EXIT_HINT_SESSION = 'There is no Cancel. Complete every check on both sticks, or turn the controller off (hold PS for 10 s) to leave without finishing.';
 const RANGE_EXIT_HINT_CHECK = 'Nothing is sent to the controller now: rotate once to check, or press Skip check.';
 
 function startRangeCheck() {

@@ -45,6 +45,19 @@ export const QUICK_REGRESSION_EPS = 0.8;
 export const QUICK_NOISE_WORN = 1.5;       // noise p95 oltre cui il sensore è consumato
 export { QUICK_STABLE_MS, QUICK_STABLE_SPREAD, QUICK_STABLE_TIMEOUT };
 
+// Diagnostica osservativa, limitata anche quando il simulatore aumenta i
+// parametri: il limite non cambia mai comandi, attese o passate dell'algoritmo.
+const VERIFICATION_MAX_PASSES = 8;
+const VERIFICATION_MAX_ATTEMPTS = 2;
+const VERIFICATION_MAX_RECORDS = 16;
+const verificationValue = (value, max = 200, digits = 2) => Number.isFinite(value)
+  ? +Math.max(0, Math.min(max, value)).toFixed(digits) : null;
+const verificationPair = (result, field) => {
+  if (!result) return null;
+  const pair = [verificationValue(result.left?.[field]), verificationValue(result.right?.[field])];
+  return pair.every(value => value !== null) ? pair : null;
+};
+
 // Parametri di oggi. Una variante del simulatore è un override di questo
 // oggetto, mai una patch al codice.
 export const QUICK_DEFAULTS = Object.freeze({
@@ -214,6 +227,7 @@ export async function runQuick({
     before: null,
     passes: [],
     passXY: [],
+    verification: { baselineNoise: null, baselineRawNoise: null, attempts: [] },
     after: null,
     unstableEvents: 0,
   };
@@ -223,6 +237,23 @@ export async function runQuick({
   const recordPass = (worst, result = null) => {
     session.passes.push(worst === null ? null : +worst.toFixed(2));
     session.passXY.push(result ? summarizeResult(result).xy : null);
+  };
+  // `off` è quanto osservato, anche su una finestra respinta; `accepted`
+  // significa scelta come verifica ordinaria, stabile e sotto il tetto.
+  // Un'estrema resta false anche quando stabile e usata per il blocco sicuro.
+  // `hold` è l'esito dell'attesa esistente, non una prova del rilascio fisico.
+  const recordVerification = (pass, attempt, result, released, accepted, criterion) => {
+    if (pass > VERIFICATION_MAX_PASSES || attempt > VERIFICATION_MAX_ATTEMPTS
+      || session.verification.attempts.length >= VERIFICATION_MAX_RECORDS) return;
+    session.verification.attempts.push({
+      pass, attempt,
+      off: verificationPair(result, 'offset'),
+      noise: verificationPair(result, 'noise'),
+      stableFraction: verificationValue(result?.stableFraction, 1, 3),
+      rawNoise: verificationValue(result?.rawNoise),
+      hold: attempt === 1 ? 'not-required' : released ? 'released' : 'not-released',
+      accepted, criterion,
+    });
   };
   // Dopo ogni await: se il controller non è più quello di partenza, nessun
   // altro comando. Prima il ciclo leggeva il `ds5` globale e, dopo un replug a
@@ -257,6 +288,8 @@ export async function runQuick({
     const before = await measureOffset(p.baselineMs, { requireCentered: true });
     if (!before || !isCurrent()) return blocked();
     session.before = summarizeResult(before);
+    session.verification.baselineNoise = verificationPair(before, 'noise');
+    session.verification.baselineRawNoise = verificationValue(before.rawNoise);
     session.settled = true;
     // Punto di partenza, nella stessa scala delle passate: decideAfterPass ci
     // semina `bestWorst` (un plateau peggiore dell'inizio non è convergenza),
@@ -472,13 +505,20 @@ export async function runQuick({
         }
         const r = await measureOffset(p.verifyMs);
         ensureCurrent();
-        if (r && !stableEnough(r))
+        const stable = r && stableEnough(r);
+        const belowCeiling = r && Math.max(r.left.offset, r.right.offset) < p.catastrophicPct;
+        // Registra il criterio sui valori originali: arrotondamento e clamp
+        // della sola diagnostica non devono spostare una decisione di soglia.
+        const criterion = !stable ? 'none' : r.stableFraction == null ? 'legacy'
+          : r.stableFraction >= DRIFT_MIN_STABLE ? 'stable-fraction' : 'baseline-noise';
+        recordVerification(pass, attempt, r, released, !!(stable && belowCeiling), criterion);
+        if (r && !stable)
           log(`Pass ${pass}: verification unsettled (noise ${Math.max(r.left.noise, r.right.noise).toFixed(1)}%, at rest ${beforeNoise.toFixed(1)}%).`);
         // Anche una misura instabile sopra il tetto non può diventare un
         // risultato positivo solo perché la frazione stabile è bassa.
         if (r && Math.max(r.left.offset, r.right.offset) >= p.catastrophicPct) implausible = r;
-        if (!r || !stableEnough(r)) continue;
-        if (Math.max(r.left.offset, r.right.offset) < p.catastrophicPct) result = r;
+        if (!r || !stable) continue;
+        if (belowCeiling) result = r;
       }
       onProgress({ bar: base + 100 / p.maxPasses });
       if (!result && implausible) {

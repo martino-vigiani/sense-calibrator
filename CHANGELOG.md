@@ -2,6 +2,13 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-10-01
+
+- Range shows each stick's edge coverage, four sides, full turns and direction reversal separately. A full coverage bar no longer hides a missing reversal; short sectors are marked on the dials. Completion and Write safety requirements are unchanged.
+- Quick records the stability of the verification measurements it already takes, including rejected extreme readings. Range records which completion requirements were missing. These optional v2 fields preserve older pages and logs; sharing waits for renewed consent. No calibration commands, timings, passes or thresholds change.
+- The private nightly quality report has a versioned deployment, verified counts and an atomic update, with a separate v2 history and rollback on failure. It uses the existing v2 definitions, rather than the old report's thresholds and exclusions.
+- Automated checks use synthetic controllers and real browser rendering. They do not establish the cause of any physical controller's extreme reading.
+
 ## 2026-09-28 (night)
 
 - **When Quick can't center a stick, the result names the axis that stays off.** For example: "Pass after pass, the left stick’s Y axis stays about 6.5 steps above center; the other axes are centered." Telemetry v2 showed that failed runs almost always leave one axis at the same value while the other three are centered.

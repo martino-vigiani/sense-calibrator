@@ -54,7 +54,7 @@ test('first visit: nothing leaves the browser until Keep sharing, then v1 and v2
   await h.advance(50);
   assert.equal(v1Sent(h), 1, 'the complete Quick session on v1, unchanged');
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
-  assert.equal(h.store.get('sense-telemetry-scope'), '3');
+  assert.equal(h.store.get('sense-telemetry-scope'), '4');
   assert.equal(h.store.get('sense-telemetry-consent'), '1');
   // da qui gli eventi partono subito
   await h.click('btn-flash');
@@ -96,10 +96,10 @@ test('a v1 sharer sees the notice again, with what changed, and even v1 waits fo
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
 });
 
-test('a v2 sharer sees the updated axis description before anything leaves', async () => {
+for (const previousScope of ['2', '3']) test(`a scope ${previousScope} sharer sees the diagnostic description before anything leaves`, async () => {
   const { h } = await setup({
     telemetryNoticeSeen: false,
-    storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '2', 'sense-telemetry-consent': '1' },
+    storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': previousScope, 'sense-telemetry-consent': '1' },
   });
   assert.equal(h.visible('telemetry-notice'), true);
   assert.equal(h.visible('notice-changed'), true);
@@ -107,7 +107,7 @@ test('a v2 sharer sees the updated axis description before anything leaves', asy
   assert.equal(h.uploads.length + h.uploadsV2.length, 0);
   await h.click('btn-notice-ok');
   await h.advance(50);
-  assert.equal(h.store.get('sense-telemetry-scope'), '3');
+  assert.equal(h.store.get('sense-telemetry-scope'), '4');
   assert.equal(v1Sent(h), 1);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
 });
@@ -180,7 +180,7 @@ test('ticking the footer box later accepts the current description and sends fro
     storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-consent': '0' },
   });
   change(h, 'telemetry-consent-footer', true);
-  assert.equal(h.store.get('sense-telemetry-scope'), '3');
+  assert.equal(h.store.get('sense-telemetry-scope'), '4');
   await quick(h);
   await h.advance(50);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
@@ -226,6 +226,9 @@ test('Quick uploads signed half-LSB axes for the baseline, each pass, and the fi
     'the uploaded axes retain stick order, axis order, sign, and pass order',
   );
   assert.ok(event.beforeAxes[0][0] > 0 && event.beforeAxes[0][1] < 0);
+  assert.deepEqual(event.verification, local.verification, 'existing verification readings reach the actual upload');
+  assert.ok(event.verification.attempts.length > 0);
+  assert.ok(event.verification.attempts.some(a => a.accepted));
 });
 
 test('Quick → Write → Cancel → disconnect: the save event says disconnected after one cancel', async () => {
@@ -402,23 +405,28 @@ test('Range finished anyway: an incomplete range event, and the save period ends
   assert.equal(r.length, 1);
   assert.deepEqual([r[0].outcome, r[0].committed, r[0].allEdges], ['incomplete', true, true], 'every edge reached, but only one way round');
   assert.ok(r[0].turns.every(t => t >= 0.5 && t < 2), `${r[0].turns}`);
+  assert.deepEqual(r[0].completion.reversed, [false, false]);
+  assert.deepEqual(r[0].completion.missing, [['turns', 'reverse'], ['turns', 'reverse']]);
+  assert.ok(r[0].completion.reverseTurns.every(t => t < 0.5));
   pagehide(h);
   await h.advance(0);
   const save = h.uploadsV2.find(e => e.type === 'save');
   assert.deepEqual([save.result, save.lock, save.reasons, save.ref], ['left', 'disabled', ['range-incomplete'], r[0].seq]);
 });
 
-// Il banner corto: al massimo ~40 parole, ogni categoria e il nuovo dato per
-// asse nominati (Keep sharing accetta lo scope 3), "Details" verso il README.
+// Il banner corto: meno di 50 parole, ogni categoria e il nuovo dato per
+// asse nominati (Keep sharing accetta lo scope 4), "Details" verso il README.
 test('the consent banner is short, names every v2 category and links the full description', async () => {
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const notice = html.slice(html.indexOf('id="telemetry-notice"'), html.indexOf('class="notice-actions"'));
   const body = notice.slice(notice.indexOf('<p>')).replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, "'").replace(/\s+/g, ' ').trim();
   const words = body.split(' ').length;
-  assert.ok(words <= 42, `${words} words: ${body}`);
-  for (const category of [/calibration results/, /whether they were saved/, /resting stick noise/]) assert.match(body, category);
-  assert.match(body, /signed stick positions by axis/);
+  assert.ok(words <= 48, `${words} words: ${body}`);
+  for (const category of [/calibration results/, /saving/, /resting stick noise/]) assert.match(body, category);
+  assert.match(body, /signed axis positions/);
+  assert.match(body, /Quick stability/);
+  assert.match(body, /missing Range checks/);
   assert.match(body, /No serial number or device ID/);
   assert.match(body, /nothing from this visit has been sent yet/);
   assert.match(notice, /href="https:\/\/github\.com\/martino-vigiani\/sense-calibrator#telemetry--privacy"[^>]*>Details</);

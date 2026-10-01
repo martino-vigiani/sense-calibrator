@@ -946,22 +946,57 @@ main {
   margin: 4px 0 8px;
 }
 .range-minmax .edge-ok { color: var(--ink); font-weight: 700; }
-.range-hint { font-size: 12px; }
+.modal-panel .range-hint {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--ink);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
 
 .range-dials {
-  display: flex;
-  justify-content: center;
-  gap: clamp(12px, 4vw, 26px);
-  margin: 18px 0 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(12px, 4vw, 24px);
+  margin: 14px 0 8px;
 }
+.range-stick { min-width: 0; margin: 0; }
+.range-stick figcaption { display: flex; flex-direction: column; align-items: center; font-size: 13px; }
+.range-stick figcaption span { font-size: 11px; color: var(--ink-2); }
 /* 38vw non teneva conto del padding del modale: a 320px i due quadranti
    sfondavano il pannello. Adesso si restringono dentro il contenitore. */
 .range-dials canvas {
-  flex: 0 1 200px;
+  display: block;
+  width: 100%;
   min-width: 0;
-  max-width: 200px;
+  max-width: 160px;
   height: auto;
   aspect-ratio: 1;
+  margin: 4px auto 6px;
+}
+.range-requirements { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.range-requirements li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.range-requirements li[data-met="true"] { color: var(--ink); }
+.range-requirement-mark { font-weight: 700; }
+.range-requirement-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.modal-panel .range-areas { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--ink-2); }
+.modal-panel .range-legend { margin: 6px 0 12px; font-size: 11px; color: var(--ink-2); }
+.modal-panel .range-help {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--edge);
+  font-size: 12px;
+  color: var(--ink-2);
 }
 .range-meta {
   display: flex;

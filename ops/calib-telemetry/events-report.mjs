@@ -21,6 +21,7 @@
 // una riga che non lo rispetta è contata e scartata, mai interpretata.
 import fs from 'node:fs/promises';
 import { validateEventV2 } from '../../js/telemetry-v2.js';
+import { diagnosticsReport } from './diagnostics-report.mjs';
 
 export const EVENTS_REPORT_SCHEMA = 'sense-calibrator.telemetry-events.v2';
 export const DEFAULT_EVENTS_CONFIG = Object.freeze({ minimumCohortSize: 5, since: null });
@@ -288,6 +289,7 @@ export function buildEventsReport(text, options = {}) {
     schema: EVENTS_REPORT_SCHEMA,
     config,
     input,
+    diagnostics: diagnosticsReport(events),
     counts: { visits: counts.visits, byType: Object.fromEntries(Object.entries(counts.byType).sort()) },
     calibrations: {
       committed: Object.fromEntries(Object.entries(calibrations.byTypeOutcome).sort()),

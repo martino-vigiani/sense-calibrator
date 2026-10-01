@@ -100,7 +100,7 @@ test('#range-hint (role=status) is written only when its text changes', async ()
   const writes = countWrites(h.$('range-hint'), 'textContent');
   await h.advance(4000); // stick a riposo: il tick gira ogni 120 ms, il testo non cambia
   const distinctChanges = writes.filter((w, i) => i === 0 || w !== writes[i - 1]).length;
-  assert.ok(h.$('range-hint').textContent.startsWith('Missing: '), h.$('range-hint').textContent);
+  assert.match(h.$('range-hint').textContent, /^Slowly trace the dashed edge sectors on both sticks/);
   assert.equal(writes.length, distinctChanges, `every write must change the text: ${JSON.stringify(writes)}`);
   assert.ok(writes.length <= 1, `a resting stick keeps the same hint, got ${writes.length} writes`);
   await h.advance(16000);

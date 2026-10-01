@@ -30,19 +30,15 @@ import { axisWorsening } from '../calib/wizard-gate.js';
 // sconsigliato: tre passi del reticolo (3 × 0,784 punti).
 export const MUCH_WORSE_PCT = 3 * LSB_PCT;
 
-// Tasso di riuscita pubblicato nel testo. Viene dal report di qualità v2 di
-// WS3 (ops/calib-telemetry), coorte PG (n=354, generato il 2026-09-25):
-// 267/354 = 75.4% finiscono sotto 1.2% (centrato), 298/354 = 84.2% entro un
-// passo. Per livello di partenza (stessa coorte): Mild 71/96 = 74%, Marked
-// 147/199 = 74%; con rumore a riposo >1.5%, 22/36 = 61% finiscono centrati
-// (la guida lo dice "about 6 in 10"). Va rigenerato a ogni release: è un
-// dato, non una promessa.
+// Tasso pubblicato, report di qualità v2 del 2026-10-01, coorte PG:
+// 458/602 sotto 1.2%, 503/602 entro un passo. Sono sessioni, non
+// controller distinti; il dato va aggiornato a ogni release, non è una promessa.
 export const FIX_RATE = Object.freeze({
   cohort: 'PG',
-  n: 354,
-  centered: 0.754,
-  withinOneStep: 0.842,
-  source: 'WS3 quality report v2, 2026-09-25',
+  n: 602,
+  centered: 0.760797,
+  withinOneStep: 0.835548,
+  source: 'quality report v2, 2026-10-01',
 });
 // La stessa cifra a parole: "about 3 in 4" regge da 0.70 a 0.80.
 export const FIX_RATE_WORDS = 'about 3 in 4';

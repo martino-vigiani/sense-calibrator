@@ -33,8 +33,8 @@ const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 // Stessi valori in subralabs-v2/code/calib-telemetry/calib-telemetry-v2.test.js.
 const CONTRACT_SHA256 = {
-  schema: '5a6680ac74c197056266572c57d3610213bbf5ae69c80a51ea5c1d07c728bbf0',
-  fixtures: '9312abed48d68882a8061863db7c164952c51170807919fb093cdcf5a3c267d5',
+  schema: '282796145fb4416ccd6295207226915cadce7d176b8f9530e1b75cf7d1a7ccc7',
+  fixtures: '9e945ac15bdbfb61b7d6afe73a7671cae51e4794724134d3adea5af424878c78',
 };
 
 const CTX = { sid: '3f9a01bc', seq: 0, board: 'BDM-030', fw: 16777258 };
@@ -67,9 +67,10 @@ test('every valid fixture passes and every invalid fixture is rejected', () => {
 test('the schema is closed: every object rejects unknown fields and every string is an enum or the sid pattern', () => {
   const walk = (node, path) => {
     if (!node || typeof node !== 'object') return;
-    if (node.type === 'object') {
+    if ([node.type].flat().includes('object')) {
       assert.equal(node.additionalProperties, false, `${path} must reject unknown fields`);
-      assert.deepEqual([...node.required].sort(), Object.keys(node.properties).sort(), `${path}: every field is required`);
+      const optional = { '#/$defs/QuickEvent': ['verification'], '#/$defs/RangeEvent': ['completion'] }[path] ?? [];
+      assert.deepEqual([...node.required, ...optional].sort(), Object.keys(node.properties).sort(), `${path}: only backward-compatible diagnostics are optional`);
     }
     const types = [node.type].flat();
     if (types.includes('string')) assert.ok(node.pattern || node.enum || 'const' in node, `${path}: free string`);
@@ -116,7 +117,7 @@ test('a real runQuick session maps to a valid quick event with rounded offsets a
   const event = buildQuickEvent(CTX, { session: res.session, outcome: res.outcome, committed: res.committed, durMs: 23_456 });
   assert.equal(validateEventV2(event), null);
   assert.deepEqual(Object.keys(event).sort(), ['after', 'afterAxes', 'app', 'before', 'beforeAxes', 'board', 'committed', 'durS', 'fw', 'needsPowerCycle',
-    'outcome', 'passAxes', 'passes', 'seq', 'sid', 'start', 'truncated', 'type', 'v']);
+    'outcome', 'passAxes', 'passes', 'seq', 'sid', 'start', 'truncated', 'type', 'v', 'verification']);
   assert.equal(event.outcome, res.outcome);
   assert.equal(event.durS, 23);
   assert.equal(event.app, TELEMETRY_APP_BUILD);
@@ -260,7 +261,7 @@ test('uploadEventV2 posts exactly the event as JSON with keepalive, and rejects 
   }), /HTTP 429/);
 });
 
-test('the consent scope is 3 and the app build is inside the contract range', () => {
-  assert.equal(TELEMETRY_SCOPE, 3);
+test('the consent scope is 4 and the app build is inside the contract range', () => {
+  assert.equal(TELEMETRY_SCOPE, 4);
   assert.equal(validateEventV2({ ...FIXTURES.valid[0].event, app: TELEMETRY_APP_BUILD }), null);
 });

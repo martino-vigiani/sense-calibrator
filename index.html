@@ -373,9 +373,9 @@
   <span>Built by <a href="https://subralabs.com" target="_blank" rel="noopener">SubraLabs</a> &middot; <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">read the technical write-up</a></span>
   <span>Calibration protocol derived from <a href="https://github.com/dualshock-tools/dualshock-tools.github.io" target="_blank" rel="noopener">dualshock-tools</a> (MIT).</span>
   <span>Unofficial tool &middot; use at your own risk.</span>
-  <label class="telemetry-label" title="Anonymous: calibration outcomes, signed stick positions by axis, saving and resting stick noise; no serial number, device ID, typed text or exact time">
+  <label class="telemetry-label" title="Anonymous: calibration outcomes, signed stick positions by axis, Quick verification stability, missing Range checks, saving and resting stick noise; no serial number, device ID, typed text or exact time">
     <input type="checkbox" id="telemetry-consent-footer">
-    <span>Share anonymous telemetry: each calibration&rsquo;s type and outcome; signed stick position by axis before and after Quick or Guided, and after each Quick pass; each Write to memory attempt and, if a result wasn&rsquo;t saved, why (Write locked, cancelled, disconnected, page closed); short summaries of resting stick noise. No serial number, device ID, typed text or exact time (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
+    <span>Share anonymous telemetry: each calibration&rsquo;s type and outcome; signed stick position by axis before and after Quick or Guided, and after each Quick pass; Quick verification stability and missing Range checks; each Write to memory attempt and, if a result wasn&rsquo;t saved, why (Write locked, cancelled, disconnected, page closed); short summaries of resting stick noise. No serial number, device ID, typed text or exact time (on by default; <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">what&rsquo;s sent &amp; why</a>)</span>
   </label>
 </footer>
 
@@ -387,7 +387,7 @@
     <p id="quick-handsoff" class="handsoff" data-level="unknown">Waiting for the controller…</p>
     <p id="quick-battery" class="hint battery-hint hidden"></p>
     <div class="progress" role="progressbar" aria-label="Calibration progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="quick-bar"></i></div>
-    <label class="telemetry-label" title="Anonymous: calibration outcomes, signed stick positions by axis, saving and resting stick noise; no serial number, device ID, typed text or exact time">
+    <label class="telemetry-label" title="Anonymous: calibration outcomes, signed stick positions by axis, Quick verification stability, missing Range checks, saving and resting stick noise; no serial number, device ID, typed text or exact time">
       <input type="checkbox" id="telemetry-consent">
       <span>Share anonymous calibration results</span>
     </label>
@@ -441,29 +441,42 @@
   <div class="modal-panel" tabindex="-1">
     <h3 id="range-title">Range calibration</h3>
     <div id="range-intro">
-      <p>Range calibration teaches the controller how far each stick travels. You will <b>rotate both sticks
-        slowly, pressed all the way against the edge</b>, at least 2 turns one way and 2 the other.</p>
-      <p><b>Once it starts there is no Cancel.</b> It ends when both sticks have covered the whole edge. The only
+      <p>Range calibration teaches the controller how far each stick travels. <b>Rotate both sticks slowly
+        against the rim</b>: cover the edge, reach all four sides, make two full turns in total, then reverse
+        for at least half a turn. Each stick has its own checklist.</p>
+      <p><b>Once it starts there is no Cancel.</b> Done needs every check on both sticks. The only
         way out without finishing is to turn the controller off (hold PS for 10 s).</p>
       <p id="range-intro-pinned" class="hint hidden"></p>
     </div>
-    <p id="range-msg" class="hidden">The controller is sampling. <b>Slowly rotate both sticks while pressing them all the way
-      against the edge</b>, at least 2 turns one way and 2 the other. Keep working the areas where the trace
-      stays short.</p>
+    <p id="range-msg" class="hidden">The controller is sampling. Follow the instruction below, keeping each stick
+      pressed gently against the rim.</p>
     <div id="range-live" class="hidden">
+    <p id="range-hint" class="range-hint" role="status">Slowly rotate both sticks against the rim.</p>
     <div class="range-dials">
-      <canvas id="dial-range-l" role="img" width="200" height="200" aria-label="Left stick coverage"></canvas>
-      <canvas id="dial-range-r" role="img" width="200" height="200" aria-label="Right stick coverage"></canvas>
+      <figure class="range-stick">
+        <figcaption><b>Left stick</b><span id="range-state-l">In progress</span></figcaption>
+        <canvas id="dial-range-l" role="img" width="200" height="200" aria-label="Left stick coverage"></canvas>
+        <ul id="range-requirements-l" class="range-requirements" aria-label="Left stick requirements"></ul>
+        <p id="range-areas-l" class="range-areas"></p>
+      </figure>
+      <figure class="range-stick">
+        <figcaption><b>Right stick</b><span id="range-state-r">In progress</span></figcaption>
+        <canvas id="dial-range-r" role="img" width="200" height="200" aria-label="Right stick coverage"></canvas>
+        <ul id="range-requirements-r" class="range-requirements" aria-label="Right stick requirements"></ul>
+        <p id="range-areas-r" class="range-areas"></p>
+      </figure>
     </div>
+    <p id="range-legend" class="range-legend">Dashed sectors need more reach. Done needs every check on both sticks.</p>
+    <p id="range-help" class="range-help" hidden></p>
     <div class="range-minmax mono" id="range-minmax">
       <span>LX</span><span>LY</span><span>RX</span><span>RY</span>
     </div>
     <div class="range-meta">
-      <span id="range-hint" class="range-hint" role="status">Extremes not reached yet</span>
       <span id="range-pct">Coverage 0%</span>
+      <span>Edge sector coverage of the weaker stick</span>
     </div>
-    <div class="progress" role="progressbar" aria-label="Range coverage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="range-bar"></i></div>
-    <p id="range-exit-hint" class="hint">There is no Cancel: this ends when both sticks have covered the whole edge, or when you turn the controller off (hold PS for 10 s).</p>
+    <div class="progress" role="progressbar" aria-label="Range edge coverage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="range-bar"></i></div>
+    <p id="range-exit-hint" class="hint">There is no Cancel. Complete every check on both sticks, or turn the controller off (hold PS for 10 s) to leave without finishing.</p>
     </div>
     <div class="modal-actions">
       <button id="btn-range-cancel" class="btn btn-ghost">Cancel</button>
@@ -637,7 +650,7 @@
     <h4 id="notice-title">Help improve the calibration</h4>
     <p id="notice-changed" class="hidden"><b>What&rsquo;s shared has changed.</b></p>
     <p>
-      Sharing sends anonymous calibration results, including signed stick positions by axis, whether they were saved, and short resting stick noise summaries. No serial number or device ID. <b>On by default</b>; nothing from this visit has been sent yet.
+      Sharing sends anonymous calibration results: signed axis positions, Quick stability, missing Range checks, saving, and resting stick noise summaries. No serial number or device ID. <b>On by default</b>; nothing from this visit has been sent yet.
       <a href="https://github.com/martino-vigiani/sense-calibrator#telemetry--privacy" target="_blank" rel="noopener">Details</a>
     </p>
   </div>

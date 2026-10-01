@@ -13,7 +13,7 @@
 // campioni. `restrictedCompare` resta per la diagnosi storica col legacy.
 //
 // Campi confrontati: l'intero oggetto sessione (tranne `t`, il timestamp, e
-// `passXY`, nuova sola osservazione telemetrica senza effetto sulla policy),
+// `passXY` e `verification`, sole osservazioni telemetriche senza effetto sulla policy),
 // l'esito, i calibEnd del firmware, il residuo vero e i comandi inviati.
 // `dur` differisce per costruzione di 300 ms sulle sessioni completate: è la
 // pausa prima della chiusura del modale, che resta nella UI di app.js.
@@ -28,7 +28,7 @@ export const outcomeFieldsOf = r => JSON.stringify([r.s.passes, r.s.before, r.s.
 
 // Il golden sintetico conserva i campi che servono al test, non `dur`.
 export function goldenRecord(r) {
-  const { passXY, ...s } = r.s;
+  const { passXY, verification, ...s } = r.s;
   return { i: r.i, s, outcome: r.outcome, calibEnds: r.calibEnds, trueQuant: r.trueQuant, counts: r.counts };
 }
 
@@ -63,7 +63,7 @@ const GOLDEN_COMMON = Object.freeze({ n: 400, seed: 7, population: 'synthetic', 
 const goldenPath = scenario => new URL(`../../test/fixtures/sim-golden-synthetic-${scenario}.json`, import.meta.url);
 
 // Diff ricorsivo: non nasconde un cambio di campioni o comandi dietro una
-// mediana d'esito uguale. `passXY` è solo telemetria ed è già escluso da
+// mediana d'esito uguale. `passXY` e `verification` sono già esclusi da
 // goldenRecord; tutti gli altri campi restano confrontati.
 export function fieldDiffs(expected, actual, path = '') {
   if (Object.is(expected, actual)) return [];

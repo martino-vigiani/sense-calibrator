@@ -47,8 +47,8 @@ const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 
 // Stessi valori in Sense-Calibrator/test/telemetry-v2.test.js.
 const CONTRACT_SHA256 = {
-  schema: '5a6680ac74c197056266572c57d3610213bbf5ae69c80a51ea5c1d07c728bbf0',
-  fixtures: '9312abed48d68882a8061863db7c164952c51170807919fb093cdcf5a3c267d5',
+  schema: '282796145fb4416ccd6295207226915cadce7d176b8f9530e1b75cf7d1a7ccc7',
+  fixtures: '9e945ac15bdbfb61b7d6afe73a7671cae51e4794724134d3adea5af424878c78',
 };
 
 let server;
@@ -109,6 +109,30 @@ async function assertProblem(response, status, code) {
 const readLines = file => fs.readFileSync(file, 'utf8').split('\n').filter(l => l.trim());
 const exists = file => fs.existsSync(file);
 
+async function makeLargestDiagnosticQuickEvent() {
+  // Usa il vero builder del browser: il limite deve coprire il JSON che parte
+  // dalla pagina, non una fixture HTTP più piccola costruita separatamente.
+  const { buildQuickEvent } = await import('../../js/telemetry-v2.js');
+  const largestRoundedPercent = 199.99; // sei caratteri entro il clamp 0–200
+  const off = [largestRoundedPercent, largestRoundedPercent];
+  const xy = [[-100, -100], [-100, -100]]; // quattro assi → -128 sul wire
+  return buildQuickEvent({ sid: '1234abcd', seq: 255, board: 'BDM-060R', fw: 4294967295 }, {
+    session: {
+      before: { off, xy }, after: { off, xy },
+      passes: Array(8).fill(largestRoundedPercent), passXY: Array(8).fill(xy),
+      verification: {
+        baselineNoise: off, baselineRawNoise: largestRoundedPercent,
+        attempts: Array.from({ length: 16 }, (_, index) => ({
+          pass: Math.floor(index / 2) + 1, attempt: index % 2 + 1,
+          off, noise: off, stableFraction: 0.999, rawNoise: largestRoundedPercent,
+          hold: index % 2 ? 'not-released' : 'not-required', accepted: false, criterion: 'stable-fraction',
+        })),
+      },
+    },
+    outcome: 'residual-deterministic', start: 'recovery', committed: true, needsPowerCycle: true, durMs: 3600_000,
+  });
+}
+
 // --- Contratto ---
 
 test('contratto: schema e fixture coincidono con le impronte condivise col sito', () => {
@@ -147,6 +171,49 @@ test('OpenAPI: le componenti pubblicate sono esattamente quelle derivate dallo s
 });
 
 // --- HTTP ---
+
+test('HTTP accepts and stores the browser diagnostic Quick payload with sixteen attempts within 4 KiB', async () => {
+  // Regressione contratto: il servizio precedente respingeva `verification`
+  // come proprietà ignota, anche se il vero payload restava sotto 4 KiB.
+  const event = await makeLargestDiagnosticQuickEvent();
+  const body = JSON.stringify(event);
+  assert.equal(event.verification.attempts.length, 16);
+  assert.ok(Buffer.byteLength(body, 'utf8') < 4 * 1024);
+
+  const response = await postEvent(body, { raw: true });
+
+  assert.equal(response.status, 204);
+  const records = readLines(DATA_V2_PATH).map(line => JSON.parse(line));
+  assert.equal(records.length, 1);
+  const { receivedDay, ...storedEvent } = records[0];
+  assert.match(receivedDay, /^\d{4}-\d{2}-\d{2}$/);
+  assert.deepEqual(storedEvent, event, 'all sixteen diagnostic measurements reach storage intact');
+  assert.equal(exists(DATA_PATH), false, 'the diagnostic event never writes the v1 file');
+});
+
+test('HTTP accepts a valid JSON body of exactly 4096 UTF-8 bytes', async () => {
+  const event = validEvent();
+  const json = JSON.stringify(event);
+  const body = json + ' '.repeat(4 * 1024 - Buffer.byteLength(json, 'utf8'));
+  assert.equal(Buffer.byteLength(body, 'utf8'), 4096);
+
+  const response = await postEvent(body, { raw: true });
+
+  assert.equal(response.status, 204);
+  assert.equal(readLines(DATA_V2_PATH).length, 1);
+});
+
+test('HTTP rejects a valid JSON body of 4097 UTF-8 bytes without writing either event log', async () => {
+  const json = JSON.stringify(validEvent());
+  const body = json + ' '.repeat(4 * 1024 + 1 - Buffer.byteLength(json, 'utf8'));
+  assert.equal(Buffer.byteLength(body, 'utf8'), 4097);
+
+  const response = await postEvent(body, { raw: true });
+
+  await assertProblem(response, 413, 'payload_too_large');
+  assert.equal(exists(DATA_V2_PATH), false);
+  assert.equal(exists(DATA_PATH), false);
+});
 
 test('ogni fixture valida → 204 e una riga: l\'evento così com\'è più il giorno di ricezione', async () => {
   const today = new Date().toISOString().slice(0, 10);

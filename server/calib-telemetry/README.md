@@ -59,10 +59,10 @@ Six event types, selected by `type`: `quick`, `guided`, `range` (one
 calibration each), `flash` (one Write to memory attempt), `save` (how an unsaved
 calibration ended: saved, disconnected or page left, with Write-lock reasons and
 dialog counters) and `rest` (a 30-second summary of resting stick noise).
-Every field is required, unknown fields are rejected at every level, and every
+Base fields are required; Quick `verification` and Range `completion` are optional and nullable so pages already open before this release still work. Unknown fields are rejected at every level, and every
 string is an enum except `sid` (8 hex characters, random per page load, never
 stored by the page). There is no serial number, device identifier, free text or
-client timestamp. The body limit is 4 KB (an event is well under 1 KB).
+client timestamp. The body limit remains 4 KB; the largest supported Quick diagnostic payload is tested against that limit. Quick diagnostics contain at most 16 existing verification measurements, their stability criterion and retry-hold outcome; Range diagnostics contain reverse-turn progress and missing completion checks. Legacy records are reported as unknown, never inferred stable or complete.
 
 The stored line is the event unchanged plus `receivedDay` (UTC date, no time):
 

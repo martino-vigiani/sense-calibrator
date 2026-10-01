@@ -22,9 +22,11 @@ import * as latticeModule from '../../js/calib/lattice.js';
 import * as outcomeModule from '../../js/ui/outcome.js';
 import * as handsOffModule from '../../js/ui/hands-off.js';
 import * as connectHelpModule from '../../js/ui/connect-help.js';
+import * as rangeProgressModule from '../../js/ui/range-progress.js';
 import * as opsModule from '../../js/calib/ops.js';
 import * as wizardGateModule from '../../js/calib/wizard-gate.js';
 import * as rangeCoverageModule from '../../js/calib/range-coverage.js';
+import * as rangeDiagnosticsModule from '../../js/calib/range-diagnostics.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 import * as telemetryV2Module from '../../js/telemetry-v2.js';
 import * as restNoiseModule from '../../js/calib/rest-noise.js';
@@ -253,7 +255,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
   hid.chooser.push(...chooser);
   // "Avviso letto" vuol dire l'avviso attuale: v1 (notice) e v2 (scope).
   const store = new Map(Object.entries({
-    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '3' } : {}),
+    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '4' } : {}),
     ...storage,
   }));
   const uploads = [];
@@ -327,9 +329,11 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './ui/outcome.js': outcomeModule,
       './ui/hands-off.js': handsOffModule,
       './ui/connect-help.js': connectHelpModule,
+      './ui/range-progress.js': rangeProgressModule,
       './calib/ops.js': opsModule,
       './calib/wizard-gate.js': wizardGateModule,
       './calib/range-coverage.js': rangeCoverageModule,
+      './calib/range-diagnostics.js': rangeDiagnosticsModule,
       ...STUBS,
     },
   };

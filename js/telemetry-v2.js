@@ -22,11 +22,11 @@ import { EVENTS_V2_SCHEMA } from './telemetry-v2-schema.js';
 export const EVENTS_V2_ENDPOINT = 'https://subralabs.com/api/calib/v2/events';
 // Data della release che produce gli eventi (YYYYMMDD). Va aggiornata a ogni
 // rilascio che cambia cosa si misura, così il report separa le versioni.
-export const TELEMETRY_APP_BUILD = 20260928;
+export const TELEMETRY_APP_BUILD = 20261001;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una
 // più nuova, l'avviso ricompare prima che partano le categorie nuove.
-export const TELEMETRY_SCOPE = 3;
+export const TELEMETRY_SCOPE = 4;
 
 /* ------------------------------ validatore ------------------------------ */
 
@@ -125,6 +125,16 @@ export function validateEventV2(event, schema = EVENTS_V2_SCHEMA) {
     if (event.passes.some((value, i) => value === null && event.passAxes[i] !== null)) {
       return '$.passAxes: unverified pass must be null';
     }
+    let previous = null;
+    for (const a of event.verification?.attempts ?? []) {
+      if ((!previous || a.pass !== previous.pass) ? (a.attempt !== 1 || (previous && a.pass <= previous.pass)) : a.attempt !== previous.attempt + 1) {
+        return '$.verification.attempts: must follow pass and attempt order';
+      }
+      if (a.accepted && (!a.off || !a.noise || a.criterion === 'none')) return '$.verification.attempts: accepted needs a measured stability criterion';
+      if ((!a.off || !a.noise) && a.criterion !== 'none') return '$.verification.attempts: missing measurement has no stability criterion';
+      if ((a.attempt === 1) !== (a.hold === 'not-required')) return '$.verification.attempts: hold must describe the retry only';
+      previous = a;
+    }
   }
   return null;
 }
@@ -168,6 +178,40 @@ const QUICK_OUTCOMES = new Set(['centered', 'within-1-step', 'residual', 'residu
   'lost-ground', 'worse-than-start', 'catastrophic', 'unverified', 'already-centered', 'preflight', 'moved', 'stalled',
   'disconnected', 'error']);
 
+const VERIFY_CRITERIA = new Set(['stable-fraction', 'baseline-noise', 'legacy', 'none']);
+const VERIFY_HOLDS = new Set(['not-required', 'released', 'not-released']);
+const RANGE_MISSING = ['coverage', 'left', 'right', 'up', 'down', 'turns', 'reverse'];
+const diagnosticPair = value => Array.isArray(value) && value.length === 2 && value.every(isNum) ? value.map(pct) : null;
+
+function verificationFor(value) {
+  if (!value || !Array.isArray(value.attempts)) return null;
+  const attempts = [];
+  for (const a of value.attempts.slice(0, 16)) {
+    // Un riepilogo malformato diventa ignoto, senza perdere l'evento Quick.
+    const prev = attempts.at(-1);
+    if (!a || !Number.isInteger(a.pass) || a.pass < 1 || a.pass > 8 || !Number.isInteger(a.attempt) || a.attempt < 1 || a.attempt > 2
+      || !VERIFY_HOLDS.has(a.hold) || !VERIFY_CRITERIA.has(a.criterion)
+      || ((!prev || a.pass !== prev.pass) ? (a.attempt !== 1 || (prev && a.pass <= prev.pass)) : a.attempt !== prev.attempt + 1)
+      || ((a.attempt === 1) !== (a.hold === 'not-required'))) return null;
+    const off = diagnosticPair(a.off), noise = diagnosticPair(a.noise);
+    const criterion = off && noise ? a.criterion : 'none';
+    attempts.push({ pass: a.pass, attempt: a.attempt, off, noise,
+      stableFraction: isNum(a.stableFraction) ? round(clamp(a.stableFraction, 0, 1), 3) : null,
+      rawNoise: isNum(a.rawNoise) ? pct(a.rawNoise) : null, hold: a.hold,
+      accepted: a.accepted === true && !!off && !!noise && criterion !== 'none', criterion });
+  }
+  return { baselineNoise: diagnosticPair(value.baselineNoise),
+    baselineRawNoise: isNum(value.baselineRawNoise) ? pct(value.baselineRawNoise) : null, attempts };
+}
+
+function completionFor(value) {
+  if (!value || !Array.isArray(value.reversed) || value.reversed.length !== 2 || !value.reversed.every(v => typeof v === 'boolean')
+    || !Array.isArray(value.reverseTurns) || value.reverseTurns.length !== 2 || !value.reverseTurns.every(isNum)
+    || !Array.isArray(value.missing) || value.missing.length !== 2 || !value.missing.every(Array.isArray)) return null;
+  return { reversed: [...value.reversed], reverseTurns: value.reverseTurns.map(v => round(clamp(v, 0, 100), 1)),
+    missing: value.missing.map(list => RANGE_MISSING.filter(reason => list.includes(reason))) };
+}
+
 // Una corsa Quick (sessione locale di runQuick + il suo esito). `outcome` è
 // quello di runQuick, o dell'aborto locale se la corsa è finita in un errore
 // della pagina.
@@ -187,6 +231,7 @@ export function buildQuickEvent(ctx, { session, outcome, start = 'normal', commi
     afterAxes: axes(session?.after),
     passes,
     passAxes: passes.map((value, i) => value === null ? null : axesFromXY(session?.passXY?.[i])),
+    verification: verificationFor(session?.verification),
     durS: seconds(durMs),
   };
 }
@@ -209,7 +254,7 @@ export function buildGuidedEvent(ctx, { outcome, committed, needsPowerCycle, ste
   };
 }
 
-export function buildRangeEvent(ctx, { outcome, committed, coverage, turns, allEdges, durMs }) {
+export function buildRangeEvent(ctx, { outcome, committed, coverage, turns, allEdges, completion, durMs }) {
   const unit = value => (isNum(value) ? round(clamp(value, 0, 1), 2) : 0);
   const turn = value => (isNum(value) ? round(clamp(value, 0, 100), 1) : 0);
   return {
@@ -220,6 +265,7 @@ export function buildRangeEvent(ctx, { outcome, committed, coverage, turns, allE
     coverage: [unit(coverage?.[0]), unit(coverage?.[1])],
     turns: [turn(turns?.[0]), turn(turns?.[1])],
     allEdges: allEdges === true,
+    completion: completionFor(completion),
     durS: seconds(durMs),
   };
 }

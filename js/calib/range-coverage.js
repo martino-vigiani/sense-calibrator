@@ -155,11 +155,15 @@ function trackTurns(s, angle, r) {
 // gli assi saturano a ±1 e le diagonali arrivano fino a √2; senza il limite il
 // massimo gonfiato alzava la soglia e i settori cardinali non contavano mai
 // (copertura 0.33 con un range 1.4× troppo stretto).
-export function stickCoverage(s) {
+export function stickCoverageThreshold(s) {
   const globalMax = Math.max(...s.bins);
-  if (globalMax < s.p.minExtent) return 0;
   const g = Math.min(1, globalMax);
-  const thr = Math.max(s.p.okRadius, g * s.p.relThreshold);
+  return Math.max(s.p.okRadius, g * s.p.relThreshold);
+}
+
+export function stickCoverage(s) {
+  if (Math.max(...s.bins) < s.p.minExtent) return 0;
+  const thr = stickCoverageThreshold(s);
   return s.bins.filter(v => v >= thr).length / s.p.bins;
 }
 

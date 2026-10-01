@@ -104,6 +104,16 @@ function validateEventV2(event, schema = SCHEMA) {
     if (event.passes.some((value, i) => value === null && event.passAxes[i] !== null)) {
       return '$.passAxes: unverified pass must be null';
     }
+    let previous = null;
+    for (const a of event.verification?.attempts ?? []) {
+      if ((!previous || a.pass !== previous.pass) ? (a.attempt !== 1 || (previous && a.pass <= previous.pass)) : a.attempt !== previous.attempt + 1) {
+        return '$.verification.attempts: must follow pass and attempt order';
+      }
+      if (a.accepted && (!a.off || !a.noise || a.criterion === 'none')) return '$.verification.attempts: accepted needs a measured stability criterion';
+      if ((!a.off || !a.noise) && a.criterion !== 'none') return '$.verification.attempts: missing measurement has no stability criterion';
+      if ((a.attempt === 1) !== (a.hold === 'not-required')) return '$.verification.attempts: hold must describe the retry only';
+      previous = a;
+    }
   }
   return null;
 }

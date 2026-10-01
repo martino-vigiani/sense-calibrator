@@ -1,5 +1,5 @@
 {
-  "description": "Contract fixtures for POST /api/calib/v2/events. Copied verbatim into subralabs-v2/code/calib-telemetry/contract/; both test suites run every case through their own validator.",
+  "description": "Contract fixtures for POST /api/calib/v2/events. Copied verbatim to server/calib-telemetry/contract; browser and server validators run every case, including older events without diagnostics.",
   "valid": [
     {
       "name": "quick centered",
@@ -421,6 +421,315 @@
         "passAxes": [
           null
         ]
+      }
+    },
+    {
+      "name": "quick stable extreme diagnostic",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "quick unstable extreme diagnostic",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.1,
+              "rawNoise": 30,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "none"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "range missing reversal diagnostic",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20261001,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "incomplete",
+        "committed": true,
+        "coverage": [
+          1,
+          1
+        ],
+        "turns": [
+          3,
+          4
+        ],
+        "allEdges": true,
+        "durS": 31,
+        "completion": {
+          "reversed": [
+            false,
+            true
+          ],
+          "reverseTurns": [
+            0,
+            1.5
+          ],
+          "missing": [
+            [
+              "reverse"
+            ],
+            []
+          ]
+        }
+      }
+    },
+    {
+      "name": "quick unknown diagnostic",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": null
       }
     }
   ],
@@ -3703,6 +4012,688 @@
             ]
           ]
         ]
+      }
+    },
+    {
+      "name": "diagnostic unknown property",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction",
+              "serial": "secret"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic unsupported criterion",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "random text"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic outside stability bounds",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 1.1,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic invalid attempt",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 3,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic repeated attempt",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction"
+            },
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": false,
+              "criterion": "stable-fraction"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "diagnostic acceptance without stability",
+      "event": {
+        "v": 2,
+        "type": "quick",
+        "sid": "3f9a01bc",
+        "seq": 0,
+        "app": 20261001,
+        "board": "BDM-030",
+        "fw": 16777258,
+        "outcome": "catastrophic",
+        "start": "normal",
+        "committed": true,
+        "needsPowerCycle": false,
+        "truncated": false,
+        "before": [
+          4.21,
+          1.5
+        ],
+        "after": [
+          0.55,
+          0.55
+        ],
+        "passes": [
+          1.24,
+          0.55
+        ],
+        "durS": 23,
+        "beforeAxes": [
+          [
+            10,
+            4
+          ],
+          [
+            3,
+            -2
+          ]
+        ],
+        "afterAxes": [
+          [
+            1,
+            -1
+          ],
+          [
+            -1,
+            1
+          ]
+        ],
+        "passAxes": [
+          [
+            [
+              3,
+              1
+            ],
+            [
+              -1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              -1
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        ],
+        "verification": {
+          "baselineNoise": [
+            0.5,
+            0
+          ],
+          "baselineRawNoise": 0.5,
+          "attempts": [
+            {
+              "pass": 1,
+              "attempt": 1,
+              "off": [
+                18,
+                0.55
+              ],
+              "noise": [
+                0.5,
+                0
+              ],
+              "stableFraction": 0.9,
+              "rawNoise": 0.5,
+              "hold": "not-required",
+              "accepted": true,
+              "criterion": "none"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "range unknown completion reason",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20261001,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "incomplete",
+        "committed": true,
+        "coverage": [
+          1,
+          1
+        ],
+        "turns": [
+          3,
+          4
+        ],
+        "allEdges": true,
+        "durS": 31,
+        "completion": {
+          "reversed": [
+            false,
+            true
+          ],
+          "reverseTurns": [
+            0,
+            1.5
+          ],
+          "missing": [
+            [
+              "free text"
+            ],
+            []
+          ]
+        }
+      }
+    },
+    {
+      "name": "range partial completion object",
+      "event": {
+        "v": 2,
+        "type": "range",
+        "sid": "3f9a01bc",
+        "seq": 5,
+        "app": 20261001,
+        "board": "BDM-040",
+        "fw": 16777216,
+        "outcome": "incomplete",
+        "committed": true,
+        "coverage": [
+          1,
+          1
+        ],
+        "turns": [
+          3,
+          4
+        ],
+        "allEdges": true,
+        "durS": 31,
+        "completion": {
+          "reverseTurns": [
+            0,
+            1.5
+          ],
+          "missing": [
+            [
+              "reverse"
+            ],
+            []
+          ]
+        }
       }
     }
   ]

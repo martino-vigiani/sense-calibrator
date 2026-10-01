@@ -10,7 +10,7 @@ import { QUICK_REGRESSION_EPS } from '../js/calib/quick.js';
 // secondo audit. La fase dei campioni cambia anche nelle vecchie sessioni
 // dette "untouched", quindi il legacy pre-refactor non può più essere un
 // confronto campo per campo. Questo test ricontrolla OGNI campo del nuovo
-// baseline (tranne passXY, sola telemetria) e gli invarianti di sicurezza.
+// baseline (tranne passXY e verification, sola telemetria) e gli invarianti di sicurezza.
 // Risultati model-verified, non una prova hardware.
 
 for (const scenario of ['normal', 'hold']) {

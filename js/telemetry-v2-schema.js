@@ -6,7 +6,7 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://subralabs.com/schemas/calib-events-v2.json",
   "title": "CalibrationEventV2",
-  "description": "One anonymous Sense-Calibrator telemetry event (contract v2). Exactly one of six event types, selected by `type`. Every field is required, unknown fields are rejected, strings are enums (only `sid` is a pattern). No serial number, device identifier, free text or client timestamp.",
+  "description": "One anonymous Sense-Calibrator telemetry event (contract v2). Exactly one of six event types, selected by `type`. Base fields are required; verification and completion diagnostics are optional for compatibility with older pages. Every diagnostic object is closed and requires all its fields. Unknown fields are rejected, strings are enums (only `sid` is a pattern). No serial number, device identifier, free text or client timestamp.",
   "oneOf": [
     {
       "$ref": "#/$defs/QuickEvent"
@@ -233,6 +233,166 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         }
       }
     },
+    "VerificationAttempt": {
+      "description": "One existing post-commit Quick measurement. A hold result describes the centered-hold check, never proof that a hand was released. accepted means the ordinary verification accepted this result below the safety ceiling; extreme readings remain unaccepted even when their stability criterion passed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "attempt",
+        "off",
+        "noise",
+        "stableFraction",
+        "rawNoise",
+        "hold",
+        "accepted",
+        "criterion"
+      ],
+      "properties": {
+        "pass": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "off": {
+          "$ref": "#/$defs/StickPair"
+        },
+        "noise": {
+          "description": "[left,right] p95 distance from the median in percent; null when no measurement was obtained.",
+          "$ref": "#/$defs/StickPair"
+        },
+        "stableFraction": {
+          "description": "Fraction of reports surviving the existing stability filter, rounded to 0.001; null when unavailable.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rawNoise": {
+          "description": "Worst-stick p95 noise from all reports before filtering, percent rounded to 0.01; null when unavailable.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 200
+        },
+        "hold": {
+          "enum": [
+            "not-required",
+            "released",
+            "not-released"
+          ]
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "criterion": {
+          "description": "Which existing stability rule passed; none also covers a missing measurement. legacy identifies a source without a measured stable fraction.",
+          "enum": [
+            "stable-fraction",
+            "baseline-noise",
+            "legacy",
+            "none"
+          ]
+        }
+      }
+    },
+    "QuickVerification": {
+      "description": "Diagnostic summaries of existing measurements, or null when unavailable. Older events omit this field. No extra HID reports, timing or calibration commands are requested.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "baselineNoise",
+        "baselineRawNoise",
+        "attempts"
+      ],
+      "properties": {
+        "baselineNoise": {
+          "$ref": "#/$defs/StickPair"
+        },
+        "baselineRawNoise": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 200
+        },
+        "attempts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/VerificationAttempt"
+          }
+        }
+      }
+    },
+    "RangeCompletion": {
+      "description": "Requirements observed when the range session was closed or abandoned; null if no tracker was available. Older events omit this field. Both arrays and the outer missing array are ordered left, right.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "reversed",
+        "reverseTurns",
+        "missing"
+      ],
+      "properties": {
+        "reversed": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "reverseTurns": {
+          "description": "Turns in the less-used direction, rounded to 0.1; reversed retains the decision before rounding.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "missing": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "coverage",
+                "left",
+                "right",
+                "up",
+                "down",
+                "turns",
+                "reverse"
+              ]
+            }
+          }
+        }
+      }
+    },
     "QuickEvent": {
       "description": "One Quick calibration run, whatever its outcome.",
       "type": "object",
@@ -351,6 +511,9 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
           "items": {
             "$ref": "#/$defs/StickAxes"
           }
+        },
+        "verification": {
+          "$ref": "#/$defs/QuickVerification"
         },
         "durS": {
           "$ref": "#/$defs/DurationS"
@@ -522,6 +685,9 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
         },
         "allEdges": {
           "type": "boolean"
+        },
+        "completion": {
+          "$ref": "#/$defs/RangeCompletion"
         },
         "durS": {
           "$ref": "#/$defs/DurationS"
