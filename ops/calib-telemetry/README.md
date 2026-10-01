@@ -142,6 +142,11 @@ partial or malformed new records remain invalid. The current v1
 `sessions.jsonl` has no axis values and cannot supply these distributions or
 repeat rates.
 
+Quick verification and Range completion diagnostics are optional measurements.
+Legacy events without them stay `unknown`: missing data is not evidence of a
+stable catastrophic result, full coverage, or a missing direction reversal.
+The report exposes counts and privacy-safe groups, never individual visits.
+
 ## VPS deployment
 
 The report is deployed privately, outside every nginx document root:
@@ -171,7 +176,7 @@ the `martino` user crontab for short periodic jobs. This report is a finite batc
 job, so the existing user-cron convention is the smaller operational surface;
 it does not need a second PM2 process or a public endpoint.
 
-The active daily entry runs at 04:10 UTC:
+The original daily entry runs at 04:10 UTC:
 
 ```cron
 10 4 * * * umask 077 && /usr/bin/node /home/martino/sense-calibrator-ops/quality-report-cli.mjs --input /var/lib/calib-telemetry/sessions.jsonl --output /var/lib/calib-telemetry/private/quality-latest.json --since 2026-09-16T11:20:32Z --summary >> /var/lib/calib-telemetry/private/quality-history.log 2>&1
@@ -180,3 +185,67 @@ The active daily entry runs at 04:10 UTC:
 The first report was generated and checked on 2026-09-16. Both report files
 use mode `0600`; the source JSONL remained byte-for-byte unchanged. The
 collector stays under PM2 and was not restarted or modified for this job.
+
+### Release the quality report independently
+
+Deploying the collector does not update this directory. Run the dedicated
+release from the reviewed checkout whenever the quality report or lattice
+changes:
+
+```sh
+scripts/deploy-quality-report.sh --dry-run
+scripts/deploy-quality-report.sh
+```
+
+`--dry-run` only reads remote files and the crontab. It prints the current
+report schema/version, input bytes/rows/hash, installed module hashes and the
+proposed v2 release. It creates no remote directory, lock, staging file,
+report, history entry or cron change. The deploy requires the existing ops and
+private directories; a missing target or an unexpected/duplicate quality cron
+entry stops the operation. `--host`, `--remote-dir`, `--data-dir` and `--since`
+are explicit overrides for a separate test environment.
+
+The deployment packages `quality-report.mjs`, `quality-report-cli.mjs` and
+`js/calib/lattice.js` as `lattice.mjs`, plus the small verified runner/checker.
+It does not deploy the typed events report or the collector. Each release is
+stored under `sense-calibrator-ops/releases/<content-sha256>/` with a manifest;
+all module hashes and the manifest must match before activation. The runner
+uses the CLI parser and the report library, reads one input snapshot, and
+checks schema `sense-calibrator.telemetry-quality.v2`, `reportVersion: 2`,
+input bytes/rows, reconciled counts, cutoff, definitions and exclusions before
+writing the candidate. An input that changes during this preflight is retried
+at most three times, then deployment stops before activation.
+
+Activation renames the `current` symlink atomically and replaces exactly the
+recognized quality cron line. The crontab must still match the preflight
+snapshot; all other entries are preserved. The new entry is:
+
+```cron
+10 4 * * * umask 077 && /usr/bin/flock -n /home/martino/sense-calibrator-ops/.quality-report.lock /usr/bin/node /home/martino/sense-calibrator-ops/current/quality-report-runner.mjs --input /var/lib/calib-telemetry/sessions.jsonl --output /var/lib/calib-telemetry/private/quality-latest.json --since 2026-09-16T11:20:32Z --summary >> /var/lib/calib-telemetry/private/quality-history-v2.log 2>&1
+```
+
+The cron and deploy share a lock. Node resolves `current` to one release before
+loading its relative imports, so a pointer switch cannot mix report, CLI and
+lattice versions. The first migration also refuses activation while the
+legacy quality job is still running. Each nightly run repeats the schema and
+snapshot checks, writes `quality-latest.json` atomically, and tags its summary
+with schema, report version, release hash and input hash. The deploy runs this
+same path once and verifies the saved current report before reporting success.
+
+The original `quality-history.log` remains unchanged; v2 summaries append to
+`quality-history-v2.log`. `sessions.jsonl`, `events-v2.jsonl` and service logs
+are never overwritten. Before activation,
+`sense-calibrator-ops/deployments/<timestamp-id>/` stores the previous report,
+crontab snapshot, pointer and quality entry with private permissions. A failed
+activation restores and verifies the prior pointer, report bytes and only
+the quality cron entry, preserving concurrent edits to unrelated jobs. A
+failed restoration exits nonzero with `ROLLBACK FAILED` and the backup path;
+it never reports success. The legacy modules and immutable releases remain
+available for recovery. PM2, nginx and the collector are not modified.
+
+The dedicated regression suite runs against a temporary local filesystem
+behind fake SSH/crontab boundaries; it never connects to the VPS:
+
+```sh
+~/.local/bin/codex-log -- node --test test/deploy-quality-report.test.js
+```
