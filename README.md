@@ -19,7 +19,7 @@ This is an unofficial tool. Calibration can correct stored center or range value
 
 Keep the controller connected while calibration is running. A completed pass changes the controller's working calibration immediately; the tool cannot restore an earlier pass.
 
-Calibration is applied to temporary memory first. If the tool reports that saved memory is locked, turning the controller off before **Write to memory** should discard the temporary calibration and return to the saved one. That behavior has not been confirmed on hardware yet (H10). Unplugging the cable alone has also not been verified (H11).
+When the tool confirms that saved memory is locked, calibration is applied to temporary memory until **Write to memory**. If the memory state is unknown, changes may not be temporary: review the warning before calibrating. With memory confirmed locked, turning the controller off before saving should return to the saved calibration, but that behavior has not been confirmed on hardware yet (H10). Unplugging the cable alone has also not been verified (H11).
 
 The result stays on screen. The tool disables saving for results such as a severe offset, an incomplete range or a controller that stopped responding. A result worse than the starting measurement needs another confirmation before saving.
 
@@ -28,9 +28,9 @@ The result stays on screen. The tool disables saving for results such as a sever
 | Tool | Purpose | Changes the controller? |
 | --- | --- | --- |
 | Drift test | Measure resting offset and signal noise | No |
-| Quick calibration | Attempt to correct a stable center offset automatically | Yes; temporary until saved |
-| Guided calibration | Recalibrate the center with a four-corner procedure | Yes; temporary until saved |
-| Range calibration | Recalibrate the full travel of both sticks | Yes; temporary until saved |
+| Quick calibration | Attempt to correct a stable center offset automatically | Yes; temporary until saved only with memory confirmed locked |
+| Guided calibration | Recalibrate the center with a four-corner procedure | Yes; temporary until saved only with memory confirmed locked |
+| Range calibration | Recalibrate the full travel of both sticks | Yes; temporary until saved only with memory confirmed locked |
 | Precision test | Compare resting position, stability, return and range with the controller's previous result | No |
 
 Quick calibration checks that both sticks are stable and within 15% of center before sending commands. A failed initial check leaves the calibration unchanged. Large resting offsets may need Guided calibration.
