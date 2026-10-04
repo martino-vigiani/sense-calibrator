@@ -62,7 +62,7 @@ test('bytes 127/128 score Center 100 and a one-step stick scores 90, measured fr
   assert.equal(oneStep.result.calibration, 90);
 });
 
-test('Stability: 1 LSB of jitter costs 5 points, the worn-sensor threshold is 75', () => {
+test('Stability: 1 LSB of jitter costs 5 points, the existing noise threshold is 75', () => {
   assert.deepEqual(STABILITY_SCORE_ANCHORS.map(a => a[1]), [100, 95, 75, 0]);
   assert.equal(stabilityScoreFor(0), 100);
   assert.equal(stabilityScoreFor(LSB_PCT), 95);
@@ -274,8 +274,8 @@ test('a jittery sensor that never rests ends with an explanation, not an endless
   assert.equal(noisy.phase, 'done');
   assert.equal(noisy.result.L.score.center, 100);
   assert.ok(noisy.result.L.score.stability < 75);
-  assert.ok(noisy.result.hardware < 75);
-  assert.match(headlineSentence(noisy.result), /jitters .* calibration can't fix/);
+  assert.equal(noisy.result.hardware, Math.min(noisy.result.L.score.stability, noisy.result.R.score.stability));
+  assert.match(headlineSentence(noisy.result), /jitter/i);
 });
 
 /* ---------------- attese e durata ---------------- */
@@ -333,6 +333,9 @@ test('before/after: a change is real only when an axis moved by one full LSB', (
   const res = { calibration: 100, hardware: 95, L: { score: at(127, 128) }, R: { score: at(128, 127) } };
   const html = comparisonHtml({ ts: 0, calibration: 70, hardware: 95, L: at(124, 128), R: at(128, 127) }, res, { now: 2 * 86400000 });
   assert.match(html, /Calibration 70 &rarr; 100/);
+  // Regressione: il punteggio di solo rumore veniva presentato come diagnosi Hardware.
+  assert.match(html, /Stability 95 &rarr; 95/);
+  assert.doesNotMatch(html, /Hardware/i);
   assert.match(html, /Left<\/span> 3 steps &rarr; at floor <b class="game-delta" data-change="better">better<\/b>/);
   assert.match(html, /Right<\/span> at floor, as before <b class="game-delta" data-change="same">same<\/b>/);
   assert.match(html, /2 days ago/);
@@ -363,6 +366,7 @@ test('"Previous" is keyed by a salted SHA-256 of the serial and never stores the
   assert.doesNotMatch(raw, /A1B2C3D4E5/);
   assert.equal(store.getItem('senseGameLastScore.v3'), null, 'v3 scores are not comparable and are dropped');
   assert.equal(loadPrevious(store, k1).calibration, run.result.calibration);
+  assert.equal(loadPrevious(store, k1).hardware, run.result.hardware, 'v4 keeps the structured hardware score');
   assert.equal(loadPrevious(store, k2), null, 'another controller has no previous result');
   assert.equal(loadPrevious(store, UNIDENTIFIED), null);
   // al massimo 8 controller ricordati
@@ -372,16 +376,69 @@ test('"Previous" is keyed by a salted SHA-256 of the serial and never stores the
 
 /* ---------------- titolo ---------------- */
 
-test('the headline is two numbers and one plain sentence', () => {
+test('the headline distinguishes center offsets from observed noise', () => {
   const s = (offset, noise) => ({ offset, noise, center: centerScore(offset), stability: stabilityScoreFor(noise), x: 0, y: 0 });
   const res = (L, R) => ({ L: { score: L }, R: { score: R }, calibration: Math.min(L.center, R.center), hardware: Math.min(L.stability, R.stability) });
-  assert.equal(headlineSentence(res(s(FLOOR_PCT, 0.78), s(FLOOR_PCT, 0))), 'Both sticks rest dead center and hold steady: nothing to fix.');
+  assert.match(headlineSentence(res(s(FLOOR_PCT, 0.78), s(FLOOR_PCT, 0))), /Both sticks rest.*center/i);
+  assert.doesNotMatch(headlineSentence(res(s(FLOOR_PCT, 0.78), s(FLOOR_PCT, 0))), /nothing to fix/i);
   assert.match(headlineSentence(res(s(ONE_STEP_PCT, 0.78), s(FLOOR_PCT, 0))), /within one step/);
-  assert.equal(headlineSentence(res(s(FLOOR_PCT, 0), s(2.0, 0.78))), 'The right stick rests 2.0% · 2 steps off center: a Quick calibration should fix that.');
+  assert.match(headlineSentence(res(s(FLOOR_PCT, 0), s(2.0, 0.78))), /right stick rests 2\.0% · 2 steps off center.*Quick calibration/i);
   assert.match(headlineSentence(res(s(20, 0), s(FLOOR_PCT, 0))), /Guided calibration/);
-  assert.match(headlineSentence(res(s(3, 0), s(FLOOR_PCT, 2.5))), /left stick rests .* and the right stick jitters by ±2\.5%/);
-  for (const r of [res(s(3, 0), s(FLOOR_PCT, 2.5)), res(s(FLOOR_PCT, 0), s(FLOOR_PCT, 0))]) {
-    assert.equal(headlineSentence(r).split(/[.:]\s+[A-Z]/).length, 1, 'one sentence');
-  }
+  assert.match(headlineSentence(res(s(3, 0), s(FLOOR_PCT, 2.5))), /left stick rests .*right stick jitters by ±2\.5%/i);
   assert.deepEqual([...GAME_PHASES], ['Center', 'Return', 'Range']);
+});
+
+// Regressione: jitter misurato veniva attribuito a "wear or dirt", anche senza
+// una diagnosi; le due branche del titolo promettevano inoltre una correzione.
+for (const [name, leftOffset, rightOffset, noisySide] of [
+  ['centered left stick', FLOOR_PCT, FLOOR_PCT, 'left'],
+  ['centered right stick', FLOOR_PCT, FLOOR_PCT, 'right'],
+  ['offset and noisy sticks', 3, FLOOR_PCT, 'right'],
+]) {
+  test(`precision headline describes observed jitter without diagnosing its cause: ${name}`, () => {
+    const score = (offset, noise) => ({ offset, noise, center: centerScore(offset), stability: stabilityScoreFor(noise), x: 0, y: 0 });
+    const L = score(leftOffset, noisySide === 'left' ? 2.5 : 0);
+    const R = score(rightOffset, noisySide === 'right' ? 2.5 : 0);
+    const result = { L: { score: L }, R: { score: R }, calibration: Math.min(L.center, R.center), hardware: Math.min(L.stability, R.stability) };
+
+    const text = headlineSentence(result);
+
+    assert.match(text, new RegExp(`${noisySide} stick.*(?:jitter|noise)`, 'i'));
+    assert.match(text, /±2\.5%/, 'the measured noise remains visible');
+    assert.doesNotMatch(text, /that's wear|wear or dirt|worn sensor|noise will stay/i);
+    assert.match(text, /not a diagnosis|cannot (?:diagnos|determine)|can['’]t (?:diagnos|determine)|cause.*(?:unknown|unconfirmed|not)|does not (?:identify|diagnos|determine)|doesn['’]t (?:identify|diagnos|determine)/i);
+    assert.doesNotMatch(text, /(?:Quick|Guided|calibration)[^.;]*(?:should|will|can) fix/i, 'a reading does not promise a calibration outcome');
+  });
+}
+
+test('precision headline recommends Quick for an offset without promising a fix', () => {
+  // Regressione: un offset da solo produceva "Quick calibration should fix that".
+  const left = { offset: 2, noise: 0, center: centerScore(2), stability: 100, x: 0.02, y: 0 };
+  const right = { offset: FLOOR_PCT, noise: 0, center: 100, stability: 100, x: 0, y: 0 };
+  const result = { L: { score: left }, R: { score: right }, calibration: left.center, hardware: 100 };
+
+  const text = headlineSentence(result);
+
+  assert.match(text, /left stick.*2\.0%.*Quick calibration/i);
+  assert.doesNotMatch(text, /(?:should|will|can) fix/i);
+});
+
+test('a precision check that never settles explains the failed measurement without diagnosing wear', () => {
+  // Regressione: un Center senza misura mostrava comunque "wear or dirt".
+  const engine = createPrecisionTest();
+  const reportPeriodMs = 20; // Report da 50 Hz, sempre sotto il limite di gap da 100 ms.
+  engine.start(0);
+  for (let t = 0; t <= PRECISION_DEFAULTS.readyTimeoutMs; t += reportPeriodMs) {
+    const report = t % (2 * reportPeriodMs) ? sticksOf(119, 128) : sticksOf(136, 128);
+    engine.feed(report, t);
+  }
+
+  const view = engine.view(PRECISION_DEFAULTS.readyTimeoutMs);
+
+  assert.equal(view.phase, 'center-failed');
+  assert.equal(engine.result(), null);
+  assert.match(view.instr, /couldn['’]t measure|unable to measure/i);
+  assert.match(view.why, /never.*rest|moving|unstable|jitter/i);
+  assert.doesNotMatch(view.why, /wear or dirt|worn sensor/i);
+  assert.match(view.why, /not a diagnosis|cannot (?:diagnos|determine)|can['’]t (?:diagnos|determine)|cause.*(?:unknown|unconfirmed|not)|does not (?:identify|diagnos|determine)|doesn['’]t (?:identify|diagnos|determine)/i);
 });

@@ -417,9 +417,10 @@ function showHeroError(html) {
 
 // Selettore vuoto o apertura fallita: la lista di controlli al posto del
 // silenzio (prima `devices.length === 0` usciva senza dire nulla).
-function showConnectHelp() {
+function showConnectHelp(status = '') {
   $('connect-help-list').innerHTML = CONNECT_CHECKLIST.map(item => `<li>${esc(item)}</li>`).join('');
   $('connect-help').classList.remove('hidden');
+  setLive($('connect-help-status'), status);
 }
 
 function showConnectError(error) {
@@ -435,8 +436,8 @@ function showUnsupported() {
   const touchOnly = window.matchMedia('(pointer: coarse)').matches;
   if (!touchOnly) {
     $('unsupported-title').textContent = 'Open this page in Chrome or Edge';
-    $('unsupported-msg').innerHTML = 'Recalibrating a DualSense means talking to it over a USB cable, and only '
-      + '<b>Chromium browsers</b> — Chrome, Edge, Brave, Opera — are allowed to do that. '
+    $('unsupported-msg').innerHTML = 'This tool needs WebHID on a computer. Open this page in '
+      + '<b>desktop Chrome or Edge</b> and connect a standard DualSense with a USB data cable. '
       + 'Safari and Firefox don’t support WebHID.';
   }
   $('btn-connect').disabled = true;
@@ -468,8 +469,19 @@ if (btnCopyLink) {
       try { ok = document.execCommand('copy'); } catch { ok = false; }
       ta.remove();
     }
-    btnCopyLink.textContent = ok ? 'Link copied' : 'Press and hold to copy';
-    toast(ok ? 'Link copied — open it on a desktop with Chrome or Edge.' : url);
+    const fallback = $('copy-link-url');
+    if (ok) {
+      const hadFallbackFocus = document.activeElement === fallback;
+      fallback.hidden = true;
+      if (hadFallbackFocus) btnCopyLink.focus();
+    } else {
+      fallback.value = url;
+      fallback.hidden = false;
+      fallback.focus();
+      fallback.select();
+    }
+    btnCopyLink.textContent = ok ? 'Link copied' : 'Select and copy the link below';
+    toast(ok ? 'Link copied — open it on a desktop with Chrome or Edge.' : 'Select and copy the link below');
     setTimeout(() => { btnCopyLink.textContent = 'Copy link'; }, 2400);
   });
 }
@@ -607,12 +619,20 @@ async function connect() {
     return;
   }
   if (adopting) return;
+  const previousFocus = document.activeElement;
+  $('hero-error').classList.add('hidden');
+  setLive($('hero-error'), '', { html: true });
+  setLive($('connect-help-status'), '');
+  $('connect-help').classList.add('hidden');
   try {
     const devices = await navigator.hid.requestDevice({ filters: HID_FILTERS });
     // Selettore vuoto o chiuso senza scegliere: il browser non dice quale dei
     // due, quindi la lista vale per entrambi.
-    if (devices.length === 0) { showConnectHelp(); return; }
-    await adopt(devices.find(isUsbDevice) ?? devices[0]);
+    if (devices.length === 0) {
+      showConnectHelp('No controller was selected. If yours was missing, try the checks below.');
+      return;
+    }
+    await adopt(devices.find(isUsbDevice) ?? devices[0], { explicit: true, previousFocus });
   } catch (error) {
     showConnectError(error);
     log(`Connection error: ${error.name ? `${error.name}: ` : ''}${error.message || error}`);
@@ -626,7 +646,7 @@ async function connect() {
 let adopting = null; // { device, aborted }
 let autoDriftTimer = null;
 
-async function adopt(device) {
+async function adopt(device, { explicit = false, previousFocus = document.activeElement } = {}) {
   if (adopting || (ds5 && ds5.device === device)) return;
   const attempt = { device, aborted: false };
   adopting = attempt;
@@ -668,10 +688,20 @@ async function adopt(device) {
     reapplyRangeWriteLock(key);
     reapplyPowerCycle();
 
+    // La connessione esplicita porta al test, salvo una nuova scelta di link
+    // durante l'I/O. Quella automatica sposta solo il fuoco rimasto nella
+    // vista che stiamo nascondendo: BODY e le altre parti della pagina restano.
+    const active = document.activeElement;
+    const inHero = $('view-hero').contains?.(active) === true;
+    const choseAnotherLink = active?.tagName === 'A' && active !== previousFocus;
+    const handoffFocus = explicit
+      ? !choseAnotherLink && (inHero || active === document.body || active === $('btn-connect'))
+      : inHero;
     $('view-hero').classList.add('hidden');
     $('view-device').classList.remove('hidden');
     $('hero-error').classList.add('hidden');
     $('connect-help').classList.add('hidden');
+    if (handoffFocus && !activeModalEl()) $('drift-card').focus();
 
     recordEvent('connect', {
       color: info.color ?? null,
@@ -753,6 +783,11 @@ function finalizeInterruptedWizard(w, { now = false } = {}) {
 }
 
 function teardown(message = null) {
+  // Prima di chiudere i modali e togliere la vista del controller: il loro
+  // owner gestisce la chiusura, poi riprendiamo solo il fuoco che scompariva.
+  const active = document.activeElement;
+  const restoreConnectFocus = $('view-device').contains?.(active) === true
+    || [...document.querySelectorAll('.modal')].some(modal => modal.contains?.(active));
   // Prima di azzerare lo stato: il blocco di Write letto qui è ancora quello
   // del controller che se ne va.
   // Fra due click non c'è una promise in attesa: il catch non vedrà lo stacco.
@@ -804,6 +839,7 @@ function teardown(message = null) {
   closeAllModals();
   $('view-device').classList.add('hidden');
   $('view-hero').classList.remove('hidden');
+  if (restoreConnectFocus && !activeModalEl()) $('btn-connect').focus();
   if (message) toast(message);
   // La calibrazione in RAM non è stata scritta. Cosa faccia lo scollegamento
   // (H11) non è verificato: il testo non promette né che sia persa né che resti.
@@ -2175,7 +2211,7 @@ function feedRestNoise(now) {
 // in tempo reale; questi testi dicono cosa sta facendo l'algoritmo.
 function quickProgressHtml({ phase, pass, worst }) {
   if (phase === 'preflight') return 'Release both sticks. Waiting for centered, stable readings…';
-  if (phase === 'noisy') return 'The readings are jumping around. <b>Let go of both sticks</b> and keep the controller flat on the table. If nobody is touching them, the sensor may be worn.';
+  if (phase === 'noisy') return 'The readings are jumping around. <b>Let go of both sticks</b> and keep the controller flat on the table. If nobody is touching them, repeat the test to check the signal at rest.';
   if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b> A held stick would be saved as the new center.';
   if (phase === 'pass' || phase === 'resumed') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
   if (phase === 'unstable') return `Pass ${pass}: unstable signal. <b>Don’t touch the sticks.</b>`;
@@ -4000,6 +4036,7 @@ async function boot() {
     }
     return;
   }
+  setConnecting(false);
 
   navigator.hid.addEventListener('disconnect', e => {
     if (adopting && e.device === adopting.device) adopting.aborted = true;

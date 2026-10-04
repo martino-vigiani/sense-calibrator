@@ -117,7 +117,11 @@ class FakeElement {
   }
   focus() { this.ownerDocument.activeElement = this; }
   blur() {}
-  select() {}
+  select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
+  contains(node) {
+    for (let current = node; current; current = current.parentNode) if (current === this) return true;
+    return false;
+  }
   appendChild(child) { child.parentNode = this; this.children.push(child); this.ownerDocument.onAppend?.(this, child); return child; }
   remove() {
     if (!this.parentNode) return;

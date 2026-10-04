@@ -60,9 +60,14 @@ test('no public page, guide or sitemap links to the probe', async () => {
   }
 });
 
-test('the probe page is excluded from indexing and cannot talk to the network', async () => {
+test('the probe is excluded from the Pages build, requests no indexing and cannot talk to the network', async () => {
+  // Audit SEO 2026-10-04: robots nel sottopercorso non esclude file dalla build.
+  // Questa guardia verifica il sorgente; l'artefatto Pages richiede un controllo dopo la build.
+  const pagesConfig = await readFile(new URL('_config.yml', root), 'utf8');
+  const exclusions = pagesConfig.match(/^exclude:[ \t]*\r?\n((?:[ \t]+[^\n]*(?:\n|$))*)/m)?.[1] ?? '';
+  assert.match(exclusions, /^[ \t]+-[ \t]+ops\/?[ \t]*(?:#.*)?$/m, 'Pages exclude must contain ops/');
   const robots = await readFile(new URL('robots.txt', root), 'utf8');
-  assert.match(robots, /^Disallow: \/ops\/$/m);
+  assert.match(robots, /^Disallow: \/sense-calibrator\/ops\/$/m, 'fallback robots path must include the project prefix');
   const html = await readFile(new URL('ops/hw-probe/index.html', root), 'utf8');
   assert.match(html, /<meta name="robots" content="noindex, nofollow[^"]*">/);
   const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1];

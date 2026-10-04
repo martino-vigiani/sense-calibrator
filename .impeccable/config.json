@@ -1,0 +1,53 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-04T22:00:29.195Z",
+        "reason": "Repository AGENTS.md requires bounded in-flow entrances and collapse with reduced-motion alternatives; progress width animation removed separately and CSS remains scanned."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-04T22:00:29.264Z",
+        "reason": "Agent: detector combines hidden and starting-style callout zero padding; visible callout has 14px 18px padding and hidden children are not rendered."
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-04T22:00:29.327Z",
+        "reason": "Repository scope: raw finding is only the hidden 10px FPS controller lab, available on localhost with preview=1 and excluded from the public release."
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "css/style.css"
+        ],
+        "createdAt": "2026-10-04T22:00:29.381Z",
+        "reason": "User confirmed keeping the existing 3px Range hint and guide note borders on 2026-10-03."
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "test/outcome.test.js"
+        ],
+        "createdAt": "2026-10-04T22:00:29.431Z",
+        "reason": "Agent: hostile HTML strings and regex are escaping-test fixtures; they do not render an image."
+      }
+    ]
+  }
+}

@@ -84,108 +84,123 @@
   <article class="guide">
     <header class="guide-hero">
       <h1>PS5 controller stick drift test</h1>
-      <p class="guide-lede">The PS5 controller stick drift test reads the resting signal of both sticks and tells you whether either one sits off center or wanders while untouched. It is read-only: no calibration or memory command is sent.</p>
+      <p class="guide-lede">To test PS5 stick drift, connect a standard DualSense by USB in desktop Chrome or Edge, release both sticks and open Sense Calibrator. The automatic test measures resting offset and signal noise without calibrating or writing to memory.</p>
       <p class="guide-cta"><a class="btn btn-primary" href="../../">Open Sense Calibrator</a> <span class="hint">Desktop Chrome or Edge &middot; USB data cable &middot; standard DualSense</span></p>
     </header>
 
+    <nav class="guide-toc" aria-label="On this page">
+      <b>On this page</b>
+      <ul>
+        <li><a href="#requirements">What you need</a></li>
+        <li><a href="#connection-help">Controller not detected</a></li>
+        <li><a href="#run-the-test">Run the test</a></li>
+        <li><a href="#read-the-result">Read the result</a></li>
+        <li><a href="#test-limits">Test limits</a></li>
+        <li><a href="#next-steps">Choose the next step</a></li>
+      </ul>
+    </nav>
+
     <div class="guide-body">
 
-      <h2>What stick drift is</h2>
-      <p>Stick drift is what happens when a stick reports a non-zero signal while nothing is touching it. The controller keeps sending values that are not neutral, and the game reads phantom movement: the camera creeps, the character walks slowly, a menu selection slides on its own.</p>
+      <h2 id="stick-drift">What stick drift is</h2>
+      <p>Stick drift is unwanted input when you have released the stick. In a game, it can appear as a creeping camera or a character moving on its own. A small non-zero reading alone is not proof of a fault: the controller reports positions in discrete steps.</p>
       <p>Two shapes matter when you test:</p>
       <ul>
-        <li><b>A stable offset.</b> The resting position is consistently wrong. Samples settle around the same non-neutral coordinates, and the same offset reappears from one test to the next.</li>
+        <li><b>A stable offset.</b> Samples settle away from center, and a similar value and direction reappear from one test to the next.</li>
         <li><b>An unstable or noisy signal.</b> The value wanders even while the stick is at rest, so no single resting position explains it.</li>
       </ul>
-      <p>The two can feel similar in a game, but they point to different causes. That is why the test reports an offset figure and a noise figure separately instead of a single pass or fail.</p>
+      <p>Offset and noise describe different parts of the signal. Neither figure identifies the physical cause by itself, so the test reports them separately.</p>
 
-      <h2>What you need</h2>
+      <h2 id="requirements">What you need</h2>
       <ul>
         <li><b>A desktop computer.</b> Windows, macOS, Linux or ChromeOS. Phones are not supported.</li>
-        <li><b>The standard PS5 DualSense.</b> Only the standard controller is supported.</li>
+        <li><b>The standard PS5 DualSense.</b> DualSense Edge and DualShock 4 are not supported.</li>
         <li><b>A USB data cable.</b> Some cables only carry power. If the controller never appears in the browser prompt, try another cable before anything else. On Linux the browser also needs permission to open the controller, usually a udev rule for its hidraw device.</li>
         <li><b>Desktop Chrome or Edge.</b> The browser talks to the controller through WebHID, which Chromium browsers provide and Safari and Firefox do not.</li>
       </ul>
       <p>The calibration side of the tool rejects Bluetooth, so USB is required for the full workflow. If the controller is paired wirelessly, plug it in with the cable and connect again.</p>
 
-      <h2>How to connect</h2>
+      <h2 id="connection-help">DualSense not detected in the browser?</h2>
+      <p>An empty or cancelled browser prompt means no controller was selected. It does not identify the cause. If your DualSense was missing, try these checks:</p>
+      <ol>
+        <li>Use desktop Chrome or Edge and a standard DualSense. Phones, DualSense Edge and DualShock 4 are outside this tool's supported setup.</li>
+        <li>Try a USB data cable and another USB port. A controller charging does not prove that the cable carries data.</li>
+        <li>Close other tabs or apps using the controller, such as Steam or DS4Windows, then choose <b>Connect DualSense</b> again. If a calibration is already running, finish it or follow its Stop instructions first.</li>
+        <li>If the browser says access was blocked, review the site's device permission before retrying. On Linux, the operating system must also allow the browser to open the controller's hidraw device; see <a href="https://developer.chrome.com/docs/capabilities/hid#dev-tips" target="_blank" rel="noopener">Chrome's WebHID permission guidance</a>.</li>
+      </ol>
+      <p>After a successful connection, the automatic drift test only reads stick positions. It does not start calibration or write to memory. If input readings stop, check the USB connection before interpreting the result as a stick problem.</p>
+
+      <h2 id="run-the-test">How to run the PS5 stick drift test</h2>
       <ol>
         <li>Plug the DualSense into the computer with the USB data cable.</li>
-        <li>Open Sense Calibrator in Chrome or Edge.</li>
+        <li>Open <a href="../../">Sense Calibrator</a> in Chrome or Edge.</li>
+        <li>Put the controller on a stable surface and release both sticks.</li>
         <li>Select <b>Connect DualSense</b>.</li>
         <li>Approve the browser prompt and pick the controller from the list.</li>
-        <li>Confirm that the status chip shows the controller as connected.</li>
-        <li>Put the controller on a stable surface, away from anything that can tap or vibrate it.</li>
+        <li>Keep the page visible and the sticks untouched while the automatic test runs. Read the result for each stick, then choose <b>Run again</b> to confirm it.</li>
       </ol>
 
-      <h2>How the automatic test measures drift</h2>
-      <p>The run is automatic. After a short settling period, the test samples the stick's input reports for about three seconds, at roughly the rate the controller sends them.</p>
-      <p>Only steady samples count. For each sample, the tool checks how far the signal moved across a short window of recent reports. A sample with a small spread is kept; a sample that moved is discarded as movement, because a hand brushing the stick, a cable tug or a vibrating table is movement, not drift. If too few steady samples remain, the test discards the attempt and starts over.</p>
+      <h2 id="measurement">How the automatic test measures drift</h2>
+      <p>The test collects about three seconds of input reports, discards initial settling samples and checks the signal spread in short windows. Windows with too much movement are excluded. If too little stable data remains, it retries; repeated instability produces a <b>Moving</b> result rather than a reliable resting offset. Missing or interrupted reports produce a connection warning.</p>
       <p>From the samples that remain, it reports two numbers per stick:</p>
       <ul>
-        <li><b>Resting offset:</b> the median stick position, as a percentage of the full range.</li>
-        <li><b>Noise:</b> how far individual samples scatter around that median.</li>
+        <li><b>Resting offset:</b> the distance of the median stick position from center, as a percentage of the full range.</li>
+        <li><b>Noise:</b> the distance within which 95% of the measured samples fall around that median.</li>
       </ul>
-      <p>Stability classification is what keeps the result honest, because the test cannot see your hand. It can only see the signal, and a value that is merely moving is not drift. The measurement logic is open source and documented: read the implementation in the <a href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener">GitHub repository</a> and the protocol notes in the <a href="https://subralabs.com/lab/sense-calibrator.html" target="_blank" rel="noopener">SubraLabs technical write-up</a>.</p>
+      <p>The test cannot see your hand. A stick held still can produce a stable signal, so you must release it yourself. Movement or noise can have several causes and does not prove wear. The measurement logic is available in the <a href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener">GitHub repository</a>.</p>
 
-      <h2>How to read the result</h2>
-      <p>Each stick gets a label from its offset: Centered under about 1.2% of range, Mild drift up to about 3.5%, and Marked drift above that. Noise is judged separately, and anything above about 1.5% is flagged as a sign of a worn or dirty signal.</p>
+      <h2 id="read-the-result">How to read the result</h2>
+      <p><b>Centered</b> is below 1.2% offset. <b>Within 1 step</b> is the next band, up to 1.25%. <b>Mild drift</b> is below 3.5%, and <b>Marked drift</b> is below 15%; at 15% or more, the tool recommends Guided. These are the tool's measurement and routing bands, not a hardware diagnosis. <b>Moving</b> and <b>Pinned</b> take precedence over an offset label.</p>
       <table>
         <thead>
           <tr>
             <th scope="col">Reading</th>
             <th scope="col">What the numbers show</th>
-            <th scope="col">What it points to</th>
+            <th scope="col">Next step</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th scope="row">Centered</th>
-            <td>Offset under about 1.2%, with low noise and a thin, steady cloud of samples.</td>
-            <td>A quiet resting signal. There is nothing to correct.</td>
+            <td>Offset below 1.2%.</td>
+            <td>There is no center offset to correct. Check noise separately if a problem remains.</td>
           </tr>
           <tr>
             <th scope="row">Stable offset</th>
-            <td>Offset above the centered band, but the same position repeats closely on a second test.</td>
-            <td>A stored calibration offset, which calibration may correct.</td>
+            <td>An offset that repeats closely on a second test, with little variation.</td>
+            <td>Calibration may help. Follow the tool's Quick or Guided recommendation.</td>
           </tr>
           <tr>
             <th scope="row">Noisy signal</th>
-            <td>Noise above about 1.5%; the position wanders around the median instead of settling.</td>
-            <td>The sensor itself, often wear or dirt. Calibration can re-center it, but the noise stays.</td>
+            <td>The reported position varies around its median.</td>
+            <td>Repeat on a stable surface. Persistent variation needs further investigation.</td>
+          </tr>
+          <tr>
+            <th scope="row">Pinned</th>
+            <td>An axis reads at the edge with very little variation.</td>
+            <td>Read the warning before starting Range. A stick that cannot leave the edge may never complete it.</td>
           </tr>
         </tbody>
       </table>
-      <p>Read both numbers together, not just the offset. A large offset with a quiet signal is a better candidate for calibration than a small offset that will not hold still. Re-run the test before acting on it: one noisy run on a wobbling surface can look worse than the stick really is.</p>
+      <p>Read both sticks' offset and noise together and repeat the test before changing anything. A noisy reading does not establish that a sensor is worn or dirty; the test does not inspect the mechanism.</p>
 
-      <h2>Why the test is read-only</h2>
-      <p>The PS5 controller stick drift test only reads input reports. It sends no calibration command and no memory command, so nothing on the controller changes while it runs. There is also nothing to save or undo afterwards.</p>
-      <p class="guide-note"><b>Read-only by design.</b> Calibration is a separate, explicit step that you choose later, and it stays temporary until you write it to the controller's memory.</p>
+      <h2 id="read-only">Why the test is read-only</h2>
+      <p>The automatic drift measurement reads input reports without sending calibration or memory-write commands. It does not create a calibration to save or undo.</p>
+      <p class="guide-note"><b>Read-only by design.</b> Choose calibration separately after reviewing the measurements. Writing its result to controller memory is another explicit action.</p>
 
-      <h2>Why a test cannot diagnose every mechanical problem</h2>
-      <p>The test measures the electrical signal at rest. It does not inspect the mechanism, so several faults stay invisible to it:</p>
+      <h2 id="test-limits">What a resting test cannot tell you</h2>
+      <p>A quiet signal at rest does not prove that the stick module is healthy. A resting test cannot reproduce every in-game condition or assess the stick's full travel. If the problem persists with a centered reading, record when it happens and investigate further rather than assuming another center calibration will fix it.</p>
+
+      <h2 id="next-steps">What to do after the result</h2>
       <ul>
-        <li>Worn or dirty potentiometer tracks</li>
-        <li>Dirt or debris inside the module</li>
-        <li>A cracked housing</li>
-        <li>A bent shaft</li>
-        <li>Intermittent faults that only appear under heat, pressure or rumble</li>
+        <li><b>Centered and quiet:</b> further center calibration is usually unnecessary. If a game still shows unwanted movement, the resting test alone has not explained it.</li>
+        <li><b>A repeatable offset:</b> read how to <a href="../calibrate-dualsense-controller/">calibrate a DualSense controller</a>, then review both sticks' results before saving.</li>
+        <li><b>A noisy or pinned signal:</b> follow the tool's warning and review the limits of calibration before starting a procedure.</li>
       </ul>
-      <p>A quiet signal at rest is a good sign, but it is not proof that the stick module is healthy. If a stick misbehaves in a game while the test reads clean, the conditions that trigger the fault may simply not be present at rest.</p>
-
-      <h2>What to do after the result</h2>
-      <ul>
-        <li><b>Centered and quiet:</b> there is nothing to fix. Test again later if something starts to feel off.</li>
-        <li><b>A stable offset:</b> the guide on how to <a href="../calibrate-dualsense-controller/">calibrate a DualSense controller</a> explains whether calibration fits and how to keep the result saved.</li>
-        <li><b>A noisy signal:</b> calibration can still re-center the stick, but it will not remove the noise. If the noise bothers you, check the warranty first; cleaning, repair or module replacement may be the realistic path.</li>
-      </ul>
-      <p>Whatever the result, run the test a second time to confirm it, and compare the numbers again after any change you make.</p>
-
-      <h2>Run the PS5 controller stick drift test</h2>
-      <p>Connect the controller over USB on a desktop in Chrome or Edge, leave both sticks alone, and read the resting offset and noise in a few seconds.</p>
+      <p>The <a href="../ps5-stick-drift-fix/">PS5 stick drift fix guide</a> helps you choose between calibration, a game dead-zone adjustment and further hardware checks. Compare the readings again after any change.</p>
       <p><a class="btn btn-primary" href="../../">Open Sense Calibrator</a></p>
 
-      <aside class="guide-next"><b>Next step</b><a href="../calibrate-dualsense-controller/">How to calibrate a DualSense controller</a><span>When calibration can correct the offset and how to keep it saved.</span></aside>
+      <aside class="guide-next"><b>Next step</b><a href="../calibrate-dualsense-controller/">How to calibrate a DualSense controller</a><span>Choose a procedure and understand what Write to memory changes.</span></aside>
 
     </div>
   </article>

@@ -177,7 +177,7 @@ test('the precision test dialog has a stable name and focuses the result', async
   assert.match(game, /elReport\.querySelector\('\.game-overall'\)\?\.focus\(/);
 });
 
-test('progress bars expose progressbar semantics and animate only without reduced motion', async () => {
+test('progress bars expose progressbar semantics without animated updates', async () => {
   const html = await readFile(indexPath, 'utf8');
   const css = await readFile(cssPath, 'utf8');
   const app = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');
@@ -190,7 +190,8 @@ test('progress bars expose progressbar semantics and animate only without reduce
   }
   // La barra del test drift è ridondante con il suo testo live.
   assert.match(tagOf(html, 'drift-progress'), /aria-hidden="true"/);
-  assert.match(ruleBody(css, '.progress i'), /transition:\s*width 0\.25s linear/);
+  // Regressione: una transizione sulla larghezza ritarda il progresso della misura live.
+  assert.match(ruleBody(css, '.progress i'), /transition:\s*none\s*(?:!important\s*)?;/);
   const reduced = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\}\s*$/)?.[1];
   assert.match(reduced, /\.progress i \{ transition: none !important; \}/);
   assert.match(app, /bar\.setAttribute\('aria-valuenow', now\)/);

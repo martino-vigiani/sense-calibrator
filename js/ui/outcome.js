@@ -30,15 +30,15 @@ import { axisWorsening } from '../calib/wizard-gate.js';
 // sconsigliato: tre passi del reticolo (3 × 0,784 punti).
 export const MUCH_WORSE_PCT = 3 * LSB_PCT;
 
-// Tasso pubblicato, report di qualità v2 del 2026-10-01, coorte PG:
-// 458/602 sotto 1.2%, 503/602 entro un passo. Sono sessioni, non
+// Tasso pubblicato, report di qualità v2 sullo snapshot del 2026-10-03, coorte PG:
+// 495/650 sotto 1.2%, 542/650 entro un passo. Sono sessioni, non
 // controller distinti; il dato va aggiornato a ogni release, non è una promessa.
 export const FIX_RATE = Object.freeze({
   cohort: 'PG',
-  n: 602,
-  centered: 0.760797,
-  withinOneStep: 0.835548,
-  source: 'quality report v2, 2026-10-01',
+  n: 650,
+  centered: 0.761538,
+  withinOneStep: 0.833846,
+  source: 'quality report v2, snapshot 2026-10-03',
 });
 // La stessa cifra a parole: "about 3 in 4" regge da 0.70 a 0.80.
 export const FIX_RATE_WORDS = 'about 3 in 4';
@@ -58,14 +58,13 @@ export function revertAdvice(nvStatus) {
   return nvStatus === 'locked' ? `${POWER_OFF_ADVICE} ${UNPLUG_UNKNOWN}` : null;
 }
 
-// Riparazione per uno stick consumato (rumore alto a riposo). L'ordine conta:
-// prima la garanzia (aprire il controller la fa decadere), poi la pulizia,
-// poi la sostituzione del modulo, e solo alla fine di nuovo la calibrazione.
+// Un segnale rumoroso non diagnostica il guasto. Prima una nuova misura,
+// poi assistenza e diagnosi; una sostituzione non si deduce dal solo rumore.
 export const REPAIR_STEPS = Object.freeze([
-  'Check the warranty first: Sony or the store may replace it, and opening the controller usually ends the warranty.',
-  'Cleaning can help: a little contact cleaner or compressed air around the base of the stick, with the stick moved in circles.',
-  'If it keeps wandering, a repair shop can replace the stick module, including Hall-effect or TMR sticks that don’t wear the same way.',
-  'After any repair, run the drift test and calibrate again.',
+  'Repeat the drift test on a stable surface with both sticks released to check whether the noisy signal persists.',
+  'If it persists, follow Sony’s controller troubleshooting and check warranty or service options before opening the controller.',
+  'Ask a qualified repairer to diagnose the cause before replacing parts. Calibration cannot repair physical damage.',
+  'After any repair, run the drift test again and calibrate only if there is a correctable offset; compare the result before saving.',
 ]);
 
 const SIDES = ['Left', 'Right'];
@@ -125,7 +124,7 @@ const TIER_WORDS = {
   },
   moving: {
     headline: 'Moving',
-    advice: 'The reading never settled. If nobody was touching the sticks, the sensor may be worn: calibration can’t fix a signal that won’t hold still.',
+    advice: 'The reading never settled. Release both sticks and repeat the test. This reading does not determine the cause of an unstable signal.',
   },
   pinned: {
     headline: 'Pinned at the edge',
@@ -438,8 +437,8 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
         RETRY,
       ], [ACTION.quick]);
     case 'worn':
-      return view('warn', 'Re-centered as far as a worn sensor allows', [
-        `Worst stick ${fmt(worst)}. The signal wanders even at rest, a sign of a worn or dirty stick sensor. Calibration can re-center the stick, but the noise will stay.`,
+      return view('warn', 'Center calibrated; signal still noisy', [
+        `Worst stick ${fmt(worst)}. The signal is noisy; this test does not determine its cause. Calibration adjusts the center. Retest with both sticks released before deciding whether to save.`,
         'You can save this if it’s better than before.',
       ], [], { repair: true });
     case 'unstable':
@@ -540,8 +539,8 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
     caution ? 'Within 1 step: check before saving' : 'Within 1 step: fine to save',
     [`Worst stick ${fmt(worst)}. ${describeTier('within-1-step').advice}`, axisLine]);
   if (outcome === 'worn') {
-    return view(outcome, 'warn', 'Re-centered as far as a worn sensor allows', [
-      `Worst stick ${fmt(worst)}. The signal wanders even at rest: calibration can re-center the stick, but the noise will stay.`,
+    return view(outcome, 'warn', 'Center calibrated; signal still noisy', [
+      `Worst stick ${fmt(worst)}. The signal is noisy; this test does not determine its cause. Calibration adjusts the center. Retest with both sticks released before deciding whether to save.`,
       axisLine,
     ], [], { repair: true });
   }
@@ -634,7 +633,7 @@ export function driftMessage(result, { previous = null, unsaved = false, writeLo
   let text;
   switch (worstTier?.id) {
     case 'moving':
-      text = 'The sticks kept moving during the test. If nobody was touching them, the signal is unstable (a sign of a worn sensor): calibration can reduce drift like this, but not remove it.';
+      text = 'The sticks kept moving during the test. Leave both sticks untouched and run it again. If this continues, the signal may be unstable; this test does not determine its cause.';
       break;
     case 'pinned':
       text = `Pinned at the edge: ${describeTier('pinned').advice}`;
@@ -670,7 +669,7 @@ export function driftMessage(result, { previous = null, unsaved = false, writeLo
     else text = `${where} This calibration is still temporary: write it to memory to keep it.`;
   }
   if (noisy && worstTier?.id !== 'moving') {
-    text += ' The signal is also noisy at rest, a sign of wear: calibration can re-center the stick, but the noise will stay.';
+    text += ' The signal is also noisy. Retest with both sticks untouched; this reading does not determine the cause.';
   }
   if (previous && unsaved) {
     const before = Math.max(previous.left.offset, previous.right.offset);
@@ -694,7 +693,7 @@ export function outcomeHtml(view) {
     : '';
   const lines = view.lines.map(l => `<p>${e(l)}</p>`).join('');
   const repair = view.repair
-    ? `<details class="outcome-repair"><summary>What else can fix a worn stick</summary><ol>${REPAIR_STEPS.map(s => `<li>${e(s)}</li>`).join('')}</ol></details>`
+    ? `<details class="outcome-repair"><summary>What to check if the signal stays noisy</summary><ol>${REPAIR_STEPS.map(s => `<li>${e(s)}</li>`).join('')}</ol></details>`
     : '';
   const actions = view.actions?.length
     ? `<div class="outcome-actions">${view.actions.map(a => `<button type="button" class="btn btn-secondary btn-sm" data-outcome-action="${e(a.id)}">${e(a.label)}</button>`).join('')}</div>`

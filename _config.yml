@@ -1,0 +1,21 @@
+# GitHub Pages usa Jekyll (main, /): non pubblicare strumenti e dati di sviluppo.
+# Le risorse dell'app, le guide, gli asset social e le verifiche Google restano inclusi.
+url: "https://martino-vigiani.github.io"
+baseurl: "/sense-calibrator"
+
+exclude:
+  - ops
+  - test
+  - docs
+  - scripts
+  - server
+  - data
+  - node_modules
+  - vendor
+  - AGENTS.md
+  - CLAUDE.md
+  - package.json
+  - README.md
+  - ARTICLE.md
+  - CHANGELOG.md
+  - CONTRIBUTING.md

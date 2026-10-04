@@ -26,6 +26,12 @@ const summary = (off, { noise = [0.2, 0.2], xy = null } = {}) => ({
   xy: xy ?? off.map(o => [o, 0]),
 });
 
+function assertNoiseIsObservation(text) {
+  assert.match(text, /noise|noisy|jitter|wanders|unstable/i, 'describe the measured signal');
+  assert.doesNotMatch(text, /as far as a worn sensor allows|a sign of (?:a )?(?:worn|wear)|noise will stay/i);
+  assert.match(text, /not a diagnosis|cannot (?:diagnos|determine)|can['’]t (?:diagnos|determine)|cause.*(?:unknown|unconfirmed|not)|does not (?:identify|diagnos|determine)|doesn['’]t (?:identify|diagnos|determine)/i, 'a signal measurement does not establish its cause');
+}
+
 test('B1: a worsened stick below the starting worst is a named caution, not a worse-than-start result', () => {
   const before = summary([9.03, 0.555]);
   const after = summary([0.555, 2]);
@@ -162,6 +168,8 @@ test('the Moving and Pinned overrides route the user, and never show a percentag
   });
   assert.equal(moving.tier, 'moving');
   assert.match(moving.text, /kept moving/);
+  // Regressione: una misura instabile veniva presentata come usura del sensore.
+  assertNoiseIsObservation(moving.text);
   assert.doesNotMatch(moving.text, /4\.0%/);
   assert.equal(describeTier('moving').recommendation, TIER_OVERRIDES.moving.recommendation);
 
@@ -217,12 +225,18 @@ test('fix-rate copy is the WS3 report figure, in words', () => {
   assert.equal(FIX_RATE.cohort, 'PG');
   assert.ok(FIX_RATE.centered >= 0.7 && FIX_RATE.centered < 0.8, '"about 3 in 4" must match the published rate');
   assert.equal(FIX_RATE_WORDS, 'about 3 in 4');
+});
+
+test('a noisy drift test reports the signal without diagnosing wear or promising permanent noise', () => {
+  // Regressione: il test diceva "a sign of wear" e "the noise will stay".
   const noisy = driftMessage({
     left: { offset: 2.2, noise: 2.4, x: 0.022, y: 0 },
     right: { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 },
   });
-  assert.match(noisy.text, /calibration can re-center the stick, but the noise will stay/);
+  assertNoiseIsObservation(noisy.text);
   assert.doesNotMatch(noisy.text, /should fix/);
+  assert.equal(noisy.tier, 'mild');
+  assert.equal(noisy.recommendation, 'quick');
 });
 
 test('Write lock: disabled, guarded and allowed cases', () => {
@@ -249,22 +263,63 @@ test('Write lock: disabled, guarded and allowed cases', () => {
   for (const [code, reason] of Object.entries(LOCK_REASONS)) assert.ok(reason.text.length > 20, code);
 });
 
-test('worn is never shown for a result worse than the start, and worn gets repair guidance in order', () => {
+test('worn is never shown for a result worse than the start', () => {
   const facts = { worst: 3.1, beforeWorst: 1.24, bestWorst: 1.24, maxNoise: 2.5, unstableEvents: 0, passes: [3.1] };
   const outcome = classifyOutcome(facts, QUICK_DEFAULTS);
   assert.equal(outcome, 'worse-than-start');
   const worse = quickOutcomeView({ outcome, ...facts });
   assert.doesNotMatch(textOf(worse), /worn/i);
   assert.equal(worse.repair, false);
+});
 
-  const worn = quickOutcomeView({ outcome: 'worn', worst: 2.2, beforeWorst: 6, bestWorst: 2.2 });
-  assert.equal(worn.repair, true);
-  assert.match(textOf(worn), /the noise will stay/);
-  const html = outcomeHtml(worn);
-  const order = ['warranty', 'Cleaning', 'Hall-effect or TMR', 'calibrate again'].map(word => html.indexOf(word));
-  assert.ok(order.every(i => i > 0), `all repair steps present: ${order}`);
-  assert.deepEqual([...order].sort((a, b) => a - b), order, 'warranty, cleaning, replacement, then calibrate');
+test('Quick noisy outcome describes observation while preserving the worn enum and allowed Write', () => {
+  // Regressione: worn era una diagnosi di sensore consumato, non un'osservazione.
+  const before = summary([6, 0.555]);
+  const after = summary([2.2, 0.555], { noise: [2.5, 0.2] });
+
+  const view = quickOutcomeView({ outcome: 'worn', worst: 2.2, beforeWorst: 6, bestWorst: 2.2, committed: true, session: { before, after } });
+
+  assertNoiseIsObservation(textOf(view));
+  assert.equal(view.outcome, 'worn', 'the structured outcome contract is unchanged');
+  assert.equal(view.center.worst, 2.2);
+  assert.equal(view.repair, true);
+  assert.equal(writeLockFor({ center: view.center }).mode, 'allowed');
+  assert.match(view.sticks[0].after, /2\.2%/);
+});
+
+test('Guided noisy outcome describes observation while preserving the worn enum and allowed Write', () => {
+  // Regressione: Guided prometteva che il rumore sarebbe rimasto invariato.
+  const before = summary([6, 0.555]);
+  const after = summary([2.2, 0.555], { noise: [2.5, 0.2] });
+
+  const view = guidedOutcomeView({ before, after });
+
+  assertNoiseIsObservation(textOf(view));
+  assert.equal(view.outcome, 'worn');
+  assert.equal(view.center.worst, 2.2);
+  assert.equal(view.repair, true);
+  assert.equal(writeLockFor({ center: view.center }).mode, 'allowed');
+});
+
+test('noisy repair guidance starts with a released retest and service diagnosis before repair', () => {
+  // Regressione: il pannello suggeriva solventi, perdita certa di garanzia e
+  // sostituzione Hall/TMR come se il test avesse già identificato la causa.
+  const view = quickOutcomeView({ outcome: 'worn', worst: 2.2, beforeWorst: 6, bestWorst: 2.2 });
+
+  const html = outcomeHtml(view);
+
   assert.equal(REPAIR_STEPS.length, 4);
+  assert.match(REPAIR_STEPS[0], /drift test|retest|test again/i);
+  assert.match(REPAIR_STEPS[0], /releas|hands off|nobody.*touch/i);
+  assert.match(REPAIR_STEPS[1], /Sony/);
+  assert.match(REPAIR_STEPS[1], /warranty|service/i);
+  assert.match(REPAIR_STEPS[2], /qualified|professional|repair shop/i);
+  assert.match(REPAIR_STEPS[2], /diagnos|inspect|check.*cause/i);
+  assert.match(REPAIR_STEPS[3], /after.*repair.*drift test/i);
+  assert.match(REPAIR_STEPS[3], /offset|off.center/i);
+  assert.doesNotMatch(html, /contact cleaner|compressed air|opening.*ends the warranty|Hall-effect or TMR|fix a worn stick/i);
+  assert.equal((html.match(/<li>/g) ?? []).length, REPAIR_STEPS.length, 'all four guidance steps are rendered');
+  assert.match(html, /Sony/);
 });
 
 test('outcome-specific copy: within 1 step, Try Guided, lost ground, moved and unverified', () => {

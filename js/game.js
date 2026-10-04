@@ -337,7 +337,8 @@ export function rangeText(rng) {
 }
 
 // La frase del titolo: una sola, in linguaggio semplice. Prima la
-// calibrazione (è ciò che si corregge qui), poi l'hardware.
+// calibrazione (è ciò che si corregge qui), poi la stabilità osservata.
+// Il rumore descrive il segnale: da solo non identifica usura o sporcizia.
 export function headlineSentence(res) {
   const L = res.L.score, R = res.R.score;
   const calSide = L.center <= R.center ? 'left' : 'right';
@@ -349,14 +350,14 @@ export function headlineSentence(res) {
   const guided = tierForOffset(calStick.offset)?.id === 'guided-only';
   const jitter = `±${hwStick.noise.toFixed(1)}%`;
   if (calIssue && hwIssue) {
-    return `The ${calSide} stick rests ${formatOffset(calStick.offset)} off center (${guided ? 'Guided calibration' : 'calibration'} can fix that), and the ${hwSide} stick jitters by ${jitter}, which calibration can't fix.`;
+    return `The ${calSide} stick rests ${formatOffset(calStick.offset)} off center; ${guided ? 'Guided calibration' : 'calibration'} may correct the offset. The ${hwSide} stick jitters by ${jitter}; this test does not determine the cause.`;
   }
   if (calIssue) {
-    return `The ${calSide} stick rests ${formatOffset(calStick.offset)} off center: ${guided ? 'too far for Quick calibration, so use Guided calibration' : 'a Quick calibration should fix that'}.`;
+    return `The ${calSide} stick rests ${formatOffset(calStick.offset)} off center: ${guided ? 'too far for Quick calibration; consider Guided calibration and compare the result' : 'a Quick calibration may correct the offset; compare the result before saving'}.`;
   }
-  if (hwIssue) return `Both sticks rest centered, but the ${hwSide} stick jitters by ${jitter}: that's wear or dirt in the sensor, which calibration can't fix.`;
-  if (res.calibration >= 100) return 'Both sticks rest dead center and hold steady: nothing to fix.';
-  return 'Both sticks rest within one step of center and hold steady: nothing worth fixing.';
+  if (hwIssue) return `Both sticks rest centered, but the ${hwSide} stick jitters by ${jitter}. Retest with both sticks released; this test does not determine the cause.`;
+  if (res.calibration >= 100) return 'Both sticks rest at the measurement limit with a steady signal: center calibration is not needed.';
+  return 'Both sticks rest within one step of center with a steady signal: center calibration is not needed.';
 }
 
 /* ---------------- macchina a stati (pura) ---------------- */
@@ -851,7 +852,7 @@ export function createPrecisionTest(params = {}) {
         v.title = 'Center';
         v.instr = 'Couldn’t measure the center: the sticks kept moving. Rest the controller on a table, then press Try again.';
         v.why = st.reason === 'never-still'
-          ? `The sticks never came to rest in ${Math.round(P.readyTimeoutMs / 1000)} seconds. If nobody was touching them, the sensor itself is jittering (wear or dirt), which calibration can’t fix.`
+          ? `The sticks never came to rest in ${Math.round(P.readyTimeoutMs / 1000)} seconds. Release both sticks and repeat the test. If the signal still jitters, this test does not determine its cause.`
           : `Movement was detected in ${P.centerMaxRetries + 1} runs in a row, and a touched run never gets a score.`;
         v.retry = 'Try again';
         break;
@@ -964,7 +965,7 @@ export function comparisonHtml(prev, res, { unidentified = false, now = Date.now
   }).join('');
   const who = unidentified ? ' (serial unreadable, so it may be another controller)' : '';
   return `<div class="game-compare">
-      <p>Previous result ${agoText(prev.ts, now)}${who}: Calibration ${prev.calibration} &rarr; ${res.calibration}, Hardware ${prev.hardware} &rarr; ${res.hardware}</p>
+      <p>Previous result ${agoText(prev.ts, now)}${who}: Calibration ${prev.calibration} &rarr; ${res.calibration}, Stability ${prev.hardware} &rarr; ${res.hardware}</p>
       <ul class="game-compare-list">${rows}</ul>
       <p class="game-compare-rule">A change counts only when a stick moved by at least one full step of 128; smaller differences are measurement noise.</p>
     </div>`;
@@ -1353,7 +1354,7 @@ export function initGame(deps) {
     // Il risultato si annuncia dalla regione live; a schermo lo dicono già i
     // due numeri grandi, quindi la riga resta solo per lo screen reader.
     elInstr.classList.add('sr-only');
-    setText(elInstr, `Calibration ${res.calibration}, Hardware ${res.hardware}.`);
+    setText(elInstr, `Calibration ${res.calibration}, Stability ${res.hardware}.`);
     setText(elWhy, '');
     show(elReport, true);
     show(elReportActions, true);
@@ -1401,9 +1402,9 @@ export function initGame(deps) {
           ${sub('Range', rangeText(s.range))}
         </div>`;
     elReport.innerHTML = `
-      <div class="game-overall" tabindex="-1" aria-label="Calibration ${res.calibration} out of 100, Hardware ${res.hardware} out of 100">
+      <div class="game-overall" tabindex="-1" aria-label="Calibration ${res.calibration} out of 100, Stability ${res.hardware} out of 100">
         <div class="game-metric"><span class="game-overall-num">${res.calibration}</span><span class="game-overall-cap">Calibration</span></div>
-        <div class="game-metric"><span class="game-overall-num">${res.hardware}</span><span class="game-overall-cap">Hardware</span></div>
+        <div class="game-metric"><span class="game-overall-num">${res.hardware}</span><span class="game-overall-cap">Stability</span></div>
       </div>
       <p class="game-verdict">${headlineSentence(res)}</p>
       ${comparisonHtml(prev, res, { unidentified })}
@@ -1411,7 +1412,7 @@ export function initGame(deps) {
         ${col('Left', res.L)}
         ${col('Right', res.R)}
       </div>
-      <p class="game-formula">Calibration is the Center score of the weaker stick: 100 at the measurement limit, 90 one step of 128 off, 60 at 3.5%. Hardware is its stability, which calibration can't change. Return and Range are for information only.</p>
+      <p class="game-formula">Calibration is the lower Center score: 100 at the measurement limit, 90 one step of 128 off, 60 at 3.5%. Stability is the lower signal-noise score; it does not diagnose the condition of the hardware. Return and Range are for information only.</p>
     `;
   }
 
@@ -1440,7 +1441,7 @@ export function initGame(deps) {
     if (my !== epoch || !elLast) return;
     const prev = loadPrevious(storage, key ?? UNIDENTIFIED);
     if (!prev) return;
-    setText(elLast, `Last result ${key ? 'for this controller' : 'in this browser'}, ${agoText(prev.ts, Date.now())}: Calibration ${prev.calibration}, Hardware ${prev.hardware}.`);
+    setText(elLast, `Last result ${key ? 'for this controller' : 'in this browser'}, ${agoText(prev.ts, Date.now())}: Calibration ${prev.calibration}, Stability ${prev.hardware}.`);
   }
 
   // open(bypassGate): bypassGate=true salta isAvailable (hook dev senza controller).

@@ -62,6 +62,7 @@ Sensitivity Finder and Gameplay Lab are unfinished local experiments. They are a
 ## Guides and project notes
 
 - [Stick drift test guide](guides/ps5-controller-stick-drift-test/index.html)
+- [PS5 stick drift fix: calibration or repair?](guides/ps5-stick-drift-fix/index.html)
 - [DualSense calibration guide](guides/calibrate-dualsense-controller/index.html)
 - [Changes](CHANGELOG.md) and [open hardware checks](docs/hardware-checks.md)
 - [Telemetry tools](ops/calib-telemetry/README.md)

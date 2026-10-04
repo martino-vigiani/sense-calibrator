@@ -1,5 +1,12 @@
 User-agent: *
 Allow: /
-Disallow: /ops/
+# Google legge robots.txt alla radice dell'host, non sotto /sense-calibrator/.
+# L'esclusione dalla build pubblica dei file di sviluppo è in _config.yml.
+Disallow: /sense-calibrator/ops/
+Disallow: /sense-calibrator/test/
+Disallow: /sense-calibrator/docs/
+Disallow: /sense-calibrator/scripts/
+Disallow: /sense-calibrator/server/
+Disallow: /sense-calibrator/data/
 
 Sitemap: https://martino-vigiani.github.io/sense-calibrator/sitemap.xml

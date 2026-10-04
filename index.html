@@ -91,7 +91,7 @@
           {
             "@type": "Question",
             "name": "Is it safe for my controller?",
-            "acceptedAnswer": { "@type": "Answer", "text": "The drift and precision tests are read-only. Calibration changes controller values, but those changes remain temporary until you choose Write to memory; powering the controller off first should discard them (not yet confirmed on hardware). Writing saves the calibration to non-volatile memory. This is an unofficial tool, so review the test result before saving and use it at your own risk." }
+            "acceptedAnswer": { "@type": "Answer", "text": "The drift and precision tests are read-only. Calibration changes controller values. With memory confirmed locked, the change is temporary until you choose Write to memory; powering off should discard it (not yet confirmed on hardware). If memory state is unknown, changes may not be temporary. This is an unofficial tool: review the result and the memory warning before saving." }
           },
           {
             "@type": "Question",
@@ -116,6 +116,8 @@
 </head>
 <body>
 
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
 <header class="topbar">
   <a class="wordmark" href="#">SENSE<span>CALIBRATOR</span></a>
   <div class="topbar-status">
@@ -129,7 +131,7 @@
   </div>
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
 
   <!-- Una calibrazione applicata in questa scheda e mai scritta né scartata
        di sicuro. sessionStorage non sa quale controller fosse: il testo lo dice. -->
@@ -144,10 +146,14 @@
   <section id="view-hero" class="view view-hero">
     <h1>Fix PS5 stick drift.<br>From your browser.</h1>
     <div class="hero-intro">
-      <p class="lede">Test a standard DualSense, recalibrate a correctable center or range offset, and compare the result before you save it.</p>
+      <div class="hero-copy">
+        <p class="lede">Test a standard DualSense, recalibrate a correctable center or range offset, and compare the result before you save it.</p>
+        <a class="hero-guide-link" href="guides/ps5-stick-drift-fix/">When does calibration fix drift?</a>
+      </div>
       <div class="hero-cta">
-        <button id="btn-connect" class="btn btn-primary btn-lg">Connect DualSense</button>
+        <button id="btn-connect" class="btn btn-primary btn-lg" disabled>Connect DualSense</button>
         <p class="hint">Desktop Chrome or Edge &middot; USB cable required</p>
+        <p class="hint hero-test-note">Connecting starts a read-only drift test. Calibration and saving are separate choices.</p>
       </div>
     </div>
 
@@ -157,12 +163,17 @@
       <h2 id="unsupported-title" class="unsupported-title">Open this page on a computer</h2>
       <p id="unsupported-msg" class="unsupported-msg">Recalibrating a DualSense means talking to it over a USB
         cable, and browsers only allow that on <b>desktop Chrome or Edge</b>. Send yourself the link, open it
-        there: the test takes a minute.</p>
+        there to run the read-only drift test.</p>
       <div class="unsupported-actions">
         <button id="btn-copy-link" class="btn btn-secondary" type="button">Copy link</button>
+        <input id="copy-link-url" class="copy-link-url" type="url" readonly aria-label="Page link to open on your computer" hidden>
       </div>
       <p class="unsupported-note">Keep reading: the steps and the FAQ below explain exactly what it fixes.</p>
     </div>
+
+    <noscript>
+      <div class="callout">JavaScript is turned off. Enable it to connect a controller and run the read-only test. You can still read the guides below.</div>
+    </noscript>
 
     <div id="hero-error" class="callout hidden" role="alert"></div>
 
@@ -170,14 +181,16 @@
          js/ui/connect-help.js. Prima la pagina restava muta. -->
     <div id="connect-help" class="callout connect-help hidden">
       <b>Controller not showing up?</b>
+      <p id="connect-help-status" role="status" aria-live="polite" aria-atomic="true"></p>
       <ul id="connect-help-list"></ul>
+      <p><a href="guides/ps5-controller-stick-drift-test/#connection-help">Follow the USB connection checks</a></p>
     </div>
 
     <ol class="steps-strip" aria-label="How it works">
       <li><b>1</b><span>Connect via USB</span></li>
       <li><b>2</b><span>Automatic drift test</span></li>
-      <li><b>3</b><span>Calibration</span></li>
-      <li><b>4</b><span>Save to memory</span></li>
+      <li><b>3</b><span>Calibrate if needed</span></li>
+      <li><b>4</b><span>Review before saving</span></li>
     </ol>
 
     <section class="faq" aria-label="Stick drift FAQ">
@@ -196,7 +209,7 @@
       </details>
       <details>
         <summary>Is it safe for my controller?</summary>
-        <p>The drift and precision tests are read-only. Calibration changes controller values, but those changes remain temporary until you choose Write to memory; powering the controller off first should discard them (not yet confirmed on hardware). Writing saves the calibration to non-volatile memory. This is an unofficial tool, so review the test result before saving and use it at your own risk.</p>
+        <p>The drift and precision tests are read-only. Calibration changes controller values. With memory confirmed locked, the change is temporary until you choose Write to memory; powering off should discard it (not yet confirmed on hardware). If memory state is unknown, changes may not be temporary. This is an unofficial tool: review the result and the memory warning before saving.</p>
       </details>
       <details>
         <summary>Why do I need a USB cable and Chrome or Edge?</summary>
@@ -215,6 +228,10 @@
     <section class="guides" aria-label="Guides">
       <h2>Guides</h2>
       <div class="guides-grid">
+        <a class="guide-card" href="guides/ps5-stick-drift-fix/">
+          <b>PS5 stick drift fix: calibration or repair?</b>
+          <span>Start with your controller's signal. See when a browser calibration helps and when to consider service.</span>
+        </a>
         <a class="guide-card" href="guides/ps5-controller-stick-drift-test/">
           <b>PS5 controller stick drift test</b>
           <span>How the automatic test measures a DualSense at rest, and how to tell a stable offset from a noisy signal.</span>
@@ -228,7 +245,7 @@
   </section>
 
   <!-- ======================= VISTA: DEVICE ======================= -->
-  <section id="view-device" class="view hidden">
+  <section id="view-device" class="view hidden" data-nosnippet>
 
     <nav class="tool-switch" aria-label="Controller tools">
       <button type="button" data-tool="calibration" class="active" aria-current="page">Calibrate</button>
@@ -249,14 +266,20 @@
       </div>
     </div>
 
-    <div id="drift-card" class="card drift-card" data-state="idle">
+    <div id="drift-card" class="card drift-card" data-state="idle" tabindex="-1" aria-labelledby="drift-title">
       <div class="drift-head">
-        <h3>Drift test</h3>
+        <h3 id="drift-title">Drift test</h3>
         <button id="btn-retest" class="btn btn-secondary btn-sm">Run again</button>
       </div>
       <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden" aria-hidden="true"><i></i></div>
     </div>
+
+    <nav class="result-help" aria-label="Help with your controller results">
+      <a href="guides/ps5-controller-stick-drift-test/#read-the-result" target="_blank" rel="noopener">Read the drift numbers</a>
+      <a href="guides/calibrate-dualsense-controller/" target="_blank" rel="noopener">Calibration and saving</a>
+      <span class="result-help-note">Guides open in a new tab.</span>
+    </nav>
 
     <!-- Esito persistente dell'ultima calibrazione (js/ui/outcome.js): resta
          finché non parte la calibrazione successiva, al posto dei toast. -->
@@ -334,7 +357,7 @@
       <div class="action">
         <div>
           <h4>Precision test</h4>
-          <p>Three short checks in about 15 seconds: center, return and range. A calibration score and a hardware score, compared with this controller&rsquo;s previous result.</p>
+          <p>Three short checks in about 15 seconds: center, return and range. A calibration score and a stability score, compared with this controller&rsquo;s previous result.</p>
         </div>
         <button id="btn-game" class="btn btn-secondary">Start</button>
       </div>
@@ -562,7 +585,7 @@
 </div>
 
 <!-- ======================= MODALE: SENSITIVITY FINDER ======================= -->
-<div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title" data-experimental hidden>
+<div id="modal-sensitivity" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sensitivity-title" data-experimental hidden data-nosnippet>
   <div class="modal-panel modal-sensitivity" tabindex="-1">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
@@ -612,7 +635,7 @@
 </div>
 
 <!-- ======================= MODALE: GAMEPLAY LAB ======================= -->
-<div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title" data-experimental hidden>
+<div id="modal-playtest" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="playtest-title" data-experimental hidden data-nosnippet>
   <div class="modal-panel modal-playtest" tabindex="-1">
     <nav class="tool-switch tool-switch-modal" aria-label="Controller tools">
       <button type="button" data-tool="calibration">Calibrate</button>
