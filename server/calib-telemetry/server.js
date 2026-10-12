@@ -390,9 +390,10 @@ app.use('/api/calib/v2/diagnostics', express.json({ limit: DIAG_BODY_LIMIT }));
 
 app.use(express.json({ limit: '8kb' }));
 
-// Periodic cleanup of stale rate-limit entries
-setInterval(() => {
-  const now = Date.now();
+// Periodic cleanup of stale rate-limit entries. Each map keeps the longest
+// window its limiter reads: the diagnostics one needs 24 h, or the per-IP day
+// cap would be forgotten every 5 minutes.
+function pruneRateLimits(now = Date.now()) {
   for (const [ip, hits] of postRateLimit) {
     const fresh = hits.filter(ts => now - ts < POST_RATE_WINDOW_MS);
     if (fresh.length === 0) postRateLimit.delete(ip);
@@ -404,11 +405,12 @@ setInterval(() => {
     else eventRateLimit.set(ip, fresh);
   }
   for (const [ip, hits] of diagRateLimit) {
-    const fresh = hits.filter(ts => now - ts < DIAG_RATE_WINDOW_MS);
+    const fresh = hits.filter(ts => now - ts < DIAG_IP_DAY_WINDOW_MS);
     if (fresh.length === 0) diagRateLimit.delete(ip);
     else diagRateLimit.set(ip, fresh);
   }
-}, 5 * 60 * 1000).unref();
+}
+setInterval(() => pruneRateLimits(), 5 * 60 * 1000).unref();
 
 // Conservazione dei report diagnostici: all'avvio e poi una volta al giorno.
 // La stessa passata ricalcola i totali in memoria (corregge anche file tolti a
@@ -870,4 +872,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { app, cleanupDiagnostics, DIAG_DIR };
+module.exports = { app, cleanupDiagnostics, pruneRateLimits, DIAG_DIR };
