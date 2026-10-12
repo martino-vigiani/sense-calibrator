@@ -380,3 +380,86 @@ test('app: a hand that keeps moving gets the movement message; a silent controll
     assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
   }
 });
+
+// ------------------------------- revisione 12/10: silenzio dopo qualche report
+
+// Sorgente come quella della pagina (app.js: stickSource): `reportTime` è il
+// tempo dell'ULTIMO report, `now()` l'ora corrente sullo stesso orologio.
+function pageLikeSource(sticks) {
+  const listeners = new Set();
+  const source = {
+    t: 0,
+    reportTime: NaN,
+    sticks,
+    now: () => source.t,
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(n) {
+      for (let i = 0; i < n; i++) {
+        source.t += 4;
+        source.reportTime = source.t;
+        for (const fn of [...listeners]) fn();
+      }
+    },
+  };
+  return source;
+}
+
+test('preflight: reports that stop after 800 ms are "no-input", not the last window seen', async () => {
+  // Stick fermo al 30% per 800 ms, poi 7 s di silenzio. Prima: reason
+  // 'off-center', offset 30, e la pagina mandava a Guided invece di dire "cavo".
+  const source = pageLikeSource({ lx: 0.3, ly: 0, rx: 0, ry: 0 });
+  const sampler = {
+    waitForStable: async () => { source.emit(200); source.t += 7000; return false; },
+    measureOffset: async () => null,
+  };
+  const r = await runQuick({ controller: {}, source, sampler, clock: { sleep: async () => {} }, isCurrent: () => true, params: {} });
+  assert.equal(r.outcome, 'preflight');
+  assert.equal(r.preflight.reason, 'no-input');
+  assert.equal(r.session.preflight.reason, 'no-input');
+  // Con i report ancora vivi la diagnosi è quella di prima.
+  const live = pageLikeSource({ lx: 0.3, ly: 0, rx: 0, ry: 0 });
+  const liveRun = await runQuick({
+    controller: {}, source: live, clock: { sleep: async () => {} }, isCurrent: () => true, params: {},
+    sampler: { waitForStable: async () => { live.emit(1000); return false; }, measureOffset: async () => null },
+  });
+  assert.equal(liveRun.preflight.reason, 'off-center');
+});
+
+test('app: a controller that goes silent during the first wait gets the cable message, even after a still off-center stick', async () => {
+  const { h, dev } = await connectedApp();
+  await h.click('btn-quick');
+  dev.touches.push({ stick: 0, t0: 0, dur: 600_000, tail: 0, amp: [40, 0] }); // ~31%, fermo
+  await h.advance(400);
+  const go = h.click('btn-quick-go');
+  await h.advance(800);
+  dev.stopped = true;
+  await h.advance(20_000);
+  await h.run(go);
+  assert.equal(dev.counts.begin, 0);
+  assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started\. <b>No readings arrived from the controller\.<\/b> Check the USB cable/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now', 'not routed to Guided');
+  const [session] = h.sessions().filter(s => s.kind === 'quick');
+  assert.equal(session.preflight.reason, 'no-input');
+});
+
+test('app: reports that keep pausing get a neutral connection message, not "Release both sticks"', async () => {
+  const { h, dev } = await connectedApp();
+  await h.click('btn-quick');
+  const go = h.click('btn-quick-go');
+  for (let i = 0; i < 40; i++) { // 200 ms di report, 150 ms di buco
+    dev.stopped = false;
+    dev.schedule(); // la catena dei report si era fermata
+    await h.advance(200);
+    dev.stopped = true;
+    await h.advance(150);
+  }
+  dev.stopped = false;
+  dev.schedule();
+  await h.run(go);
+  assert.equal(dev.counts.begin, 0);
+  const [session] = h.sessions().filter(s => s.kind === 'quick');
+  assert.equal(session.preflight.reason, 'gaps');
+  assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started\. <b>The controller’s readings kept pausing<\/b>/);
+  assert.doesNotMatch(h.$('quick-msg').innerHTML, /Release both sticks/);
+  assert.equal(h.eval('quickHoldKnown'), false, 'no hand to show on the meter');
+});

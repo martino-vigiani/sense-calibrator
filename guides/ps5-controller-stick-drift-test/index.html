@@ -96,7 +96,7 @@
             "name": "What result counts as stick drift?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift or Marked drift, and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything."
+              "text": "The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift (below 3.5%), Marked drift (below 15%) or Severe drift (15% or more), and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything."
             }
           }
         ]
@@ -196,7 +196,7 @@
       <p>The test cannot see your hand. A stick held still can produce a stable signal, so you must release it yourself. Movement or noise can have several causes and does not prove wear. The measurement logic is available in the <a href="https://github.com/martino-vigiani/sense-calibrator" target="_blank" rel="noopener">GitHub repository</a>.</p>
 
       <h2 id="read-the-result">How to read the result</h2>
-      <p><b>Centered</b> is below 1.2% offset. <b>Within 1 step</b> is the next band, up to 1.25%. <b>Mild drift</b> is below 3.5%, and <b>Marked drift</b> is below 15%; at 15% or more, the tool recommends Guided. These are the tool's measurement and routing bands, not a hardware diagnosis. <b>Moving</b> and <b>Pinned</b> take precedence over an offset label.</p>
+      <p><b>Centered</b> is below 1.2% offset. <b>Within 1 step</b> is the next band, up to 1.25%. <b>Mild drift</b> is below 3.5%, and <b>Marked drift</b> is below 15%; at 15% or more it is <b>Severe drift</b> and the tool recommends Guided. These are the tool's measurement and routing bands, not a hardware diagnosis. <b>Moving</b> and <b>Pinned</b> take precedence over an offset label.</p>
       <table>
         <thead>
           <tr>
@@ -254,7 +254,7 @@
       <h3>Does the drift test change my controller?</h3>
       <p>No. The automatic drift test only reads input reports. It sends no calibration or memory-write command, so there is nothing to save or undo.</p>
       <h3>What result counts as stick drift?</h3>
-      <p>The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift or Marked drift, and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything.</p>
+      <p>The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift (below 3.5%), Marked drift (below 15%) or Severe drift (15% or more), and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything.</p>
 
       <aside class="guide-next">
         <b>Next step</b>

@@ -229,7 +229,11 @@ export function sampleGateOptions({ ref, tol, escaped = false, params = {}, isCa
 //
 // `watchRestWindow` osserva gli stessi input report dell'attesa e tiene gli
 // ultimi holdMs; `stop()` restituisce { center, spread, n } o null (meno di 10
-// report: nessun dato).
+// report, o l'ultimo report più vecchio di REST_SILENT_MS rispetto a
+// source.now(): nessun dato). Senza il controllo di età, un'attesa scaduta
+// dopo che i report si erano fermati diceva `far`/`moving` sull'ultima
+// finestra vista, mai `no-data`.
+const REST_SILENT_MS = 250; // come PROBE_SILENT_MS della sonda Quick
 export function watchRestWindow(source, holdMs = WIZARD_DEFAULTS.holdMs) {
   const win = [];
   const unsubscribe = source.subscribe(() => {
@@ -240,6 +244,8 @@ export function watchRestWindow(source, holdMs = WIZARD_DEFAULTS.holdMs) {
   return {
     stop() {
       unsubscribe();
+      const now = source.now?.();
+      if (win.length && Number.isFinite(now) && now - win.at(-1).t > REST_SILENT_MS) return null;
       return summarizeRestWindow(win);
     },
   };

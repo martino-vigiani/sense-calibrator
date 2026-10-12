@@ -220,6 +220,8 @@ export function createRangeTracker(params = {}) {
     left,
     right,
     params: left.p,
+    // Messo da rangeStatus quando Finish anyway si sblocca: non si riblocca.
+    finishUnlocked: false,
     push(sticks) {
       pushStick(left, sticks.lx, sticks.ly);
       pushStick(right, sticks.rx, sticks.ry);
@@ -263,7 +265,11 @@ export function rangeStatus(tracker, elapsedMs = 0) {
   const edgesDone = [L, R].every(st => st.coverage >= tracker.params.minCoverage && st.missingDirs.length === 0);
   const rotationOnly = !complete && edgesDone;
   const unlockMs = rotationOnly ? Math.max(tracker.params.unlockMs, tracker.params.rotationUnlockMs) : tracker.params.unlockMs;
-  const unlocked = elapsedMs >= unlockMs;
+  // Una volta comparso, Finish anyway resta per questa sessione: rotationOnly
+  // cambia nel tempo (a 20 s manca un lato, a 25 s solo rotazione) e la soglia
+  // salirebbe a 60 s, rimettendo Done disattivato sotto il dito dell'utente.
+  const unlocked = tracker.finishUnlocked === true || elapsedMs >= unlockMs;
+  if (unlocked && !complete) tracker.finishUnlocked = true;
   return {
     left: L,
     right: R,

@@ -181,3 +181,36 @@ test('preflight probe: a report gap or a release restarts the off-center time', 
   probe.push(null, 2608);
   probe.push(resting, NaN);
 });
+
+test('preflight probe: reports that keep pausing are "gaps", not a moving stick', () => {
+  // Revisione 12/10: un buco oltre 100 ms azzera la finestra, e con buchi
+  // ricorrenti non si arriva mai a 300 ms continui. Prima lo stato restava
+  // 'moving' e la pagina diceva "Release both sticks" (e "Stick held") a una
+  // mano che non c'era. Lo stick qui è fermo e centrato.
+  const probe = newProbe();
+  let t = 0;
+  for (let burst = 0; burst < 10; burst++) {
+    probeFeed(probe, t, t + 200, resting); // 200 ms di report, poi un buco
+    t += 200 + GAP_MS + 50;
+  }
+  const last = t - GAP_MS - 50;
+  assert.equal(probe.status(last).reason, 'gaps');
+  // Una finestra intera dopo l'ultimo buco si giudica di nuovo.
+  probeFeed(probe, t, t + 400, resting);
+  assert.equal(probe.status(t + 400).reason, 'settled');
+  // Un buco solo, poi movimento continuo: 'moving' come prima.
+  const moving = newProbe();
+  probeFeed(moving, 0, 500, resting);
+  probeFeed(moving, 500 + GAP_MS + 50, 1500, now => ({ ...resting, rx: 0.2 * Math.sin(now / 30) }));
+  assert.equal(moving.status(1500).reason, 'moving');
+  // Una mano vista in movimento, poi un buco proprio prima della fine
+  // dell'attesa: resta 'moving' (sim sintetica, seed 7, sessione 301).
+  const touched = newProbe();
+  probeFeed(touched, 0, 1000, now => ({ ...resting, rx: 0.2 * Math.sin(now / 30) }));
+  probeFeed(touched, 1000 + GAP_MS + 50, 1300, resting);
+  assert.equal(touched.status(1300).reason, 'moving');
+  // All'avvio, prima di 300 ms continui e senza buchi: invariato ('moving').
+  const early = newProbe();
+  probeFeed(early, 0, 100, resting);
+  assert.equal(early.status(100).reason, 'moving');
+});

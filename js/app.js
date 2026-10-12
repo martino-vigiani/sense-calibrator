@@ -2447,6 +2447,15 @@ async function quickCalibrate() {
         log('Quick calibration not started: no stick readings from the controller.');
         return;
       }
+      if (diag.reason === 'gaps') {
+        // Report a singhiozzo: la finestra ferma non arriva mai, ma nulla dice
+        // che ci sia una mano. Niente "Release both sticks" né "Stick held".
+        if (ops.isCurrent(op)) quickHoldKnown = false;
+        blockedMessage = 'Calibration has not started. <b>The controller’s readings kept pausing</b>, so the sticks could not be checked. '
+          + 'Connect the cable directly to the computer, without a hub, keep this tab in front, then try again.';
+        log('Quick calibration not started: stick readings kept pausing.');
+        return;
+      }
       // Il modale dice "Release both sticks": il misuratore non deve dire il
       // contrario. Con stick fermi e centrati (`settled`: l'arresto è un buco
       // nei report) non c'è nessuna tenuta da mostrare.

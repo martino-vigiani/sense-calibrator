@@ -208,3 +208,24 @@ test('circularity RMS is null until every sector is reached, near 0 on a circle,
   const c = circularityRms(lumpy);
   assert.ok(c > 5 && c < 10, `${c}`);
 });
+
+test('Finish anyway, once shown, stays for the session even when only rotation is left later', () => {
+  // Revisione 12/10: a 20 s manca un lato (soglia 15 s, Finish anyway), a 25 s
+  // l'utente completa il lato, rotationOnly diventa vero e la soglia sarebbe
+  // salita a 60 s, rimettendo Done disattivato. Done e Write: invariati.
+  const t = createRangeTracker();
+  for (const [x, y] of rotation({ turns: 1 })) t.push({ lx: x < 0 ? 0.7 * x : x, ly: y, rx: x, ry: y });
+  let st = rangeStatus(t, 20_000);
+  assert.equal(st.rotationOnly, false);
+  assert.equal(st.finishAnyway, true);
+  for (const [x, y] of rotation({ turns: 0.6, phase: 2 * Math.PI })) t.push({ lx: x, ly: y, rx: x, ry: y });
+  st = rangeStatus(t, 25_000);
+  assert.equal(st.rotationOnly, true, 'only rotation is missing now');
+  assert.equal(st.complete, false);
+  assert.equal(st.finishAnyway, true, 'the button does not lock again');
+  assert.equal(st.canFinish, true);
+  // Un tracker nuovo, solo rotazione dall'inizio: la regola dei 60 s resta.
+  const fresh = createRangeTracker();
+  for (const [x, y] of rotation({ turns: 1 })) fresh.push({ lx: x, ly: y, rx: x, ry: y });
+  assert.equal(rangeStatus(fresh, 25_000).finishAnyway, false);
+});

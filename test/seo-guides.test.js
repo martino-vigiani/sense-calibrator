@@ -261,3 +261,29 @@ test('the comparison credits dualshock-tools and dates its third-party facts', a
   assert.match(html, /checked on 12 October 2026/);
   assert.match(html, /not affiliated with dualshock-tools/);
 });
+
+// Revisione 12/10: la FAQ del test drift elencava solo Mild e Marked drift.
+// Le etichette vengono dai badge di GRID_TABLE (quelli che il test drift
+// mostra), sia nella FAQ visibile sia nel JSON-LD.
+test('the drift test FAQ names every drift badge the tool shows, with its band', async () => {
+  const { GRID_TABLE } = await import('../js/calib/lattice.js');
+  const html = await readFile(new URL('guides/ps5-controller-stick-drift-test/index.html', rootUrl), 'utf8');
+  const answer = 'Larger offsets are labeled Mild drift (below 3.5%), Marked drift (below 15%) or Severe drift (15% or more)';
+  assert.equal(html.split(answer).length - 1, 2, 'visible FAQ and JSON-LD carry the same answer');
+  const badges = GRID_TABLE.map(row => row.badge).filter(b => /drift/i.test(b));
+  assert.deepEqual(badges, ['Mild drift', 'Marked drift', 'Severe drift']);
+  const bands = Object.fromEntries(GRID_TABLE.map(row => [row.badge, row.max]));
+  assert.equal(bands['Mild drift'], 3.5);
+  assert.equal(bands['Marked drift'], 15);
+});
+
+// Revisione 12/10: l'avviso di dualshock-tools era parafrasato più morbido
+// dell'originale, e "far more GitHub stars and forks" non aveva numeri né data.
+test('the dualshock-tools comparison quotes its drift warning and dates its GitHub numbers', async () => {
+  const html = await readFile(new URL('guides/sense-calibrator-vs-dualshock-tools/index.html', rootUrl), 'utf8');
+  assert.ok(html.includes('“This utility cannot fix stick drift.”'));
+  assert.ok(html.includes('“but it may also make the problem worse, with no way to undo it.”'));
+  assert.doesNotMatch(html, /drift caused by worn parts/);
+  assert.doesNotMatch(html, /far more GitHub stars/);
+  assert.match(html, /on 12 October 2026 its GitHub repository had \d+ stars and \d+ forks, against \d+ and \d+ for Sense Calibrator/);
+});

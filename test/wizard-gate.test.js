@@ -420,3 +420,29 @@ test('a timed-out sample carries a diagnosis but never a center', async () => {
   assert.ok(Math.abs(r.diagnosis.dist[0] - 0.15) < 1e-6);
   assert.equal(source.listeners.size, 0);
 });
+
+test('a wait that times out after the reports stopped is "no-data", not the last window seen', async () => {
+  // Revisione 12/10: la finestra osservata non scadeva allo stop(), quindi un
+  // timeout dopo che i report si erano fermati diceva far/moving, mai no-data.
+  // Solo il testo: nessun campione, nessun centro in entrambi i casi.
+  const held = () => ({ ...REST, lx: REST.lx + 0.15 });
+  for (const kind of ['sample', 'reference']) {
+    const source = scriptedSource(held);
+    let fire = null;
+    const clock = { setTimeout: fn => { fire = fn; return 1; }, clearTimeout: () => {} };
+    const promise = kind === 'sample'
+      ? gateWizardSample(source, clock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB })
+      : captureRestReferenceDetailed(source, clock);
+    for (let i = 0; i < 200; i++) { // 800 ms di report, poi silenzio
+      source.t += 4;
+      source.sticks = kind === 'sample' ? held() : { lx: 0.6, ly: 0.6, rx: 0, ry: 0 };
+      for (const fn of [...source.listeners]) fn();
+    }
+    source.t += WIZARD_DEFAULTS.timeoutMs;
+    fire();
+    const r = await promise;
+    assert.equal(r.diagnosis.why, 'no-data', kind);
+    assert.equal(r.center ?? null, null, kind);
+    assert.equal(source.listeners.size, 0, kind);
+  }
+});

@@ -303,8 +303,20 @@ export async function runQuick({
     stopProbe?.();
     stopProbe = null;
   };
+  // Ora corrente per la diagnosi del silenzio: reportTime è il tempo
+  // dell'ULTIMO report e non avanza quando i report si fermano, quindi con
+  // quello un controller muto dopo qualche report non risultava mai muto.
+  // source.now() è lo stesso orologio di event.timeStamp (app.js: stickSource);
+  // il massimo copre un timeStamp di pochi ms avanti. Solo testo: le decisioni
+  // (attesa, uscita anticipata) restano sul tempo dei report.
+  const probeNow = () => {
+    const t = reportTimeOf(source);
+    const n = source?.now?.();
+    if (!Number.isFinite(n)) return t;
+    return Number.isFinite(t) ? Math.max(n, t) : n;
+  };
   const blocked = () => {
-    const diag = stopProbe ? probe.status(reportTimeOf(source)) : { reason: 'unknown' };
+    const diag = stopProbe ? probe.status(probeNow()) : { reason: 'unknown' };
     endProbe();
     session.aborted = 'preflight';
     session.preflight = { stage: preflightStage, reason: diag.reason };

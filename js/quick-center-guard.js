@@ -52,6 +52,10 @@ const PROBE_SILENT_MS = 250;
 //                lo tiene fermo; i due casi sono indistinguibili da qui
 //   'settled'    fermi e centrati: la tenuta è passata, l'arresto viene da
 //                altro (buco nei report durante la baseline, scollegamento)
+//   'gaps'       i report arrivano, ma un buco oltre `maxGapMs` ha azzerato la
+//                finestra, non ci sono ancora `holdMs` continui da giudicare e
+//                l'ultima finestra giudicata (se c'è) era ferma e centrata:
+//                nulla indica una mano, quindi non la si nomina
 //   'moving'     tutto il resto: il segnale non resta fermo per `holdMs`
 //
 // `push` va chiamato su ogni input report HID (mai su un timer) con il tempo
@@ -65,6 +69,12 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
   let offSince = null;
   let offWindow = null;
   let settled = false;
+  // `evaluated`: l'ultimo report aveva `holdMs` continui da giudicare;
+  // `gapped`: almeno un buco ha azzerato la finestra; `lastJudged`: l'esito
+  // dell'ultima finestra giudicata ('moving' | 'off' | 'settled' | null).
+  let evaluated = false;
+  let gapped = false;
+  let lastJudged = null;
   const axes = ['lx', 'ly', 'rx', 'ry'];
   return {
     push(sticks, now) {
@@ -74,6 +84,7 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
         continuousStart = null;
         offSince = null;
         settled = false;
+        gapped = true;
       }
       reports += 1;
       last = now;
@@ -82,7 +93,8 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
       while (win.length && win[0].t < now - holdMs) win.shift();
       let off = false;
       settled = false;
-      if (win.length >= 10 && now - continuousStart >= holdMs) {
+      evaluated = win.length >= 10 && now - continuousStart >= holdMs;
+      if (evaluated) {
         const stats = {};
         let maxSpread = 0;
         for (const a of axes) {
@@ -100,6 +112,7 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
         const outsideL = win.some(s => Math.hypot(s.lx, s.ly) > QUICK_CENTER_RADIUS);
         const outsideR = win.some(s => Math.hypot(s.rx, s.ry) > QUICK_CENTER_RADIUS);
         settled = maxSpread <= spread && !outsideL && !outsideR;
+        lastJudged = maxSpread > spread ? 'moving' : settled ? 'settled' : 'off';
         if (maxSpread <= spread && (outsideL || outsideR)) {
           off = true;
           const stick = (x, y) => ({
@@ -123,13 +136,19 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
     },
     // { reason, side?, offset?, result? }: `result` ha la forma di analyzeDrift
     // ({ left, right } con offset e noise in %, x/y normalizzati) per il
-    // routing della pagina. `now` serve a riconoscere un controller muto.
+    // routing della pagina. `now` serve a riconoscere un controller muto: deve
+    // essere l'ora corrente (source.now()), non il tempo dell'ultimo report,
+    // che resta fermo quando i report si fermano e non scade mai.
     status(now) {
       if (reports < 10 || last === null || !Number.isFinite(now) || now - last > PROBE_SILENT_MS) return { reason: 'no-input' };
       if (offSince !== null && offWindow) {
         const { left, right, side } = offWindow;
         return { reason: 'off-center', side, offset: offWindow[side].offset, result: { left, right, unstable: false } };
       }
+      // Dopo un buco, finché non c'è una finestra intera, vale l'ultima
+      // finestra giudicata: se si muoveva (o era ferma fuori raggio) resta
+      // 'moving' come prima; 'gaps' solo se nulla ha mostrato una mano.
+      if (!evaluated && gapped && (lastJudged === null || lastJudged === 'settled')) return { reason: 'gaps' };
       return { reason: settled ? 'settled' : 'moving' };
     },
   };
