@@ -33,8 +33,8 @@ const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 // Stessi valori in subralabs-v2/code/calib-telemetry/calib-telemetry-v2.test.js.
 const CONTRACT_SHA256 = {
-  schema: '282796145fb4416ccd6295207226915cadce7d176b8f9530e1b75cf7d1a7ccc7',
-  fixtures: '9e945ac15bdbfb61b7d6afe73a7671cae51e4794724134d3adea5af424878c78',
+  schema: '64954349dff06c49d08f97bc9af4d3b5c2a73b448fe61aed4a50d30fef6eae33',
+  fixtures: '2639167df7df4650a8ae620c68e5f632f3bd58ae324c5a3151a0784a19349424',
 };
 
 const CTX = { sid: '3f9a01bc', seq: 0, board: 'BDM-030', fw: 16777258 };
@@ -61,7 +61,7 @@ test('every valid fixture passes and every invalid fixture is rejected', () => {
   for (const { name, event } of FIXTURES.valid) assert.equal(validateEventV2(event), null, name);
   for (const { name, event } of FIXTURES.invalid) assert.notEqual(validateEventV2(event), null, name);
   const types = new Set(FIXTURES.valid.map(f => f.event.type));
-  assert.deepEqual([...types].sort(), ['flash', 'guided', 'quick', 'range', 'rest', 'save']);
+  assert.deepEqual([...types].sort(), ['flash', 'guided', 'landing', 'quick', 'range', 'rest', 'save']);
 });
 
 test('the schema is closed: every object rejects unknown fields and every string is an enum or the sid pattern', () => {
@@ -69,7 +69,8 @@ test('the schema is closed: every object rejects unknown fields and every string
     if (!node || typeof node !== 'object') return;
     if ([node.type].flat().includes('object')) {
       assert.equal(node.additionalProperties, false, `${path} must reject unknown fields`);
-      const optional = { '#/$defs/QuickEvent': ['verification'], '#/$defs/RangeEvent': ['completion'] }[path] ?? [];
+      const optional = { '#/$defs/QuickEvent': ['verification'], '#/$defs/RangeEvent': ['completion'],
+        '#/$defs/RestEvent': ['sinceCalS', 'opsSince', 'landings'] }[path] ?? [];
       assert.deepEqual([...node.required, ...optional].sort(), Object.keys(node.properties).sort(), `${path}: only backward-compatible diagnostics are optional`);
     }
     const types = [node.type].flat();
@@ -261,7 +262,7 @@ test('uploadEventV2 posts exactly the event as JSON with keepalive, and rejects 
   }), /HTTP 429/);
 });
 
-test('the consent scope is 4 and the app build is inside the contract range', () => {
-  assert.equal(TELEMETRY_SCOPE, 4);
+test('the consent scope is 5 and the app build is inside the contract range', () => {
+  assert.equal(TELEMETRY_SCOPE, 5);
   assert.equal(validateEventV2({ ...FIXTURES.valid[0].event, app: TELEMETRY_APP_BUILD }), null);
 });

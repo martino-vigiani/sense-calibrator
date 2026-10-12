@@ -56,11 +56,15 @@ each other:
 CALIB_CONTRACT_PEER=../../../Sense-Calibrator/ops/calib-telemetry/contract node --test
 ```
 
-Six event types, selected by `type`: `quick`, `guided`, `range` (one
+Seven event types, selected by `type`: `quick`, `guided`, `range` (one
 calibration each), `flash` (one Write to memory attempt), `save` (how an unsaved
 calibration ended: saved, disconnected or page left, with Write-lock reasons and
-dialog counters) and `rest` (a 30-second summary of resting stick noise).
-Base fields are required; Quick `verification` and Range `completion` are optional and nullable so pages already open before this release still work. Unknown fields are rejected at every level, and every
+dialog counters), `rest` (a 30-second summary of resting stick noise) and
+`landing` (where the sticks stopped after each release since the last
+calibration, at most two per visit; the largest one is under 2 KB).
+Base fields are required; Quick `verification`, Range `completion` and the rest
+timing fields (`sinceCalS`, `opsSince`, `landings`) are optional and nullable so pages already open before this release still work. The only times are
+seconds since the last calibration of the page load, rounded to 10 s and capped at 3600. Unknown fields are rejected at every level, and every
 string is an enum except `sid` (8 hex characters, random per page load, never
 stored by the page). There is no serial number, device identifier, free text or
 client timestamp. The body limit remains 4 KB; the largest supported Quick diagnostic payload is tested against that limit. Quick diagnostics contain at most 16 existing verification measurements, their stability criterion and retry-hold outcome; Range diagnostics contain reverse-turn progress and missing completion checks. Legacy records are reported as unknown, never inferred stable or complete.

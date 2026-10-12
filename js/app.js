@@ -6,10 +6,12 @@ import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
 import {
-  TELEMETRY_SCOPE, buildFlashEvent, buildGuidedEvent, buildQuickEvent, buildRangeEvent, buildRestEvent, buildSaveEvent,
-  flashResultFor, uploadEventV2, validateEventV2,
+  TELEMETRY_SCOPE, buildFlashEvent, buildGuidedEvent, buildLandingEvent, buildQuickEvent, buildRangeEvent, buildRestEvent,
+  buildSaveEvent, flashResultFor, uploadEventV2, validateEventV2,
 } from './telemetry-v2.js';
+import { createCalTimeline } from './telemetry-timeline.js';
 import { createRestNoiseCollector } from './calib/rest-noise.js';
+import { createLandingDetector } from './calib/landing.js';
 import {
   DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
@@ -710,6 +712,7 @@ async function adopt(device, { explicit = false, previousFocus = document.active
     const key = await localDeviceKey(info.serial);
     if (ds5 !== candidate) return;
     deviceKey = key;
+    calTimeline.connected(key);
     const nv = await refreshNv();
     if (ds5 !== candidate) return;
     reapplyCenterWriteLock();
@@ -829,6 +832,8 @@ function teardown(message = null) {
   if (unsaved && currentWriteLock().mode === 'allowed') lostSave = { key: deviceKey };
   closeSaveChapter('disconnected');
   restNoise.reset();
+  landingDetector.reset();
+  calTimeline.disconnected();
   if (diag.active) {
     diagNote('disconnect');
     diag.gap();
@@ -961,6 +966,7 @@ function onInputReport(event) {
   const now = performance.now();
   feedHandsOff(now);
   feedRestNoise(now);
+  feedLandings(now);
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
     battery = ds5.parseBattery(d);
@@ -1646,6 +1652,7 @@ async function doFlash() {
   const noteFlash = (error, nv) => {
     const result = flashResultFor(error, nv);
     if (ds5 === controller && ops.isCurrent(op) && saveChapter === chapter && chapter) chapter.lastFlash = result;
+    calTimeline.op('flash');
     emitV2(ctx => buildFlashEvent(ctx, { result, nv, attempt, lock: lock.mode }), { device: flashDevice });
   };
   try {
@@ -1900,6 +1907,7 @@ function confirmPoweredOff() {
   if (!powerCycleApplies() || ops.busy) return;
   const ok = confirm('Continue only if you turned the controller off (held PS for 10 s until the light went out, or used Restart) after the calibration pass was left open. Disconnecting or unplugging the cable doesn’t count. Did you turn it off?');
   if (!ok) return;
+  calTimeline.op('power-cycle');
   clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.');
   // Un controller dal seriale illeggibile non toglie i blocchi con chiave
   // (vedi clearPowerCycle): se uno vale ancora, il promemoria resta.
@@ -2158,8 +2166,8 @@ function sendV2(item, { now = false } = {}) {
 // seq e la scheda del controller; `device` sovrascrive board/fw quando
 // l'evento arriva dopo il teardown (esito 'disconnected'). Con la
 // condivisione spenta non costruisce nemmeno l'evento.
-function emitV2(build, { device = null, now = false } = {}) {
-  diagCalib(build, device);
+function emitV2(build, { device = null, now = false, diag = true } = {}) {
+  if (diag) diagCalib(build, device);
   if (!telemetryEnabled() || v2Seq >= V2_MAX_PER_LOAD || v2Seq > 255) return null;
   const ctx = {
     sid: V2_SID,
@@ -2193,6 +2201,7 @@ function flushV2(keepSharing) {
 // sessione prima di alzare `unsaved`).
 function emitCalibV2(build, options) {
   const event = emitV2(build, options);
+  noteCalibTimeline(event, build, options);
   if (!event) return;
   const owner = options?.controller ?? null;
   const epoch = options?.epoch;
@@ -2204,6 +2213,22 @@ function emitCalibV2(build, options) {
     saveChapter.sessions += 1;
     lastCalibV2.claimed = true;
   }
+}
+
+// La cronologia della visita (js/telemetry-timeline.js) segue le calibrazioni
+// anche con la condivisione spenta: se la persona la riaccende dal footer,
+// sinceCalS non deve dire "nessuna calibrazione" quando c'è stata. Senza
+// evento inviato il builder gira solo per leggere tipo e commit. L'esito di un
+// ciclo orfano, arrivato quando è già collegato un altro controller, non è
+// una calibrazione di questo.
+function noteCalibTimeline(event, build, options) {
+  const owner = options?.controller ?? null;
+  if (ds5 && owner && owner !== ds5) return;
+  let probe = event;
+  if (!probe) {
+    try { probe = build({ sid: '00000000', seq: 0, board: null, fw: null }); } catch { return; }
+  }
+  calTimeline.calibration({ type: probe?.type, committed: probe?.committed, ref: event ? event.seq : null }, performance.now());
 }
 
 /* --------- periodo "non salvato": si salva davvero? --------- */
@@ -2274,7 +2299,43 @@ function feedRestNoise(now) {
   }
   const summary = restNoise.push(sticks, now, { drift: !!driftTest });
   if (!summary) return;
-  emitV2(ctx => buildRestEvent(ctx, { summary, drift: summary.drift, state: restState(), discarded: summary.discarded }));
+  const timing = calTimeline.rest(now);
+  emitV2(ctx => buildRestEvent(ctx, { summary, drift: summary.drift, state: restState(), discarded: summary.discarded, timing }));
+}
+
+/* --------- rilasci (js/calib/landing.js) --------- */
+// Dove si ferma ogni stick dopo un rilascio, dagli stessi input report.
+// Solo con un controller, nessuna calibrazione, flash o range in corso e la
+// condivisione non negata; i modali non contano (il test di precisione fa
+// proprio dei rilasci). Restano in memoria (calTimeline) e partono riassunti
+// nell'evento `landing`: al più due per caricamento, a 20 rilasci dopo una
+// calibrazione e all'uscita dalla pagina.
+const calTimeline = createCalTimeline();
+const landingDetector = createLandingDetector();
+let landingSlowCheckAt = -Infinity;
+let landingSlowBlocked = false;
+function landingAllowed(now) {
+  if (!ds5 || ops.busy || flashing || wizard || rangeSession || rangeCheck) return false;
+  if (now - landingSlowCheckAt > 200 || now < landingSlowCheckAt) {
+    landingSlowCheckAt = now;
+    landingSlowBlocked = !telemetryEnabled();
+  }
+  return !landingSlowBlocked;
+}
+function feedLandings(now) {
+  if (!landingAllowed(now)) {
+    landingDetector.reset();
+    return;
+  }
+  for (const landing of landingDetector.push(sticks, lastStickReportAt ?? now)) {
+    if (calTimeline.landing(landing, landing.t)) emitLandings('count');
+  }
+}
+function emitLandings(trigger, { now = false } = {}) {
+  const pending = calTimeline.pending(trigger, performance.now());
+  if (!pending) return;
+  // Non nel report diagnostico: lì i rilasci ci sono già, uno per uno.
+  if (emitV2(ctx => buildLandingEvent(ctx, pending), { now, diag: false })) calTimeline.sent(trigger);
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
@@ -3891,6 +3952,7 @@ async function rebootController() {
   diagNote('start', { op: 'restart' });
   const { sent } = await controller.reboot();
   diagNote('restart', { sent });
+  if (sent) calTimeline.op('power-cycle');
   if (ds5 !== controller) {
     toast('Controller restarting: reconnect it once it has powered off.', 5000);
     return;
@@ -4088,6 +4150,7 @@ window.addEventListener('pagehide', () => {
   if (rangeSession) reportAbandonedRange(rangeSession, { now: true });
   if (rangeClosing) reportAbandonedRange(rangeClosing, { now: true });
   closeSaveChapter('left', { now: true });
+  emitLandings('left', { now: true });
 });
 
 // Avviso solo se c'è qualcosa da perdere che si potrebbe salvare: una
@@ -4107,6 +4170,10 @@ function setConsent(on) {
   if (!on) {
     consentEpoch += 1;
     for (const item of v2Outbox) if (item.state === 'queued') item.state = 'discarded';
+    // I rilasci raccolti finora non partono più, nemmeno se la condivisione
+    // torna accesa più tardi.
+    calTimeline.clearLandings();
+    landingDetector.reset();
   }
   storageWrite(TELEMETRY_CONSENT_KEY, on ? '1' : '0');
   for (const box of consentBoxes) box.checked = on;

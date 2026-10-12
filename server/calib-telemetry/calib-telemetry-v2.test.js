@@ -47,8 +47,8 @@ const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 
 // Stessi valori in Sense-Calibrator/test/telemetry-v2.test.js.
 const CONTRACT_SHA256 = {
-  schema: '282796145fb4416ccd6295207226915cadce7d176b8f9530e1b75cf7d1a7ccc7',
-  fixtures: '9e945ac15bdbfb61b7d6afe73a7671cae51e4794724134d3adea5af424878c78',
+  schema: '64954349dff06c49d08f97bc9af4d3b5c2a73b448fe61aed4a50d30fef6eae33',
+  fixtures: '2639167df7df4650a8ae620c68e5f632f3bd58ae324c5a3151a0784a19349424',
 };
 
 let server;
@@ -189,6 +189,22 @@ test('HTTP accepts and stores the browser diagnostic Quick payload with sixteen 
   assert.match(receivedDay, /^\d{4}-\d{2}-\d{2}$/);
   assert.deepEqual(storedEvent, event, 'all sixteen diagnostic measurements reach storage intact');
   assert.equal(exists(DATA_PATH), false, 'the diagnostic event never writes the v1 file');
+});
+
+test('HTTP stores the largest landing event the browser builds, and a rest event from a cached page without the timing fields', async () => {
+  const { buildLandingEvent } = await import('../../js/telemetry-v2.js');
+  const landings = Array.from({ length: 40 }, (_, i) => ({ stick: i % 2 ? 'right' : 'left', landAxes: [-63.95, -63.95], sinceMs: 3_600_000 }));
+  const landing = buildLandingEvent({ sid: 'ffffffff', seq: 255, board: 'BDM-060R' }, {
+    trigger: 'count', ref: 255, sinceMs: 3_600_000, ops: ['quick', 'guided', 'range', 'flash', 'reconnect', 'power-cycle'],
+    counts: { left: 10_000, right: 10_000 }, landings,
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(landing), 'utf8') < 2048);
+  const legacyRest = validEvent('rest');
+  for (const k of ['sinceCalS', 'opsSince', 'landings']) assert.equal(Object.hasOwn(legacyRest, k), false);
+  assert.equal((await postEvent(landing)).status, 204);
+  assert.equal((await postEvent(legacyRest)).status, 204);
+  const stored = readLines(DATA_V2_PATH).map(line => JSON.parse(line));
+  assert.deepEqual(stored.map(({ receivedDay, ...event }) => event), [landing, legacyRest]);
 });
 
 test('HTTP accepts a valid JSON body of exactly 4096 UTF-8 bytes', async () => {

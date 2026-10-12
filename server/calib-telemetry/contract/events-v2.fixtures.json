@@ -731,6 +731,368 @@
         ],
         "verification": null
       }
+    },
+    {
+      "name": "rest with time since calibration",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 420,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest with no calibration yet",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 1,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": null,
+        "opsSince": null,
+        "landings": null
+      }
+    },
+    {
+      "name": "landing after 20 releases",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing on page exit with no calibration",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 4,
+        "app": 20261013,
+        "board": null,
+        "trigger": "left",
+        "ref": null,
+        "sinceCalS": null,
+        "opsSince": null,
+        "sticks": [
+          {
+            "count": 0,
+            "median": null,
+            "spread": null,
+            "firstS": null,
+            "lastS": null,
+            "recent": []
+          },
+          {
+            "count": 1,
+            "median": [
+              -20,
+              25
+            ],
+            "spread": [
+              0,
+              0
+            ],
+            "firstS": null,
+            "lastS": null,
+            "recent": [
+              {
+                "axes": [
+                  -20,
+                  25
+                ],
+                "sinceCalS": null
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -4694,6 +5056,3353 @@
             []
           ]
         }
+      }
+    },
+    {
+      "name": "rest sinceCalS over one hour",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 3610,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest sinceCalS negative",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": -10,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest sinceCalS not an integer",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 12.5,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest unknown operation",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 420,
+        "opsSince": [
+          "quick",
+          "unplug"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest repeated operation",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 420,
+        "opsSince": [
+          "quick",
+          "flash",
+          "flash"
+        ],
+        "landings": 7
+      }
+    },
+    {
+      "name": "rest landings negative",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 420,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": -1
+      }
+    },
+    {
+      "name": "rest landings as text",
+      "event": {
+        "v": 2,
+        "type": "rest",
+        "sid": "3f9a01bc",
+        "seq": 11,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ctx": "idle",
+        "state": "saved",
+        "durS": 30,
+        "reports": 7483,
+        "intervalMs": [
+          4,
+          4.3,
+          21.7
+        ],
+        "gaps": 0,
+        "discarded": 1,
+        "sticks": [
+          {
+            "off": 0.61,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 2.06,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              42,
+              3,
+              0
+            ]
+          },
+          {
+            "off": 3.2,
+            "p50": 0.5,
+            "p95": 1.12,
+            "max": 4.6,
+            "sx": 0.41,
+            "sy": 0.38,
+            "ex": [
+              310,
+              88,
+              6
+            ]
+          }
+        ],
+        "sinceCalS": 420,
+        "opsSince": [
+          "quick",
+          "range",
+          "reconnect"
+        ],
+        "landings": "7"
+      }
+    },
+    {
+      "name": "landing unknown trigger",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "timer",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing missing sticks",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ]
+      }
+    },
+    {
+      "name": "landing missing trigger",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing with a client time",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ],
+        "t": 1760000000000
+      }
+    },
+    {
+      "name": "landing with firmware",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ],
+        "fw": 16777258
+      }
+    },
+    {
+      "name": "landing one stick only",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing ref out of range",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 256,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing 21 recent points",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing point with an extra field",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40,
+                "peak": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing point axis beyond 64 LSB",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  129,
+                  0
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing point fractional half-LSB",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7.5,
+                  0
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing median with three axes",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              1,
+              2,
+              3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing spread negative",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              -0.1,
+              1
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing stick with an unknown field",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ],
+            "settleMs": 120
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing stick without lastS",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 2,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "landing count over the cap",
+      "event": {
+        "v": 2,
+        "type": "landing",
+        "sid": "3f9a01bc",
+        "seq": 12,
+        "app": 20261013,
+        "board": "BDM-030",
+        "trigger": "count",
+        "ref": 3,
+        "sinceCalS": 3600,
+        "opsSince": [
+          "guided",
+          "flash",
+          "power-cycle"
+        ],
+        "sticks": [
+          {
+            "count": 10001,
+            "median": [
+              0,
+              0
+            ],
+            "spread": [
+              0.56,
+              0.56
+            ],
+            "firstS": 60,
+            "lastS": 3600,
+            "recent": [
+              {
+                "axes": [
+                  1,
+                  -1
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  -1,
+                  0
+                ],
+                "sinceCalS": 3600
+              }
+            ]
+          },
+          {
+            "count": 23,
+            "median": [
+              8,
+              -3
+            ],
+            "spread": [
+              0.78,
+              1.17
+            ],
+            "firstS": 30,
+            "lastS": 120,
+            "recent": [
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 40
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 50
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 60
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  9,
+                  -5
+                ],
+                "sinceCalS": 70
+              },
+              {
+                "axes": [
+                  7,
+                  -2
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  8,
+                  -3
+                ],
+                "sinceCalS": 80
+              },
+              {
+                "axes": [
+                  9,
+                  -4
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  7,
+                  -5
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  8,
+                  -2
+                ],
+                "sinceCalS": 90
+              },
+              {
+                "axes": [
+                  9,
+                  -3
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  7,
+                  -4
+                ],
+                "sinceCalS": 100
+              },
+              {
+                "axes": [
+                  8,
+                  -5
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  9,
+                  -2
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  7,
+                  -3
+                ],
+                "sinceCalS": 110
+              },
+              {
+                "axes": [
+                  8,
+                  -4
+                ],
+                "sinceCalS": 120
+              }
+            ]
+          }
+        ]
       }
     }
   ]

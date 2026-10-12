@@ -11,8 +11,10 @@ function usage() {
   return `Usage: node ops/calib-telemetry/events-report-cli.mjs [options]
 
 Aggregate report of the v2 telemetry events: save rate by calibration outcome,
-resting stick noise, signed final axis residuals by board, and exact nonzero
-axis repeats across adjacent verified Quick passes. The input is never changed.
+resting stick noise, signed final axis residuals by board, exact nonzero
+axis repeats across adjacent verified Quick passes, resting windows off center
+after a centering by time since calibration and by operation since, and how
+much the release points of each stick vary. The input is never changed.
 
 Options:
   --input PATH            events JSONL (default: ${DEFAULT_INPUT})

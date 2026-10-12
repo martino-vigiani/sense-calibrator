@@ -12,6 +12,10 @@
 //      p95 e massimo della distanza dalla mediana, escursioni al minuto,
 //      offset della mediana, cadenza dei report; per scheda e per stato
 //      (prima della calibrazione, non salvata, salvata).
+//   4. Dopo un centraggio lo stick torna fuori centro: dopo quanto tempo e
+//      dopo quali operazioni (rest con sinceCalS/opsSince), e i rilasci
+//      (landing) si fermano sempre nello stesso punto? Vedi
+//      afterCalibrationReport in diagnostics-report.mjs.
 //   3. Quale asse conserva il residuo? Valore finale firmato per asse e scheda;
 //      passate Quick adiacenti che ripetono lo stesso valore non nullo, senza
 //      confondere una norma radiale uguale con lo stesso asse e segno.
@@ -21,7 +25,7 @@
 // una riga che non lo rispetta è contata e scartata, mai interpretata.
 import fs from 'node:fs/promises';
 import { validateEventV2 } from '../../js/telemetry-v2.js';
-import { diagnosticsReport } from './diagnostics-report.mjs';
+import { afterCalibrationReport, diagnosticsReport } from './diagnostics-report.mjs';
 
 export const EVENTS_REPORT_SCHEMA = 'sense-calibrator.telemetry-events.v2';
 export const DEFAULT_EVENTS_CONFIG = Object.freeze({ minimumCohortSize: 5, since: null });
@@ -290,6 +294,7 @@ export function buildEventsReport(text, options = {}) {
     config,
     input,
     diagnostics: diagnosticsReport(events),
+    afterCalibration: afterCalibrationReport(events, config),
     counts: { visits: counts.visits, byType: Object.fromEntries(Object.entries(counts.byType).sort()) },
     calibrations: {
       committed: Object.fromEntries(Object.entries(calibrations.byTypeOutcome).sort()),
@@ -345,12 +350,14 @@ export function formatEventsSummary(report) {
   const q = report.saving.byType.quick;
   const rest = report.restNoise.all;
   const repeats = report.residualAxes.quickPassRepeats.all;
+  const after = report.afterCalibration.restAfterCentering.all;
   const pct = v => (v === null || v === undefined ? 'n/a' : `${(v * 100).toFixed(1)}%`);
   return [
     `events ${report.input.accepted} (invalid ${report.input.invalidEvent + report.input.invalidJson})`,
     `visits ${report.counts.visits}`,
     `quick saved ${q ? `${q.saved}/${q.n} (${pct(q.saveRate)})` : 'n/a'}`,
     `rest windows ${rest.n}`,
+    `off center after a centering ${after.offCenter}/${after.n} (${pct(after.rate)})`,
     rest.suppressed ? 'noise suppressed' : `right p95 median ${rest.right.p95Lsb.p50} LSB`,
     repeats.suppressed ? `axis repeats suppressed (${repeats.eligibleRuns} eligible Quick runs)` : `axis repeats ${repeats.runs.withExactRepeat}/${repeats.runs.eligible} eligible Quick runs (${pct(repeats.runs.rateAmongEligible)})`,
   ].join(' · ');
