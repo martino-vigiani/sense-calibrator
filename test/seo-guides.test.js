@@ -13,22 +13,49 @@ const GUIDES = [
   {
     path: 'guides/ps5-controller-stick-drift-test/index.html',
     url: 'https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/',
-    title: 'PS5 Controller Stick Drift Test | Sense Calibrator',
+    title: 'PS5 Controller Stick Drift Test Online | Sense Calibrator',
     description:
-      'Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.',
-    h1: 'PS5 controller stick drift test',
-    other: 'calibrate-dualsense-controller',
+      'Free online PS5 controller stick drift test for a standard DualSense. Plug it in by USB in desktop Chrome or Edge and read the resting offset and noise of each stick.',
+    h1: 'PS5 controller stick drift test online',
+    card: 'PS5 controller stick drift test online',
+    faq: true,
   },
   {
     path: 'guides/calibrate-dualsense-controller/index.html',
     url: 'https://martino-vigiani.github.io/sense-calibrator/guides/calibrate-dualsense-controller/',
-    title: 'How to Calibrate a DualSense Controller | Sense Calibrator',
+    title: 'DualSense Calibration Online for PS5 Sticks | Sense Calibrator',
     description:
-      'Learn when DualSense calibration can correct stick drift, how Quick and Guided calibration differ, and how to keep a calibration saved in controller memory.',
-    h1: 'How to calibrate a DualSense controller',
-    other: 'ps5-controller-stick-drift-test',
+      'Calibrate a standard PS5 DualSense online in desktop Chrome or Edge over USB. When calibration can correct stick drift, Quick vs Guided, and how saving works.',
+    h1: 'DualSense calibration online: how to calibrate the sticks',
+    card: 'DualSense calibration online',
+    faq: true,
+  },
+  {
+    path: 'guides/ps5-stick-drift-fix/index.html',
+    url: 'https://martino-vigiani.github.io/sense-calibrator/guides/ps5-stick-drift-fix/',
+    title: 'PS5 Stick Drift Fix: Calibration or Repair? | Sense Calibrator',
+    description:
+      'Find out when PS5 stick drift can be fixed with DualSense calibration. Test first, compare the result, and know when the controller needs repair.',
+    h1: 'PS5 stick drift fix:<br>calibration or repair?',
+    card: 'PS5 stick drift fix: calibration or repair?',
+    faq: false,
+  },
+  {
+    path: 'guides/sense-calibrator-vs-dualshock-tools/index.html',
+    url: 'https://martino-vigiani.github.io/sense-calibrator/guides/sense-calibrator-vs-dualshock-tools/',
+    title: 'Sense Calibrator vs dualshock-tools: Which to Use? | Sense Calibrator',
+    description:
+      'An honest comparison of two free browser tools for PS5 controller calibration: what dualshock-tools and Sense Calibrator support, and when to use each.',
+    h1: 'Sense Calibrator vs dualshock-tools',
+    card: 'Sense Calibrator vs dualshock-tools',
+    faq: false,
   },
 ];
+
+const guideDir = (guide) => dirname(guide.path).split('/').pop();
+
+// H10 (power-off senza Write) non è verificato: le pagine pubbliche non lo promettono.
+const POWER_OFF_PROMISE = /should (?:discard|revert|return it|be lost)/i;
 
 const EXPERIMENTAL = /sensitivity|gameplay|playtest|play\s+test|polling\s+rate|input\s+latency|hall\s*effect/i;
 
@@ -40,7 +67,7 @@ function jsonLdBlocks(html) {
   return matchAll(html, /<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/g);
 }
 
-test('both guide pages exist as static files', async () => {
+test('every guide page exists as a static file', async () => {
   for (const guide of GUIDES) {
     const info = await stat(new URL(guide.path, rootUrl));
     assert.ok(info.isFile(), `${guide.path} should be a file`);
@@ -54,7 +81,7 @@ test('each guide has one unique title, description, h1 and canonical', async () 
     const html = await readFile(new URL(guide.path, rootUrl), 'utf8');
     const titles = matchAll(html, /<title>([^<]+)<\/title>/g);
     const descriptions = matchAll(html, /<meta name="description" content="([^"]+)">/g);
-    const h1s = matchAll(html, /<h1>([^<]+)<\/h1>/g);
+    const h1s = matchAll(html, /<h1>(.+?)<\/h1>/g);
     const canonicals = matchAll(html, /<link rel="canonical" href="([^"]+)">/g);
 
     assert.equal(titles.length, 1, `${guide.path} should have exactly one title`);
@@ -109,7 +136,7 @@ test('each guide carries parseable minimal JSON-LD with no fabricated metadata',
   }
 });
 
-test('both canonical guide URLs are published in the sitemap with a lastmod', async () => {
+test('every canonical guide URL is published in the sitemap with a lastmod', async () => {
   const sitemap = await readFile(new URL('sitemap.xml', rootUrl), 'utf8');
 
   for (const guide of GUIDES) {
@@ -130,7 +157,7 @@ test('the homepage title and core positioning stay unchanged', async () => {
   assert.match(html, /<meta name="description" content="Test and recalibrate a standard PS5 DualSense for stick drift from desktop Chrome or Edge over USB\. Free, open source and no install\.">/);
 });
 
-test('the homepage visibly links to both guides inside the landing view', async () => {
+test('the homepage visibly links to every guide inside the landing view', async () => {
   const html = await readFile(new URL('index.html', rootUrl), 'utf8');
   const hero = html.match(/<section id="view-hero"[\s\S]*?<\/section>\s*<\/section>/)?.[0];
 
@@ -138,9 +165,8 @@ test('the homepage visibly links to both guides inside the landing view', async 
   for (const guide of GUIDES) {
     const dir = dirname(guide.path);
     assert.match(hero, new RegExp(`href="${dir}/"`), `homepage should link to ${dir}/`);
+    assert.ok(hero.includes(`<b>${guide.card}</b>`), `homepage card for ${dir}`);
   }
-  assert.match(hero, />PS5 controller stick drift test</);
-  assert.match(hero, />Calibrate a DualSense controller</);
 });
 
 test('experimental tools stay out of public SEO content', async () => {
@@ -175,12 +201,63 @@ test('guide asset and navigation paths resolve to repository files', async () =>
   }
 });
 
-test('the two guides cross-link to each other and back to the tool', async () => {
+test('every guide links to every other guide and back to the tool', async () => {
   for (const guide of GUIDES) {
     const html = await readFile(new URL(guide.path, rootUrl), 'utf8');
 
-    assert.match(html, new RegExp(`href="\.\./${guide.other}/"`), `${guide.path} should link to the other guide`);
+    for (const other of GUIDES.filter((g) => g !== guide)) {
+      assert.match(html, new RegExp(`href="\\.\\./${guideDir(other)}/"`), `${guide.path} should link to ${guideDir(other)}`);
+    }
     assert.match(html, /href="\.\.\/\.\.\/"/, `${guide.path} should link back to the tool`);
     assert.match(html, /href="\.\.\/\.\.\/css\/style\.css"/, `${guide.path} should use the shared stylesheet`);
   }
+});
+
+function stripTags(html) {
+  return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// FAQ in JSON-LD solo se identica al testo visibile: niente risposte nascoste ai lettori.
+function assertFaqMatchesPage(html, label) {
+  const data = JSON.parse(jsonLdBlocks(html)[0]);
+  const nodes = data['@graph'] ?? [data];
+  const faq = nodes.find((node) => node['@type'] === 'FAQPage');
+  assert.ok(faq, `${label} should carry FAQPage data`);
+  assert.ok(faq.mainEntity.length >= 3, `${label} FAQ should have several questions`);
+  const visible = stripTags(html.replace(/<script[\s\S]*?<\/script>/g, ''));
+  for (const item of faq.mainEntity) {
+    assert.ok(visible.includes(item.name), `${label}: question not visible: ${item.name}`);
+    assert.ok(visible.includes(item.acceptedAnswer.text), `${label}: answer not visible: ${item.name}`);
+  }
+}
+
+test('FAQ structured data matches the visible questions and answers', async () => {
+  assertFaqMatchesPage(await readFile(new URL('index.html', rootUrl), 'utf8'), 'index.html');
+  for (const guide of GUIDES) {
+    const html = await readFile(new URL(guide.path, rootUrl), 'utf8');
+    const hasFaq = /"@type": "FAQPage"/.test(html);
+    assert.equal(hasFaq, guide.faq, `${guide.path} FAQPage presence`);
+    if (guide.faq) assertFaqMatchesPage(html, guide.path);
+  }
+});
+
+test('public pages do not promise that a power-off reverts an unsaved calibration', async () => {
+  const home = await readFile(new URL('index.html', rootUrl), 'utf8');
+  const faq = home.match(/<section class="faq"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(faq);
+  assert.doesNotMatch(faq, POWER_OFF_PROMISE);
+  assert.doesNotMatch(jsonLdBlocks(home)[0], POWER_OFF_PROMISE);
+  for (const guide of GUIDES) {
+    const html = await readFile(new URL(guide.path, rootUrl), 'utf8');
+    assert.doesNotMatch(html, POWER_OFF_PROMISE, guide.path);
+  }
+});
+
+test('the comparison credits dualshock-tools and dates its third-party facts', async () => {
+  const html = await readFile(new URL(GUIDES[3].path, rootUrl), 'utf8');
+  assert.match(html, /href="https:\/\/github\.com\/dualshock-tools\/dualshock-tools\.github\.io"/);
+  assert.match(html, /href="https:\/\/dualshock-tools\.github\.io\/"/);
+  assert.match(html, /THIRD_PARTY_NOTICES\.md/);
+  assert.match(html, /checked on 12 October 2026/);
+  assert.match(html, /not affiliated with dualshock-tools/);
 });

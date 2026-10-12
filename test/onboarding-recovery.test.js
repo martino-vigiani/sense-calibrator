@@ -10,7 +10,7 @@ async function loadOnboardingApp(options = {}) {
   const h = await loadApp(options);
   // Solo questi test modellano la discendenza: contiene esattamente i nodi
   // assegnati, indipendentemente dai controlli del gestore che si sta provando.
-  for (const id of ['btn-connect', 'btn-copy-link', 'copy-link-url']) h.$('view-hero').appendChild(h.$(id));
+  for (const id of ['btn-connect', 'btn-share-link', 'btn-copy-link', 'copy-link-url']) h.$('view-hero').appendChild(h.$(id));
   for (const id of ['btn-disconnect', 'drift-card']) h.$('view-device').appendChild(h.$(id));
   h.$('modal-quick').appendChild(h.$('btn-quick-cancel'));
   const outsideLink = h.doc.createElement('a');
@@ -43,6 +43,46 @@ test('a browser without WebHID keeps Connect disabled and exposes the desktop fa
   assert.match(h.$('unsupported-title').textContent, /Chrome or Edge/);
   assert.equal(h.peek().ds5, null);
   assert.equal(chooserCalls, 0);
+});
+
+test('a phone with native sharing offers to send the link to a computer', async () => {
+  // Chi arriva dal telefono deve potersi ritrovare il link sul desktop.
+  const shared = [];
+  const { h } = await loadOnboardingApp({ hidAvailable: false, pointerCoarse: true, share: async data => { shared.push(data); } });
+
+  assert.equal(h.$('btn-share-link').hidden, false);
+  await h.run(h.click('btn-share-link'));
+  assert.equal(shared.length, 1);
+  assert.equal(shared[0].url, h.window.location.href);
+  assert.match(shared[0].text, /Chrome or Edge/);
+  assert.match(shared[0].text, /USB/);
+});
+
+test('closing the share sheet is not reported as an error', async () => {
+  const share = async () => { const error = new Error('Share canceled'); error.name = 'AbortError'; throw error; };
+  const { h } = await loadOnboardingApp({ hidAvailable: false, pointerCoarse: true, share });
+
+  await h.run(h.click('btn-share-link'));
+  assert.deepEqual(h.toasts(), []);
+
+  // Controllo dello strumento: un errore vero invece si vede.
+  const failing = await loadOnboardingApp({ hidAvailable: false, pointerCoarse: true, share: async () => { throw new Error('NotAllowed'); } });
+  await failing.h.run(failing.h.click('btn-share-link'));
+  assert.match(failing.h.toasts().join(' '), /Copy link/);
+});
+
+test('the share button stays hidden without native sharing or on a desktop browser', async () => {
+  const noShare = await loadOnboardingApp({ hidAvailable: false, pointerCoarse: true });
+  assert.equal(noShare.h.$('btn-share-link').hidden, true);
+  assert.equal(noShare.h.visible('unsupported'), true);
+
+  const desktop = await loadOnboardingApp({ hidAvailable: false, share: async () => {} });
+  assert.equal(desktop.h.$('btn-share-link').hidden, true);
+  assert.match(desktop.h.$('unsupported-title').textContent, /Chrome or Edge/);
+
+  const supported = await loadOnboardingApp({ pointerCoarse: true, share: async () => {} });
+  assert.equal(supported.h.$('btn-share-link').hidden, true);
+  assert.equal(supported.h.visible('unsupported'), false);
 });
 
 for (const failure of ['returns false', 'throws']) {

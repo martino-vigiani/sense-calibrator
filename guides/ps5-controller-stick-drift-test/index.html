@@ -3,24 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>PS5 Controller Stick Drift Test | Sense Calibrator</title>
-  <meta name="description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta name="color-scheme" content="light">
+  <title>PS5 Controller Stick Drift Test Online | Sense Calibrator</title>
+  <meta name="description" content="Free online PS5 controller stick drift test for a standard DualSense. Plug it in by USB in desktop Chrome or Edge and read the resting offset and noise of each stick.">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Sense Calibrator">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/">
-  <meta property="og:title" content="PS5 Controller Stick Drift Test | Sense Calibrator">
-  <meta property="og:description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta property="og:title" content="PS5 Controller Stick Drift Test Online | Sense Calibrator">
+  <meta property="og:description" content="Free online PS5 controller stick drift test for a standard DualSense. Plug it in by USB in desktop Chrome or Edge and read the resting offset and noise of each stick.">
   <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="PS5 Controller Stick Drift Test | Sense Calibrator">
-  <meta name="twitter:description" content="Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.">
+  <meta name="twitter:title" content="PS5 Controller Stick Drift Test Online | Sense Calibrator">
+  <meta name="twitter:description" content="Free online PS5 controller stick drift test for a standard DualSense. Plug it in by USB in desktop Chrome or Edge and read the resting offset and noise of each stick.">
   <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
   <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
@@ -33,10 +34,12 @@
         "@type": "WebPage",
         "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/#page",
         "url": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/",
-        "name": "PS5 Controller Stick Drift Test | Sense Calibrator",
-        "description": "Run a free PS5 controller stick drift test on a standard DualSense over USB in Chrome or Edge. Read the resting offset and signal noise from your browser.",
+        "name": "PS5 Controller Stick Drift Test Online | Sense Calibrator",
+        "description": "Free online PS5 controller stick drift test for a standard DualSense. Plug it in by USB in desktop Chrome or Edge and read the resting offset and noise of each stick.",
         "inLanguage": "en",
-        "isPartOf": { "@id": "https://martino-vigiani.github.io/sense-calibrator/#website" }
+        "isPartOf": {
+          "@id": "https://martino-vigiani.github.io/sense-calibrator/#website"
+        }
       },
       {
         "@type": "BreadcrumbList",
@@ -51,8 +54,50 @@
           {
             "@type": "ListItem",
             "position": 2,
-            "name": "PS5 controller stick drift test",
+            "name": "PS5 controller stick drift test online",
             "item": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/#faq",
+        "isPartOf": {
+          "@id": "https://martino-vigiani.github.io/sense-calibrator/guides/ps5-controller-stick-drift-test/#page"
+        },
+        "inLanguage": "en",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Can I test PS5 stick drift online without installing anything?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Sense Calibrator runs in desktop Chrome or Edge through WebHID, with no install or account. Connect a standard DualSense with a USB data cable, choose Connect DualSense and leave both sticks untouched while the automatic test runs."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I run the stick drift test on my phone?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Phone browsers do not provide WebHID, so the test needs a computer with desktop Chrome or Edge and a USB data cable. You can read this guide on a phone and open the tool later on a computer."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the drift test change my controller?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The automatic drift test only reads input reports. It sends no calibration or memory-write command, so there is nothing to save or undo."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What result counts as stick drift?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift or Marked drift, and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything."
+            }
           }
         ]
       }
@@ -77,13 +122,13 @@
   <nav class="guide-breadcrumb" aria-label="Breadcrumb">
     <ol>
       <li><a href="../../">Sense Calibrator</a></li>
-      <li aria-current="page">PS5 controller stick drift test</li>
+      <li aria-current="page">PS5 controller stick drift test online</li>
     </ol>
   </nav>
 
   <article class="guide">
     <header class="guide-hero">
-      <h1>PS5 controller stick drift test</h1>
+      <h1>PS5 controller stick drift test online</h1>
       <p class="guide-lede">To test PS5 stick drift, connect a standard DualSense by USB in desktop Chrome or Edge, release both sticks and open Sense Calibrator. The automatic test measures resting offset and signal noise without calibrating or writing to memory.</p>
       <p class="guide-cta"><a class="btn btn-primary" href="../../">Open Sense Calibrator</a> <span class="hint">Desktop Chrome or Edge &middot; USB data cable &middot; standard DualSense</span></p>
     </header>
@@ -97,6 +142,7 @@
         <li><a href="#read-the-result">Read the result</a></li>
         <li><a href="#test-limits">Test limits</a></li>
         <li><a href="#next-steps">Choose the next step</a></li>
+        <li><a href="#faq">FAQ</a></li>
       </ul>
     </nav>
 
@@ -200,7 +246,25 @@
       <p>The <a href="../ps5-stick-drift-fix/">PS5 stick drift fix guide</a> helps you choose between calibration, a game dead-zone adjustment and further hardware checks. Compare the readings again after any change.</p>
       <p><a class="btn btn-primary" href="../../">Open Sense Calibrator</a></p>
 
-      <aside class="guide-next"><b>Next step</b><a href="../calibrate-dualsense-controller/">How to calibrate a DualSense controller</a><span>Choose a procedure and understand what Write to memory changes.</span></aside>
+      <h2 id="faq">Stick drift test FAQ</h2>
+      <h3>Can I test PS5 stick drift online without installing anything?</h3>
+      <p>Yes. Sense Calibrator runs in desktop Chrome or Edge through WebHID, with no install or account. Connect a standard DualSense with a USB data cable, choose Connect DualSense and leave both sticks untouched while the automatic test runs.</p>
+      <h3>Can I run the stick drift test on my phone?</h3>
+      <p>No. Phone browsers do not provide WebHID, so the test needs a computer with desktop Chrome or Edge and a USB data cable. You can read this guide on a phone and open the tool later on a computer.</p>
+      <h3>Does the drift test change my controller?</h3>
+      <p>No. The automatic drift test only reads input reports. It sends no calibration or memory-write command, so there is nothing to save or undo.</p>
+      <h3>What result counts as stick drift?</h3>
+      <p>The tool reports each stick's resting offset and noise. Below 1.2% offset reads as Centered and up to 1.25% as Within 1 step. Larger offsets are labeled Mild drift or Marked drift, and Moving or Pinned take precedence. These are measurement bands, not a hardware diagnosis: repeat the test before changing anything.</p>
+
+      <aside class="guide-next">
+        <b>Next step</b>
+        <a href="../calibrate-dualsense-controller/">DualSense calibration online</a>
+        <span>Choose a procedure and understand what Write to memory changes.</span>
+        <a href="../ps5-stick-drift-fix/">PS5 stick drift fix: calibration or repair?</a>
+        <span>When calibration helps and when to consider service.</span>
+        <a href="../sense-calibrator-vs-dualshock-tools/">Sense Calibrator vs dualshock-tools</a>
+        <span>Another browser tool, with wider controller support.</span>
+      </aside>
 
     </div>
   </article>

@@ -2,6 +2,14 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-10-12
+
+- **Guides target the searches people make.** The drift test guide is now "PS5 controller stick drift test online" and the calibration guide "DualSense calibration online", with matching titles, descriptions and headings. Both have a short FAQ, and its structured data repeats the visible questions and answers word for word.
+- **New guide: Sense Calibrator vs dualshock-tools.** It credits the project the calibration commands come from, says which controllers each tool supports and when to use dualshock-tools instead. Facts about dualshock-tools come from its README and site, checked on 12 October 2026.
+- Every guide links to every other guide, and the homepage lists all four. The sitemap includes the new page, with every `lastmod` set to 2026-10-12.
+- **Phones get a way to keep the link.** Where WebHID is missing on a touch device, the page offers **Send link to my computer** (the system share sheet, when the browser has one) next to **Copy link**, and shows the address to type. Desktop Chrome and Edge are unchanged.
+- The homepage FAQ and the guides no longer say a power-off "should" discard an unsaved calibration. They say it has not yet been confirmed on hardware (H10). The in-app copy is unchanged.
+
 ## 2026-10-01
 
 - Range shows each stick's edge coverage, four sides, full turns and direction reversal separately. A full coverage bar no longer hides a missing reversal; short sectors are marked on the dials. Completion and Write safety requirements are unchanged.

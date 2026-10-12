@@ -440,6 +440,9 @@ function showUnsupported() {
       + '<b>desktop Chrome or Edge</b> and connect a standard DualSense with a USB data cable. '
       + 'Safari and Firefox don’t support WebHID.';
   }
+  // Sul telefono il foglio di condivisione nativo (mail, messaggi, AirDrop) è
+  // il modo più rapido per ritrovare il link sul computer. Solo se esiste.
+  if (touchOnly && typeof navigator.share === 'function') $('btn-share-link').hidden = false;
   $('btn-connect').disabled = true;
   document.querySelector('.hero-cta').classList.add('hidden');
   // "NOT CONNECTED" qui è rumore: non si potrà mai connettere nulla.
@@ -447,6 +450,23 @@ function showUnsupported() {
   $('chip-conn').classList.add('hidden');
   document.body.classList.add('no-hid');
   $('unsupported').classList.remove('hidden');
+}
+
+// "Invia al computer": condivisione nativa. Annullare il foglio non è un errore;
+// se la condivisione fallisce resta "Copia link" accanto.
+const btnShareLink = $('btn-share-link');
+if (btnShareLink) {
+  btnShareLink.addEventListener('click', async () => {
+    try {
+      await navigator.share({
+        title: 'Sense Calibrator',
+        text: 'Open on a computer in Chrome or Edge, with the DualSense plugged in by USB.',
+        url: location.href,
+      });
+    } catch (error) {
+      if (error?.name !== 'AbortError') toast('Sharing didn’t work here. Use Copy link instead.');
+    }
+  });
 }
 
 // "Copia link": su mobile l'azione utile è mandarsi la pagina sul desktop.
