@@ -42,6 +42,11 @@ function stickProgress(stick, status, label) {
     needsEdge: !coverageMet || !sidesMet,
     needsCoverage: !coverageMet,
     missingSides: status.missingDirs,
+    // Non ancora mosso fino al bordo (stessa soglia minExtent del gate).
+    idle: status.maxAbs < stick.p.minExtent,
+    // Giri interi mancanti, come in rangeStatus: cambia solo a giro completato.
+    turnsLeft: status.enoughTurns ? 0 : Math.max(1, Math.ceil(stick.p.minTurns - status.turns - 1e-9)),
+    needsReverse: !status.reversed,
     // Quando il gate è già passato, i pochi settori residui non sembrano un
     // requisito nuovo: 90%, non 100%, resta il criterio di copertura.
     areasText: !coverageMet ? `Short areas: ${areas.join(', ')}.`
@@ -71,7 +76,15 @@ export function rangeProgress(tracker, elapsedMs = 0) {
   } else {
     const edge = incomplete.filter(stick => stick.needsCoverage);
     const sides = incomplete.filter(stick => stick.missingSides.length);
-    if (edge.length) {
+    const idle = incomplete.filter(stick => stick.idle);
+    if (idle.length === 1) {
+      // Telemetria v2: range abbandonati o chiusi con uno stick fermo o quasi
+      // (copertura 0 da un lato e decine di giri dall'altro). "Tracciare i
+      // settori tratteggiati" non dice che serve anche l'altro stick.
+      action = 'edge';
+      const ready = incomplete.length === 1 ? `The ${idle[0] === left ? 'right' : 'left'} stick is complete. ` : '';
+      hint = `${ready}The ${idle[0].label.toLowerCase()} hasn’t moved yet: push it to the rim and rotate it too. Every check is needed on both sticks.`;
+    } else if (edge.length) {
       action = 'edge';
       hint = `Slowly trace the dashed edge sectors on ${stickNames(edge)}, pressing gently against the rim.`;
     } else if (sides.length) {
@@ -79,8 +92,17 @@ export function rangeProgress(tracker, elapsedMs = 0) {
       hint = 'Press each stick all the way to its short sides: '
         + sides.map(stick => `${stick.label}: ${stick.missingSides.join(', ')}`).join('; ') + '.';
     } else {
+      // Mancano solo giri (ed eventualmente il verso opposto): si dice per
+      // stick quanto manca, in giri interi. Il caso più frequente nei range
+      // incompleti (telemetria v2): stick sinistro completo, destro a ~1 giro.
       action = 'turns';
-      hint = `Keep ${stickNames(incomplete)} against the rim for two full turns in total, then reverse for at least half a turn.`;
+      const ready = incomplete.length === 1 ? `The ${incomplete[0] === left ? 'right' : 'left'} stick is complete. ` : '';
+      const todo = stick => {
+        const turns = stick.turnsLeft ? `${stick.turnsLeft} more full ${stick.turnsLeft > 1 ? 'turns' : 'turn'} against the rim` : '';
+        const back = stick.needsReverse ? 'half a turn the other way' : '';
+        return [turns, back].filter(Boolean).join(', then ');
+      };
+      hint = `${ready}${incomplete.map(stick => `${stick.label}: ${todo(stick)}`).join('. ')}.`;
     }
   }
   // Suggerimento dopo il tempo già usato per Finish anyway, senza chiamarlo

@@ -169,7 +169,8 @@ async function rotateRangeOnce(h, dev) {
     at: (t, axis) => 127.5 * (axis === 0
       ? Math.cos(2 * Math.PI * (t - t0) / 1000)
       : Math.sin(2 * Math.PI * (t - t0) / 1000)) });
-  await h.advance(16000);
+  // Manca solo la rotazione: Finish anyway compare dopo rotationUnlockMs.
+  await h.advance(61_000);
 }
 
 test('audit 03: Range unplug during rotation leaves a write lock and one v2 event', async () => {

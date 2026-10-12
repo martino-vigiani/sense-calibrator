@@ -28,7 +28,9 @@ function snapshot(left = {}, right = {}, params = {}) {
 }
 
 test('100% coverage and many turns keep reversal visibly pending on each stick', () => {
-  const view = rangeProgress(snapshot({ turns: 24, reverseTurns: 0 }, { turns: 24, reverseTurns: 0 }), 40_000);
+  const tracker = snapshot({ turns: 24, reverseTurns: 0 }, { turns: 24, reverseTurns: 0 });
+  assert.equal(rangeProgress(tracker, 40_000).status.finishAnyway, false, 'only rotation missing: no early exit');
+  const view = rangeProgress(tracker, tracker.params.rotationUnlockMs);
   assert.equal(view.status.coverage, 1);
   assert.equal(view.status.complete, false);
   assert.equal(view.status.finishAnyway, true);
@@ -46,6 +48,30 @@ test('a finished left stick leaves one clear instruction for the right stick', (
   assert.equal(view.left.complete, true);
   assert.equal(view.right.complete, false);
   assert.match(view.hint, /^The left stick is complete\. Reverse the right stick/);
+});
+
+test('a stick that has not moved is named, also when the other one is complete', () => {
+  const both = createRangeTracker();
+  readyStick(both.left, { turns: 1.2, reverseTurns: 0 });
+  let view = rangeProgress(both);
+  assert.match(view.hint, /^The right stick hasn’t moved yet: push it to the rim and rotate it too\./);
+  const done = createRangeTracker();
+  readyStick(done.left);
+  view = rangeProgress(done);
+  assert.match(view.hint, /^The left stick is complete\. The right stick hasn’t moved yet/);
+  // Nessuno dei due mosso: il testo di sempre.
+  view = rangeProgress(createRangeTracker());
+  assert.match(view.hint, /^Slowly trace the dashed edge sectors on both sticks/);
+});
+
+test('missing turns are spelled out per stick in whole turns', () => {
+  let view = rangeProgress(snapshot({}, { turns: 1.1, reverseTurns: 0 }));
+  assert.equal(view.action, 'turns');
+  assert.equal(view.hint, 'The left stick is complete. Right stick: 1 more full turn against the rim, then half a turn the other way.');
+  view = rangeProgress(snapshot({ turns: 0.6, reverseTurns: 0 }, { turns: 1.5, reverseTurns: 0.5 }));
+  assert.equal(view.hint, 'Left stick: 2 more full turns against the rim, then half a turn the other way. Right stick: 1 more full turn against the rim.');
+  assert.equal(view.status.rotationOnly, true);
+  assert.equal(view.status.unlockMs, createRangeTracker().params.rotationUnlockMs);
 });
 
 test('reverse, turns, sides and sector coverage are independent requirements', () => {

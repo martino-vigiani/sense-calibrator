@@ -2,6 +2,16 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## Unreleased
+
+From telemetry v2, 27 September to 12 October: 215 Range calibrations, of which 124 were complete, 63 incomplete and 28 errors. These changes are verified with the virtual DualSense and app harness, not with a physical controller. Range's completion requirements, the Write lock, the HID commands and the v2 contract are unchanged.
+
+- **A Range start that the controller doesn't accept now asks for a restart.** Nine errors were starts that the firmware refused or didn't confirm, and seven of them were immediate retries in the same visit, after a five-second toast. The result panel now stays on screen with **Restart the controller** and **I already turned it off**. Until the controller has restarted, Range, Quick, Guided and Write stay off for it, so a retry can't be refused the same way again. If it refuses again after a restart, the panel says that restarting didn't help. A start with no reply still shows "The controller stopped responding".
+- **Finish anyway no longer appears at 15 s when only rotation is missing.** Of the 39 incomplete ranges that recorded what was missing, 31 had already covered the edge and reached all four sides on both sticks. They were missing only full turns or the reverse half-turn, often on a right stick at about one turn. Their median length was 27 s, so most were finished soon after the button appeared. In that case the button now stays **Done** until 60 s; 90% of complete ranges finish within 58 s. The hint says what each stick still needs, for example "Right stick: 1 more full turn against the rim, then half a turn the other way". The confirmation no longer says that stick travel may become unreachable. If an edge or a side is missing, Finish anyway still appears at 15 s.
+- **The hint names a stick that hasn't moved.** Some ranges were abandoned or finished with one stick still at zero coverage.
+- **The Write lock text for a range with an unknown result** no longer says "had already closed" when the range failed, was interrupted or never started. The six `range-already-closed` save reasons in the data all came from such ranges; none came from a real code 3. The v2 code is unchanged.
+- **The v2 diagnostics report splits Range `error` events into `start`, `interrupted` and `close`, using fields that already exist.** It also counts incomplete ranges where only rotation was missing. On the real data this gives 9 failed starts, 19 sessions left open by closing the page or unplugging, and 0 failed closes.
+
 ## 2026-10-01
 
 - Range shows each stick's edge coverage, four sides, full turns and direction reversal separately. A full coverage bar no longer hides a missing reversal; short sectors are marked on the dials. Completion and Write safety requirements are unchanged.

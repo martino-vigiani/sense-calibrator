@@ -146,19 +146,37 @@ test('Done needs every direction at 0.9 of the maximum, two turns and a change o
   assert.equal(st.shortDirs.length, 0);
 });
 
-test('Finish anyway appears only after 15 s, names the missing directions, and never on a degenerate range', () => {
+test('Finish anyway appears only after 15 s (60 s if only rotation is missing), names what is missing, and never on a degenerate range', () => {
   const t = createRangeTracker();
-  // entrambi gli stick un giro in un verso: incompleto ma non degenere
+  // entrambi gli stick un giro in un verso: bordo e lati completi, mancano
+  // giri e inversione. Incompleto ma non degenere, e raggiungibile girando.
   const a = [...rotation({ turns: 1 })];
   for (const [x, y] of a) t.push({ lx: x, ly: y, rx: x, ry: y });
   let st = rangeStatus(t, RANGE_DEFAULTS.unlockMs - 1);
   assert.equal(st.complete, false);
   assert.equal(st.canFinish, false);
+  assert.equal(st.rotationOnly, true);
   st = rangeStatus(t, RANGE_DEFAULTS.unlockMs);
-  assert.equal(st.finishAnyway, true);
+  assert.equal(st.finishAnyway, false, 'only rotation missing: no Finish anyway at 15 s');
+  assert.equal(st.canFinish, false);
+  st = rangeStatus(t, RANGE_DEFAULTS.rotationUnlockMs - 1);
+  assert.equal(st.canFinish, false);
+  st = rangeStatus(t, RANGE_DEFAULTS.rotationUnlockMs);
+  assert.equal(st.finishAnyway, true, 'the confirmed exit still exists after 60 s');
   assert.equal(st.canFinish, true);
+  assert.equal(st.complete, false, 'the Done requirements are unchanged');
   assert.ok(st.missing.some(m => /L: .* more turn/.test(m)));
   assert.ok(st.missing.includes('R: turn the other way too'));
+
+  // un lato corto (non degenere): l'uscita resta a 15 s come prima
+  const e = createRangeTracker();
+  for (const [x, y] of rotation({ turns: 1 })) e.push({ lx: x < 0 ? 0.7 * x : x, ly: y, rx: x, ry: y });
+  st = rangeStatus(e, RANGE_DEFAULTS.unlockMs - 1);
+  assert.equal(st.canFinish, false);
+  st = rangeStatus(e, RANGE_DEFAULTS.unlockMs);
+  assert.equal(st.rotationOnly, false);
+  assert.equal(st.finishAnyway, true);
+  assert.ok(st.missingDirs.includes('L left'));
 
   // solo lo stick destro si è mosso: il sinistro renderebbe il range degenere
   const d = createRangeTracker();
