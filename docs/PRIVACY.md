@@ -24,6 +24,24 @@ Like any web request, the upload reaches the server with network metadata such a
 
 The web server in front of the service (nginx on subralabs.com, behind Cloudflare) does keep an access log, as it does for every page of the site, telemetry requests included. For each request it records the IP address, the exact time, the requested path and the browser's user agent. These logs are kept to debug the server and protect it from abuse, never to analyse the telemetry. They are deleted after 14 days (the logs rotate daily and the last 14 are kept). Cloudflare, which proxies the site, processes the same request data under its own policy.
 
+## Diagnostic recording
+
+A diagnostic recording is for a stick that drifts again soon after a calibration. It is not telemetry: it starts only when you press **Start recording** in the panel opened from the footer link, it is kept in memory in that tab, and it stops by itself after 30 minutes. Nothing is sent while it records.
+
+A report contains:
+
+- times in milliseconds from the start of the recording, never a date or time of day;
+- connections and disconnections, with the board revision and firmware version, and the memory (NVS) status;
+- each drift test result (offset, noise and signed position per stick); the start of each Quick, Guided, Range, Write and Restart, and their results as the same typed events described above (outcome, before and after per axis, whether the calibration was committed, whether a power cycle is needed), built with a fixed code `00000000` instead of the visit code, so they can't be linked to telemetry from the same visit;
+- whether the calibration in the controller became unsaved or saved, and whether the page asked for a power cycle;
+- each release: where the stick stopped (signed position per axis in 8-bit steps, 0.1 step), how far it had been pushed, and how long it took to settle;
+- once per second, per stick, the median position and spread of that second's readings, and how many readings there were. The raw readings (about 250 per second) never leave the browser;
+- the thresholds used to detect releases, and how many items were dropped if a cap was reached.
+
+It never contains the serial number, the controller color, the firmware build date, a device identifier, error messages or typed text. The exact contract is `ops/calib-telemetry/contract/diagnostics-v1.schema.json`; the page and the server both reject any other field.
+
+**Download JSON** saves the same report to your computer. **Send to the developer** first shows its size and contents and asks you to confirm; only then is it sent to `https://subralabs.com/api/calib/v2/diagnostics`. Your telemetry setting doesn't change, and you can send a report with sharing off. The server stores the report as it is, plus the day it was received, under a random code (`SC-` and 8 characters) that it shows you to quote in a GitHub issue. Reports are deleted after 180 days. A connection can send at most 3 reports per hour; as for telemetry, the IP address is used in memory for that limit and appears in the web server's access log (14 days), never in the report.
+
 If you accepted an earlier description, the notice appears again when the shared fields change. The updated events are only sent after you choose **Keep sharing** again. Until then nothing from the visit is sent, including the Quick result you had already agreed to.
 
 

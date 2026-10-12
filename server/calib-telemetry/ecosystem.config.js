@@ -9,6 +9,7 @@ module.exports = {
       PORT: '3040',
       DATA_PATH: '/var/lib/calib-telemetry/sessions.jsonl',
       DATA_V2_PATH: '/var/lib/calib-telemetry/events-v2.jsonl',
+      DIAG_DIR: '/var/lib/calib-telemetry/diagnostics',
     },
     merge_logs: true,
     time: true,

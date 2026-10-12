@@ -1255,6 +1255,73 @@ main {
   border-radius: 3px;
 }
 
+/* Link del footer che apre un pannello della pagina (non una navigazione). */
+.footer-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 0.18s var(--ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .footer-link:hover { color: var(--ink); }
+}
+.footer-link:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ---------------- registrazione diagnostica ---------------- */
+
+/* Nessun colore nuovo: i due stick si distinguono per tratto e marcatore. Il
+   grafico non anima mai (è una lettura dal vivo). */
+/* Sotto l'header fisso quando il link del footer lo porta in vista. */
+.diag-panel { margin-top: 18px; scroll-margin-top: 88px; }
+.diag-panel:focus { outline: none; }
+.diag-panel:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.diag-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.diag-head h3 { margin: 0; }
+.diag-intro { margin: 10px 0 0; max-width: 68ch; font-size: 14px; color: var(--ink-2); }
+.diag-status { margin: 14px 0 0; font-weight: 600; }
+.diag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.diag-elapsed { font-variant-numeric: tabular-nums; }
+.diag-figure { margin: 14px 0 0; }
+.diag-chart {
+  min-height: 180px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+.diag-chart svg { display: block; width: 100%; height: auto; }
+.diag-grid { stroke: var(--line-2); stroke-width: 1; }
+.diag-axis, .diag-mark-label { fill: var(--ink-3); font: 10px var(--mono); }
+.diag-mark-label { fill: var(--ink-2); font-weight: 600; }
+.diag-mark { stroke: var(--edge); stroke-width: 1; stroke-dasharray: 2 3; }
+.diag-line { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+.diag-line.diag-left { stroke: var(--ink); }
+.diag-line.diag-right { stroke: var(--ink-2); stroke-dasharray: 5 3; }
+.diag-dot.diag-left { fill: var(--ink); }
+.diag-dot.diag-right { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+.diag-key { display: inline-block; width: 18px; height: 0; vertical-align: middle; border-top: 2px solid var(--ink); }
+.diag-key-right { border-top: 2px dashed var(--ink-2); }
+.diag-table-wrap { margin-top: 16px; overflow-x: auto; }
+.diag-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.diag-table caption { text-align: left; font-weight: 600; font-size: 13px; padding-bottom: 6px; }
+.diag-table th, .diag-table td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.diag-table th { color: var(--ink-3); font-weight: 600; }
+.diag-sent { margin-top: 14px; }
+.diag-sent code { font: 600 14px var(--mono); }
+.diag-send-list { margin: 10px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); }
+.diag-send-list li + li { margin-top: 4px; }
+.diag-send-msg:empty { display: none; }
+
 /* ---------------- test di precisione (gioco) ---------------- */
 
 .modal-wide { max-width: 680px; }

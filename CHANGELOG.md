@@ -2,6 +2,19 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-10-13
+
+### Diagnostic recording
+
+Telemetry v2 shows the stick off center again in 52% of resting windows after a centering, but its events have no time and don't record where the stick stops after each release, so a calibration that was lost (unplugged or powered off without Write, a Range that moved the center) can't be told apart from a worn stick that stops somewhere different every time.
+
+- **Diagnostic recording**, from a link in the footer: up to 30 minutes, in memory in this tab only, with times counted from the start (never the time of day). It notes connections, board and firmware, memory status, each operation's start and result (the same typed events as telemetry, before and after per axis, committed, power cycle needed), each Write and Restart, the power-cycle lock, where each stick stops after every release, and the resting position once per second. No serial number, device ID or raw readings.
+- The panel shows the resting offset over time for each stick, with releases as dots and lettered markers for connections and operations, a table of the last releases, and a per-stick summary (typical stop, how much stops vary). It never gives a verdict: the thresholds that would separate a lost calibration from a worn stick are not validated yet.
+- **Download JSON**, and **Send to the developer** after a confirmation that shows the size and what's inside. It is separate from the telemetry consent, which doesn't change. The server answers with a code (`SC-…`) to quote in an issue; the bug report template has a field for it.
+- `js/calib/landing.js` detects releases from the HID reports with the existing thresholds (leave the rest point by 8%, then 300 ms still within 3.5%); a thumb held still past 15% is a hold, not a landing. It is pure, so telemetry v2 can reuse it.
+- Server: `POST /api/calib/v2/diagnostics` validates the report against `diagnostics-v1.schema.json` (closed at every level, embedded events against the v2 contract), with a 512 KB body limit, 3 reports per hour per IP, one file per report (600, folder 700), a 200 MB cap (507) and deletion after 180 days. A typical 30-minute recording is about 100 KB.
+- Verified with the virtual DualSense and app harness only, not with a physical controller.
+
 ## 2026-10-12
 
 ### Search guides and phones

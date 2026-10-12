@@ -12,8 +12,9 @@ The web server in front of the service (nginx, behind Cloudflare) writes its own
 |--------|------|-------------|
 | `POST` | `/api/calib/v1/sessions` | Submit a calibration session (204 on success) |
 | `POST` | `/api/calib/v2/events` | Submit one typed calibration event (204 on success) |
+| `POST` | `/api/calib/v2/diagnostics` | Submit one diagnostic recording the user confirmed (201 `{ "code": "SC-…" }`) |
 | `GET` | `/api/calib/health` | Public health check (`{"status":"ok"}`) |
-| `GET` | `/health` | Local full health (uptime + line count, not proxied) |
+| `GET` | `/health` | Local full health (uptime, line counts, diagnostic report count; not proxied) |
 
 ## Schema (`POST /api/calib/v1/sessions`)
 
@@ -70,14 +71,48 @@ The stored line is the event unchanged plus `receivedDay` (UTC date, no time):
 {"v":2,"type":"flash","sid":"3f9a01bc","seq":6,"app":20260927,"board":"BDM-030","fw":16777258,"result":"ok","nv":"locked","attempt":1,"lock":"allowed","receivedDay":"2026-09-28"}
 ```
 
-`contract/openapi-components.js` derives the OpenAPI components from the schema;
-the v2 test fails if `code/subralabs.com/openapi.json` does not match it.
+`contract/openapi-components.js` derives the OpenAPI components from the schemas
+(`CalibrationEventV2` + `EventV2*`, `DiagnosticsReportV1` + `DiagV1*`; print them
+with `node contract/openapi-components.js`); the v2 and diagnostics tests fail
+if `code/subralabs.com/openapi.json` (via `OPENAPI_PATH`) does not match.
+
+## Diagnostic reports (`POST /api/calib/v2/diagnostics`)
+
+One report per request, sent only after the user presses **Send to the
+developer** in the page and confirms. Validated against
+`contract/diagnostics-v1.schema.json` (`DiagnosticsReportV1`; byte-for-byte
+copy of the site's `ops/calib-telemetry/contract/`, same pinned SHA-256 and
+fixtures in `calib-diagnostics.test.js` and `test/diag-contract.test.js`) with
+the same validator as v2 events; every embedded `calib` event is also validated
+against `CalibrationEventV2`. Unknown fields are rejected at every level. All
+times are milliseconds from the start of the recording (at most 30 minutes);
+there is no clock time, serial number, device identifier or raw input report.
+
+- Body limit **512 KB** (dedicated parser; the global parser stays at 8 KB and
+  v2 events at 4 KB; nginx in front accepts up to 1 MB by default). The largest
+  report the page can build is tested below it; a typical 30-minute recording
+  is about 100 KB.
+- Rate limit **3 reports per IP per hour**, own bucket (`calibration-diagnostics`),
+  applied before parsing, same headers and `429` as the other endpoints.
+- Stored as `${DIAG_DIR}/<code>.json` (mode 600; the folder is created 700 and
+  tightened to 700 if it exists): the report unchanged plus `receivedDay` (UTC
+  date). `code` is `SC-` + 8 random base32 characters (40 bits, `crypto`), and a
+  file is never overwritten. Response: `201 {"code":"SC-ABCDEFGH"}`.
+- `DIAG_DIR` defaults to `diagnostics/` next to `DATA_V2_PATH`
+  (`/var/lib/calib-telemetry/diagnostics`). Total cap 200 MB
+  (`DIAG_DIR_LIMIT` in bytes to override) → `507`.
+- Reports older than 180 days (file mtime) are deleted at startup and once a
+  day (an `unref` timer); only files named like a code are touched.
+
+To read a report quoted in an issue: `ssh` to the VPS and open
+`/var/lib/calib-telemetry/diagnostics/SC-XXXXXXXX.json`.
 
 ## Rate limit
 
 v1: 10 POST requests per IP per minute (in-memory). v2: 30 events per IP per
 minute, in a separate bucket with its own policy name (`calibration-events`),
-so events never use up the v1 quota. Both are applied before the JSON body is
+so events never use up the v1 quota. Diagnostic reports: 3 per IP per hour
+(`calibration-diagnostics`). Both are applied before the JSON body is
 parsed. Submission responses expose
 `RateLimit-Policy` and `RateLimit` in the current IETF HTTPAPI draft format,
 plus the earlier compatibility fields. Exceeding the quota returns `429` and
@@ -98,14 +133,14 @@ with the stable code `unsupported_media_type`.
 
 ## Data file
 
-Sessions are appended as JSONL to `DATA_PATH` (default `/var/lib/calib-telemetry/sessions.jsonl`). v2 events go to `DATA_V2_PATH` (default `/var/lib/calib-telemetry/events-v2.jsonl`). Each file has its own 50 MB cap → 507.
+Sessions are appended as JSONL to `DATA_PATH` (default `/var/lib/calib-telemetry/sessions.jsonl`). v2 events go to `DATA_V2_PATH` (default `/var/lib/calib-telemetry/events-v2.jsonl`). Each file has its own 50 MB cap → 507. Diagnostic reports are one file each in `DIAG_DIR` (see above).
 
 ## Local dev
 
 ```sh
 npm install
 DATA_PATH=/tmp/calib-test.jsonl DATA_V2_PATH=/tmp/calib-v2.jsonl PORT=3040 node server.js
-npm test   # v1 and v2 suites
+npm test   # v1, v2 and diagnostics suites
 ```
 
 ## PM2 / deploy

@@ -32,6 +32,12 @@ import {
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 import { rangeCompletion } from './calib/range-diagnostics.js';
+import {
+  createDiagRecorder, diagnosticsContents, diagnosticsJson, uploadDiagnostics, validateDiagnostics,
+} from './diag/recorder.js';
+import {
+  diagChartLabel, diagChartSvg, landingRowsHtml, landingSummaryText, sendSummaryText,
+} from './diag/view.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -604,6 +610,7 @@ async function refreshNv(controller = ds5) {
   if (ds5 !== controller) return nv;
   nvStatus = nv.status;
   setNvChip(controller.poisoned ? { status: 'poisoned' } : nv);
+  diagNote('nv', { nv: nv.status });
   return nv;
 }
 
@@ -699,6 +706,7 @@ async function adopt(device, { explicit = false, previousFocus = document.active
     if (ds5 !== candidate) return;
     deviceInfo = info;
     renderDeviceInfo(info);
+    diagNote('connect', { board: info.board, fw: info.fwversion });
     const key = await localDeviceKey(info.serial);
     if (ds5 !== candidate) return;
     deviceKey = key;
@@ -821,6 +829,10 @@ function teardown(message = null) {
   if (unsaved && currentWriteLock().mode === 'allowed') lostSave = { key: deviceKey };
   closeSaveChapter('disconnected');
   restNoise.reset();
+  if (diag.active) {
+    diagNote('disconnect');
+    diag.gap();
+  }
   const hadUnsaved = unsaved;
   const nvAtExit = lastNvStatus;
   ds5 = null;
@@ -933,6 +945,7 @@ function onInputReport(event) {
     && eventAt <= handledAt + 50 && eventAt >= handledAt - 60_000 ? eventAt : handledAt;
   sticks = parsed;
   notifyStickSample();
+  if (diag.active) feedDiag();
   playtest?.feedSample(sticks, performance.now());
 
   if (driftTest) driftSample();
@@ -1177,6 +1190,7 @@ function finishDriftTest(result) {
     worst: +worst.toFixed(2),
     unstable: result.unstable === true,
   });
+  diagNote('drift', { auto, res: summarizeResult(result), unstable: result.unstable === true });
   // Testo e instradamento dal livello peggiore (js/ui/outcome.js): ≥15% →
   // Guided, Pinned → Range poi Guided, rumore → "il rumore resta".
   $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved, writeLock: currentWriteLock().mode }).text;
@@ -1185,6 +1199,9 @@ function finishDriftTest(result) {
 /* ============================== unsaved / flash ============================== */
 
 function setUnsaved(v) {
+  // Con il controller ancora collegato: allo scollegamento la pagina dimentica
+  // lo stato, ma il controller non ha salvato nulla.
+  if (v !== unsaved && ds5) diagNote('unsaved', { on: v });
   if (v && !unsaved) openSaveChapter();
   unsaved = v;
   $('banner-unsaved').classList.toggle('hidden', !v);
@@ -1621,6 +1638,7 @@ async function doFlash() {
   const chapter = saveChapter;
   $('btn-flash-go').disabled = true;
   const op = ops.beginOp();
+  diagNote('start', { op: 'flash' });
   closeModal('modal-flash');
   flashing = true;
   if (saveChapter) saveChapter.attempts += 1;
@@ -1755,6 +1773,7 @@ function syncPowerCycleFlag() {
 // esenzioni (il controller illeggibile potrebbe essere uno di quelli esentati).
 function markPowerCycle(controller, key) {
   powerCycleLocks.set(key ?? null, { controller, reload: false, exempt: new Set() });
+  diagNote('power-cycle', { lock: 'marked' });
   repairAllowed = false;
   // Il blocco sostituisce il segno provvisorio della sessione in volo: il suo
   // rilascio non deve più togliere nulla.
@@ -1797,6 +1816,7 @@ function clearPowerCycle(reason, controller = ds5, key = deviceKey) {
   for (const [lockKey, lock] of powerCycleLocks) {
     if (controller && lock.controller === controller) powerCycleLocks.delete(lockKey);
   }
+  diagNote('power-cycle', { lock: 'cleared' });
   syncPowerCycleFlag();
   if (powerCycleLockFor(controller, key)) {
     log('Another controller used in this tab still has a calibration pass left open, and this one can’t be told apart from it (its serial number can’t be read): calibration and saving stay blocked.');
@@ -2139,6 +2159,7 @@ function sendV2(item, { now = false } = {}) {
 // l'evento arriva dopo il teardown (esito 'disconnected'). Con la
 // condivisione spenta non costruisce nemmeno l'evento.
 function emitV2(build, { device = null, now = false } = {}) {
+  diagCalib(build, device);
   if (!telemetryEnabled() || v2Seq >= V2_MAX_PER_LOAD || v2Seq > 255) return null;
   const ctx = {
     sid: V2_SID,
@@ -2302,6 +2323,7 @@ async function quickCalibrate() {
   const force = quickForceNext || recovery;
   cancelDriftTest();
   const op = ops.beginOp();
+  diagNote('start', { op: 'quick' });
   clearOutcome();
   const bar = $('quick-bar');
   quickPreflightBlocked = false;
@@ -2842,6 +2864,7 @@ async function wizardNext() {
       // ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
       w.op = ops.beginOp();
+      diagNote('start', { op: 'guided' });
       w.startedAt = performance.now();
       w.device = { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null };
       w.controller = ds5;
@@ -3335,6 +3358,7 @@ async function startRange() {
   rangeIntro = null;
   const controller = ds5;
   const op = ops.beginOp();
+  diagNote('start', { op: 'range' });
   rangeOp = op;
   const key = deviceKey;
   const previousLock = rangeWriteLocks.get(key);
@@ -3864,7 +3888,9 @@ async function rebootController() {
   // ritorni. Se il riavvio c'è stato ma il blocco restasse per errore, il
   // prossimo calibBegin (senza riparazione) verrebbe rifiutato: mai un commit.
   rebootPending = { controller, at: performance.now() };
+  diagNote('start', { op: 'restart' });
   const { sent } = await controller.reboot();
+  diagNote('restart', { sent });
   if (ds5 !== controller) {
     toast('Controller restarting: reconnect it once it has powered off.', 5000);
     return;
@@ -4175,6 +4201,249 @@ if (navigator.hid && telemetryEnabled() && !scopeAccepted()) {
   requestAnimationFrame(() => $('btn-notice-optout').focus());
 }
 
+/* ============================== registrazione diagnostica ============================== */
+
+// Per "poco dopo la calibrazione lo stick torna fuori centro": un registro di
+// al più 30 minuti (js/diag/recorder.js) con connessioni, operazioni, Write, i
+// rilasci di js/calib/landing.js e la posizione a riposo una volta al secondo.
+// Parte solo dal pannello aperto dal footer, vive in memoria in questa scheda e
+// non dipende dal consenso della telemetria, perché non manda nulla da solo:
+// l'invio è un'azione a parte, con una sua conferma, e il consenso non cambia.
+// Tempi relativi all'inizio, mai un orario; nessun seriale né chiave.
+const diag = createDiagRecorder();
+let diagStopTimer = null;
+let diagRenderQueued = false;
+let diagSentCode = null;
+let diagSendReport = null; // il report mostrato nella conferma, quello che parte
+let diagSending = false;
+let diagSeq = 0;
+const DIAG_ISSUE_URL = 'https://github.com/martino-vigiani/sense-calibrator/issues/new?template=bug-report.yml';
+
+function diagNote(type, data) {
+  if (!diag.active) return;
+  if (diag.note(performance.now(), type, data)) scheduleDiagRender();
+}
+
+// Gli eventi v2 di una calibrazione, di un Write o di un periodo non salvato:
+// stessi builder della telemetria, costruiti anche con la condivisione spenta
+// (dal report escono solo su conferma), con un sid fisso e un contatore
+// proprio, così non si collegano agli eventi della visita.
+function diagCalib(build, device) {
+  if (!diag.active) return;
+  let event;
+  try {
+    event = build({
+      sid: '00000000',
+      seq: Math.min(255, diagSeq),
+      board: device ? device.board : deviceInfo?.board ?? null,
+      fw: device ? device.fw : deviceInfo?.fwversion ?? null,
+    });
+  } catch { return; }
+  diagSeq += 1;
+  diagNote('calib', { event });
+}
+
+// Dagli input report, come ogni altra misura: tempo del report HID.
+function feedDiag() {
+  const out = diag.push(sticks, lastStickReportAt ?? performance.now());
+  if (out.stopped) diagStopped();
+  else if (out.landings.length || out.row) scheduleDiagRender();
+}
+
+// Il disegno al frame successivo, al più uno per frame (una riga di traccia al
+// secondo e qualche rilascio): in una tab nascosta aspetta il ritorno.
+function scheduleDiagRender() {
+  if (diagRenderQueued || $('diag-panel').classList.contains('hidden')) return;
+  diagRenderQueued = true;
+  requestAnimationFrame(() => {
+    diagRenderQueued = false;
+    renderDiag();
+  });
+}
+
+function diagStatusText() {
+  if (diag.active) return 'Recording. It stops by itself after 30 minutes.';
+  if (!diag.started) return 'Not recording.';
+  const minutes = Math.max(1, Math.round(diag.elapsed(performance.now()) / 60_000));
+  const why = diag.stopReason === 'time-limit' ? 'Stopped at the 30-minute limit' : `Stopped after ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return diagSentCode ? `${why}. Sent: code ${diagSentCode}.` : `${why}. Download it or send it to the developer.`;
+}
+
+function renderDiag() {
+  const now = performance.now();
+  setLive($('diag-status'), diagStatusText());
+  $('btn-diag-start').classList.toggle('hidden', diag.active);
+  $('btn-diag-start').textContent = diag.started ? 'Start a new recording' : 'Start recording';
+  $('btn-diag-stop').classList.toggle('hidden', !diag.active);
+  $('btn-diag-download').disabled = !diag.started;
+  $('btn-diag-send').disabled = !diag.started || diagSending;
+  // Contatori che cambiano di continuo: testo normale, mai una regione live.
+  const elapsed = Math.floor(diag.elapsed(now) / 1000);
+  setLive($('diag-elapsed'), diag.started
+    ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} recorded · ${diag.landings.length} release${diag.landings.length === 1 ? '' : 's'} · ${diag.events.length} event${diag.events.length === 1 ? '' : 's'}`
+    : '');
+  const parts = { trace: diag.trace, landings: diag.landings, events: diag.events, durMs: diag.elapsed(now) };
+  const chart = $('diag-chart');
+  const width = Math.max(280, Math.round(chart.clientWidth || 640));
+  chart.innerHTML = diagChartSvg(parts, { width, height: 180 });
+  chart.setAttribute('aria-label', diagChartLabel(parts));
+  $('diag-landings').innerHTML = landingRowsHtml(diag.landings);
+  setLive($('diag-summary'), diag.landings.length ? landingSummaryText(diag.summary()) : '');
+}
+
+function openDiagPanel() {
+  const panel = $('diag-panel');
+  panel.classList.remove('hidden');
+  $('btn-diag-open').setAttribute('aria-expanded', 'true');
+  renderDiag();
+  panel.scrollIntoView?.({ block: 'start', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  panel.focus({ preventScroll: true });
+}
+
+function closeDiagPanel() {
+  // Chiudere il pannello non ferma la registrazione: il link del footer lo riapre.
+  $('diag-panel').classList.add('hidden');
+  $('btn-diag-open').setAttribute('aria-expanded', 'false');
+  $('btn-diag-open').focus();
+}
+
+function startDiag() {
+  if (diag.active) return;
+  if (diag.started && !diagSentCode
+    && !confirm('Start a new recording? The current one is discarded unless you downloaded it.')) return;
+  diag.start(performance.now());
+  diagSeq = 0;
+  diagSentCode = null;
+  $('diag-sent').classList.add('hidden');
+  // Lo stato di partenza, se un controller è già collegato.
+  if (ds5 && deviceInfo) {
+    diagNote('connect', { board: deviceInfo.board, fw: deviceInfo.fwversion });
+    if (nvStatus) diagNote('nv', { nv: nvStatus });
+    if (unsaved) diagNote('unsaved', { on: true });
+    if (powerCycleApplies()) diagNote('power-cycle', { lock: 'marked' });
+  }
+  // Guardia per i 30 minuti senza report (controller scollegato): i report,
+  // quando arrivano, fermano la registrazione da soli.
+  clearTimeout(diagStopTimer);
+  diagStopTimer = setTimeout(() => {
+    diagStopTimer = null;
+    if (diag.tick(performance.now())) diagStopped();
+  }, diag.limits.maxMs + 1000);
+  log('Diagnostic recording started.');
+  renderDiag();
+}
+
+function stopDiag() {
+  if (!diag.stop(performance.now(), 'user')) return;
+  clearTimeout(diagStopTimer);
+  diagStopTimer = null;
+  log('Diagnostic recording stopped.');
+  renderDiag();
+  // Il bottone premuto sparisce: il fuoco va al passo successivo.
+  $('btn-diag-download').focus();
+}
+
+function diagStopped() {
+  clearTimeout(diagStopTimer);
+  diagStopTimer = null;
+  log('Diagnostic recording stopped at the 30-minute limit.');
+  renderDiag();
+}
+
+function downloadDiag() {
+  if (!diag.started) return;
+  const report = diag.report(performance.now());
+  const error = validateDiagnostics(report);
+  if (error) { log(`Diagnostic report not valid: ${error}.`); toast('The recording could not be exported.', 5000, { alert: true }); return; }
+  try {
+    const url = URL.createObjectURL(new Blob([diagnosticsJson(report)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    // Nessuna data nel nome: il file non porta orari.
+    a.download = 'sense-calibrator-diagnostics.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    log(`Diagnostic download failed: ${e.message || e}.`);
+    toast('The download could not start in this browser.', 5000, { alert: true });
+  }
+}
+
+// La conferma mostra il report che partirà, con le sue dimensioni: è quello,
+// fotografato all'apertura, che "Send report" manda.
+function openDiagSend() {
+  if (!diag.started || diagSending) return;
+  diagSendReport = diag.report(performance.now());
+  const error = validateDiagnostics(diagSendReport);
+  const info = diagnosticsContents(diagSendReport);
+  const tooLarge = info.bytes > diag.limits.maxBytes;
+  setLive($('diag-send-what'), error ? 'This recording can’t be sent: download it instead and attach it to an issue.'
+    : tooLarge ? 'This recording is too large to send: download it instead and attach it to an issue.'
+      : sendSummaryText(info));
+  setLive($('diag-send-msg'), '');
+  $('btn-diag-send-go').disabled = !!error || tooLarge;
+  $('btn-diag-send-go').textContent = 'Send report';
+  if (error) log(`Diagnostic report not valid: ${error}.`);
+  openModal('modal-diag-send');
+}
+
+const DIAG_SEND_ERRORS = {
+  429: 'Too many reports from this connection in the last hour. Try again later, or download the file and attach it to an issue.',
+  413: 'The report is too large to send. Download the file and attach it to an issue.',
+  507: 'The report store is full right now. Download the file and attach it to an issue.',
+};
+
+async function sendDiag() {
+  const report = diagSendReport;
+  if (!report || diagSending) return;
+  diagSending = true;
+  const btn = $('btn-diag-send-go');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  setLive($('diag-send-msg'), 'Sending…');
+  try {
+    const code = await uploadDiagnostics(report, { fetchImpl: (url, init) => fetch(url, init) });
+    diagSentCode = code;
+    diagSendReport = null;
+    closeModal('modal-diag-send');
+    const sent = $('diag-sent');
+    sent.innerHTML = `<p>Sent. Your report code is <code>${esc(code)}</code>. Quote it in a GitHub issue so the developer can find the report.</p>`
+      + `<p><a href="${DIAG_ISSUE_URL}&amp;diagnostic-code=${encodeURIComponent(code)}" target="_blank" rel="noopener">Open an issue with this code</a></p>`;
+    sent.classList.remove('hidden');
+    log(`Diagnostic report sent: ${code}.`);
+    renderDiag();
+  } catch (error) {
+    const text = DIAG_SEND_ERRORS[error.status]
+      ?? (error.reason === 'http' ? `The server refused the report (HTTP ${error.status}). Download the file and attach it to an issue.`
+        : 'Couldn’t reach the server. Check the connection and try again, or download the file and attach it to an issue.');
+    setLive($('diag-send-msg'), text);
+    btn.textContent = 'Try again';
+    btn.disabled = error.status === 413 || error.status === 507 || error.reason === 'invalid' || error.reason === 'too-large';
+    log(`Diagnostic report not sent: ${error.message || error}.`);
+  } finally {
+    diagSending = false;
+    $('btn-diag-send').disabled = !diag.started;
+  }
+}
+
+$('btn-diag-open').addEventListener('click', () => {
+  if ($('diag-panel').classList.contains('hidden')) openDiagPanel();
+  else closeDiagPanel();
+});
+$('btn-diag-close').addEventListener('click', closeDiagPanel);
+$('btn-diag-start').addEventListener('click', startDiag);
+$('btn-diag-stop').addEventListener('click', stopDiag);
+$('btn-diag-download').addEventListener('click', downloadDiag);
+$('btn-diag-send').addEventListener('click', openDiagSend);
+$('btn-diag-send-go').addEventListener('click', () => sendDiag());
+$('btn-diag-send-cancel').addEventListener('click', () => {
+  if (diagSending) return;
+  diagSendReport = null;
+  closeModal('modal-diag-send');
+});
+
 /* ============================== tastiera ============================== */
 
 // Esc chiude solo ciò che è annullabile senza lasciare il controller in uno
@@ -4189,6 +4458,7 @@ const ESC_DISMISS = {
   'modal-game': 'btn-game-exit',
   'modal-sensitivity': 'btn-sensitivity-exit',
   'modal-playtest': 'btn-playtest-exit',
+  'modal-diag-send': 'btn-diag-send-cancel',
 };
 
 document.addEventListener('keydown', e => {
@@ -4285,6 +4555,8 @@ window.__senseWaitForStable = waitForStable;
 window.__senseCalibSessions = () => JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
 // Eventi v2 di questa pagina con il loro stato (queued, sending, sent, failed,
 // discarded). Solo memoria: ricaricare la pagina li perde.
+// Il report diagnostico com'è ora (lo stesso che Download JSON salverebbe).
+window.__senseDiagnostics = () => (diag.started ? diag.report(performance.now()) : null);
 window.__senseTelemetryV2 = () => v2Outbox.map(item => ({ state: item.state, event: JSON.parse(JSON.stringify(item.event)) }));
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller
