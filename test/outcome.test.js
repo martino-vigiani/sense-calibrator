@@ -6,7 +6,7 @@ import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
   FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
   guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView, render,
-  revertAdvice, stickRows, stuckAxes, writeLockFor,
+  RANGE_MOVES_CENTER, RANGE_THEN_CENTER, rangeRecheckView, revertAdvice, saveCtaFor, stickRows, stuckAxes, writeLockFor,
 } from '../js/ui/outcome.js';
 import { replayOutcomes } from '../ops/sim/replay-telemetry.mjs';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
@@ -179,7 +179,7 @@ test('the Moving and Pinned overrides route the user, and never show a percentag
   });
   assert.equal(pinned.tier, 'pinned');
   assert.equal(pinned.recommendation, 'range-then-guided');
-  assert.match(pinned.text, /Range calibration first, then Guided/);
+  assert.match(pinned.text, /Range calibration first\. Afterwards the page measures the center again: if a stick rests off-center, run Quick calibration \(or Guided from 15%\)/);
 });
 
 // Review 2: dopo una calibrazione non salvata il test drift non dice "No
@@ -413,7 +413,9 @@ test('pinned after calibration disables Write and routes to Range, then Guided',
   const guided = guidedOutcomeView({ before: summary([6, 0.555]), after: summary([12, 0.555], { xy: [[99.2, 0], [0.4, 0.4]] }) });
   assert.equal(guided.outcome, 'pinned');
   assert.deepEqual(guided.actions.map(a => a.id), ['range', 'guided']);
-  assert.match(textOf(guided), /haven’t confirmed yet whether Range also moves the center/);
+  assert.ok(textOf(guided).includes(RANGE_THEN_CENTER), 'after Range, recheck the center and use Quick');
+  assert.ok(textOf(guided).includes(RANGE_MOVES_CENTER), 'the telemetry hint, hedged');
+  assert.match(RANGE_MOVES_CENTER, /isn’t confirmed on hardware/);
   assert.equal(stickRows(null, summary([12, 0.555], { xy: [[99.2, 0], [0.4, 0.4]] }))[0].after, 'Pinned at the edge');
 });
 
@@ -438,6 +440,62 @@ test('an incomplete or already-closed range disables Write; a complete one does 
   assert.equal(writeLockFor({ range: rangeOutcomeView({}).range }).mode, 'allowed');
   assert.match(rangeOutcomeView({}).title, /not saved yet/);
   assert.match(rangeOutcomeView({ incomplete: true }).title, /Range incomplete/);
+});
+
+// H12: dopo un range completo il centro si rimisura prima di salvare.
+test('a complete range keeps Write guarded until the center is measured again, with no save invitation', () => {
+  const pending = rangeOutcomeView({ checking: true });
+  const lock = writeLockFor({ range: pending.range });
+  assert.equal(lock.mode, 'guarded');
+  assert.deepEqual(lock.reasons.map(r => r.code), ['range-center-unchecked']);
+  assert.equal(saveCtaFor({ view: pending, unsaved: true, lockMode: lock.mode }), false);
+  assert.match(textOf(pending), /drift test measures the center again/);
+  assert.ok(pending.lines.includes(RANGE_MOVES_CENTER));
+  // Il flag non sopravvive a un esito che non è un range completo.
+  assert.equal(rangeOutcomeView({ incomplete: true, checking: true }).range.centerUnchecked, undefined);
+  assert.equal(rangeOutcomeView({ alreadyClosed: true, checking: true }).range.centerUnchecked, undefined);
+});
+
+test('rangeRecheckView: centered after Range → no warning and Write allowed', () => {
+  const v = rangeRecheckView({ before: summary([0.555, 0.555]), after: summary([0.555, 1.24]) });
+  assert.equal(v.tone, 'ok');
+  assert.equal(v.verdict, 'centered');
+  assert.equal(writeLockFor({ center: v.center, range: v.range }).mode, 'allowed');
+  assert.doesNotMatch(textOf(v), /off-center|moved|Quick/);
+  assert.equal(v.center.committed, false, 'a measurement, not a calibration');
+});
+
+test('rangeRecheckView: a stick off-center after Range → Quick first, Write guarded, the move named when it was centered before', () => {
+  const v = rangeRecheckView({ before: summary([0.555, 0.555]), after: summary([4.47, 1.24]) });
+  assert.equal(v.tone, 'warn');
+  assert.equal(v.verdict, 'off');
+  assert.equal(v.moved, true);
+  assert.equal(v.title, 'Range applied, but the center moved');
+  assert.match(v.lines[0], /^The left stick moved off-center after the Range calibration\. Run Quick calibration now, before saving/);
+  assert.deepEqual(v.actions.map(a => [a.id, a.label]), [['quick', 'Quick calibration'], ['retest', 'Run the drift test']]);
+  assert.deepEqual(v.sticks.map(r => [r.side, r.before, r.after]), [['Left', '0.6% · at floor', '4.5%'], ['Right', '0.6% · at floor', '1.2% · 1 step']]);
+  const lock = writeLockFor({ center: v.center, range: v.range });
+  assert.equal(lock.mode, 'guarded');
+  assert.deepEqual(lock.reasons.map(r => r.code), ['range-center-off']);
+  assert.equal(saveCtaFor({ view: v, unsaved: true, lockMode: lock.mode }), false);
+  // Senza un "prima" misurato non si dice "moved".
+  const unknown = rangeRecheckView({ before: null, after: summary([4.47, 5.11]) });
+  assert.equal(unknown.moved, false);
+  assert.equal(unknown.title, 'Range applied, but the center is off');
+  assert.match(unknown.lines[0], /^Both sticks rest off-center/);
+});
+
+test('rangeRecheckView: 15% or more → Guided and Write disabled; an axis at the edge → Guided, disabled, likely faulty', () => {
+  const far = rangeRecheckView({ before: null, after: summary([18, 0.555]) });
+  assert.equal(far.verdict, 'far');
+  assert.deepEqual(far.actions.map(a => a.id), ['guided']);
+  assert.equal(writeLockFor({ center: far.center }).mode, 'disabled');
+  assert.doesNotMatch(textOf(far), SUCCESS);
+  const pinned = rangeRecheckView({ before: null, after: summary([100.1, 0.555], { xy: [[99.6, 8], [0.39, 0.39]] }) });
+  assert.equal(pinned.verdict, 'pinned');
+  assert.deepEqual(pinned.actions.map(a => a.id), ['guided']);
+  assert.equal(writeLockFor({ center: pinned.center }).mode, 'disabled');
+  assert.match(textOf(pinned), /likely faulty/);
 });
 
 test('a timed-out (poisoned) controller gets its own copy: no earlier pass, no save, no Restart, no raw HID text', () => {

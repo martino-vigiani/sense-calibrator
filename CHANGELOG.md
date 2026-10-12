@@ -2,6 +2,18 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## 2026-10-13
+
+### Range recheck
+
+From telemetry v2, 27 September to 12 October: in the first resting window after a Quick or Guided result within one step of center, a stick was off-center (more than 1.25%) in 12 of 13 cases when a complete Range calibration ran in between, against 29 of 93 without one. After Range the worst stick rested between 1.7% and 11.4%, never at 15% or more. The sample is small and Range moving the center (hardware check H12) is still not confirmed on a physical controller, so the copy calls it a hint. These changes are verified with the virtual DualSense and the app harness. No new HID command, no change to the v2 contract.
+
+- **After a complete Range, the page measures the center again before you save.** The drift test that already followed the Range check now also decides the result panel. If both sticks are still within one step, the panel says so and the save invitation comes back. If a stick rests off-center, the panel says "Range applied, but the center moved" (or "is off", when there was no centered reading just before the Range), shows each stick before → after, and offers **Quick calibration**. From 15% off it offers Guided instead, and an axis still at the edge says the stick is likely faulty.
+- **Write asks for a second confirmation until the center is checked, and while it is off.** Between Range and the drift test the reason is "The center hasn't been measured since the Range calibration"; after an off-center recheck it is "A stick rests off-center after the Range calibration. Run Quick calibration before saving." It is guarded, not disabled: the range itself is complete, a stick under 15% can be recentered with Quick and then saved in one Write, and the reading before the Range was taken on the old range, so it can't measure how much worse the center got. A recheck at 15% or more, or with an axis at the edge, disables Write with the existing reasons. A moving or failed drift test leaves the check pending; the next still one completes it. A Quick or Guided result replaces it.
+- **"Range, then Guided" advice now says to check the center after Range.** The Pinned drift result, the Quick and Guided pinned results and the Quick preflight routes say that the page measures the center again after Range and to run Quick, or Guided from 15%, if a stick is off. They no longer say Guided is the only next step.
+- The outcome of each recheck (before, after, verdict) is kept in the local calibration history as a `range-recheck` event. It is not sent. The two new Write reasons are not v2 lock reason codes, so a v2 `save` event in this state reports `guarded` with no reason.
+- The calibration guide and the drift test guide say that Range can leave the center off and that the tool rechecks it. `docs/hardware-checks.md` records the telemetry hint and the procedure for H12.
+
 ## 2026-10-12
 
 ### Search guides and phones

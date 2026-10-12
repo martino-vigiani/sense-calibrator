@@ -167,6 +167,7 @@
       <h3 id="range-calibration">Range calibration</h3>
       <p>Range is separate from center calibration. Rotate both sticks around the full edge and change direction as instructed; the tool tracks coverage before enabling Done. Its intro sends no calibration command and explains the consequences before Start.</p>
       <p>After Start, the session must be finished or the controller turned off. A pinned stick may never complete the required travel. An incomplete range cannot be written to memory, and a range procedure is not a guaranteed repair for a faulty or replaced module.</p>
+      <p>Range can leave the resting center off. Whether it moves the center has not been confirmed on physical hardware, but in shared results the center was off after most Range calibrations. After a complete range the tool runs the drift test again before you save: if a stick now rests off-center it recommends Quick calibration and asks for a second confirmation before writing the result as it is. From 15% off-center it recommends Guided, and Write stays off.</p>
 
       <h2 id="release-the-sticks">Release the sticks for resting measurements</h2>
       <p>Put the controller on a stable surface and release both sticks whenever the tool asks for a resting reading. Its checks can detect movement and reject unsuitable samples, but a stick held still can also look stable. A green movement meter does not prove that your hands are off.</p>

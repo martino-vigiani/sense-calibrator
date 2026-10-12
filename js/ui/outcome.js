@@ -17,8 +17,11 @@
 //   letta `locked`, l'unico caso in cui il piano lo ammette finché H10 non
 //   passa; "scollega" non compare mai come rimedio: cosa fa lo scollegamento
 //   (H11) non è verificato, e il testo lo dice;
-// - Range: la raccomandazione Range → Guided resta ipotetica finché H12 non
-//   dice se Range sposta anche il centro.
+// - Range: se Range sposti anche il centro (H12) non è verificato su
+//   hardware. La telemetria v2 lo suggerisce (dopo un range completo il centro
+//   era fuori 12 volte su 13), quindi dopo ogni range completo la pagina
+//   rimisura il centro e propone Quick (o Guided dal 15%) prima di salvare; il
+//   testo cita il dato come indizio, mai come fatto.
 import {
   FLOOR_PCT, GRID_TABLE, GUIDED_ONLY_MIN, LSB_PCT, TIER_OVERRIDES, formatOffset, tierFor, tierForOffset,
 } from '../calib/lattice.js';
@@ -100,6 +103,14 @@ export const REPAIR_STEPS = Object.freeze([
   'After any repair, run the drift test again and calibrate only if there is a correctable offset; compare the result before saving.',
 ]);
 
+// Il passo dopo Range, in ogni consiglio "Range, poi …": il centro si
+// ricontrolla, e si corregge con Quick (Guided oltre il suo raggio).
+export const RANGE_THEN_CENTER = `Afterwards the page measures the center again: if a stick rests off-center, run Quick calibration (or Guided from ${GUIDED_ONLY_MIN}%).`;
+// H12 non verificato: il dato della telemetria v2 è un indizio. 27/9–12/10:
+// prima finestra a riposo dopo un Quick/Guided centrato, fuori centro 12 volte
+// su 13 con un range completo in mezzo, 29 su 93 senza.
+export const RANGE_MOVES_CENTER = 'In shared results the center was off after most Range calibrations; this isn’t confirmed on hardware yet.';
+
 const SIDES = ['Left', 'Right'];
 const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const worstOfSummary = s => (s && Array.isArray(s.off) && s.off.every(isNum) ? Math.max(...s.off) : null);
@@ -161,7 +172,7 @@ const TIER_WORDS = {
   },
   pinned: {
     headline: 'Pinned at the edge',
-    advice: 'An axis reads at the very edge. That isn’t ordinary drift: try Range calibration first, then Guided if the center is still off. A stick that can’t leave the edge may never finish Range, which then can only be left by turning the controller off. If it stays at the edge, the stick is likely faulty.',
+    advice: `An axis reads at the very edge. That isn’t ordinary drift: try Range calibration first. ${RANGE_THEN_CENTER} A stick that can’t leave the edge may never finish Range, which then can only be left by turning the controller off. If it stays at the edge, the stick is likely faulty.`,
   },
 };
 
@@ -194,6 +205,12 @@ export const LOCK_REASONS = Object.freeze({
   'axis-worse': { mode: 'guarded', text: 'An axis moved further from center than before. Check it before saving.' },
   'lost-ground': { mode: 'guarded', text: 'An earlier pass was better than the result the controller has now.' },
   unverified: { mode: 'guarded', text: 'The last calibration couldn’t be verified. Run the drift test and check the numbers first.' },
+  // Dopo un range completo, finché il test drift non ha rimisurato il centro
+  // (H12: Range potrebbe averlo spostato), e quando l'ha trovato fuori. Non
+  // `disabled`: il range è completo e uno stick entro il 15% si ricentra con
+  // Quick; oltre il 15% e un asse al bordo restano `catastrophic`/`pinned`.
+  'range-center-unchecked': { mode: 'guarded', text: 'The center hasn’t been measured since the Range calibration, which may have moved it. Run the drift test first.' },
+  'range-center-off': { mode: 'guarded', text: 'A stick rests off-center after the Range calibration. Run Quick calibration before saving.' },
 });
 
 // Stato di Write da tutto ciò che la RAM del controller contiene ora.
@@ -225,9 +242,11 @@ export function writeLockFor({ center = null, range = null, poisoned = false, ne
     if (axisWorse) codes.push('axis-worse');
     if (outcome === 'lost-ground' || (isNum(worst) && isNum(bestWorst) && worst - bestWorst > QUICK_REGRESSION_EPS)) codes.push('lost-ground');
     if (!isNum(worst) && committed && outcome !== 'stalled' && outcome !== 'catastrophic') codes.push('unverified');
+    if (outcome === 'range-center-off') codes.push('range-center-off');
   }
   if (range?.incomplete) codes.push('range-incomplete');
   if (range?.alreadyClosed) codes.push('range-already-closed');
+  if (range?.centerUnchecked) codes.push('range-center-unchecked');
   const unique = [...new Set(codes)];
   const reasons = unique.map(code => ({ code, ...LOCK_REASONS[code] }));
   const mode = reasons.some(r => r.mode === 'disabled') ? 'disabled'
@@ -256,6 +275,7 @@ const ACTION = {
   guided: { id: 'guided', label: 'Guided calibration' },
   range: { id: 'range', label: 'Range calibration' },
   quick: { id: 'quick', label: 'Run Quick again' },
+  quickNow: { id: 'quick', label: 'Quick calibration' },
   retest: { id: 'retest', label: 'Run the drift test' },
   recovery: { id: 'recovery', label: 'Try one recovery pass' },
   restart: { id: 'restart', label: 'Restart the controller' },
@@ -431,7 +451,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
     return view('bad', 'An axis is stuck at the edge', [
       'After calibration an axis reads at the very edge. That isn’t drift Quick calibration can fix, and saving it would store a broken calibration.',
       revert,
-      'Try Range calibration first, then Guided if the center is still off. We haven’t confirmed yet whether Range also moves the center.',
+      `Try Range calibration first. ${RANGE_THEN_CENTER} ${RANGE_MOVES_CENTER}`,
     ], routeFor(worst, true));
   }
   if (outcome === 'moved' && !isNum(worst)) {
@@ -568,7 +588,7 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
     return view('pinned', 'bad', 'An axis is stuck at the edge', [
       'An axis reads at the very edge. Saving it would store a broken calibration.',
       revert,
-      'Try Range calibration, then Guided again. We haven’t confirmed yet whether Range also moves the center.',
+      `Try Range calibration first. ${RANGE_THEN_CENTER} ${RANGE_MOVES_CENTER}`,
     ], [ACTION.range, ACTION.guided]);
   }
   // Stessa regola della rapida, con la partenza come migliore punto noto.
@@ -606,8 +626,11 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
 }
 
 // Esito del range. `incomplete` copre anche "Finish anyway" (WS7).
-export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, error = null, committed = false, leftOpen = false } = {}) {
+// `checking`: range completo, centro non ancora rimisurato (vedi
+// rangeRecheckView): Write chiede conferma finché il test drift non l'ha fatto.
+export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, error = null, committed = false, leftOpen = false, checking = false } = {}) {
   const range = { incomplete, alreadyClosed: alreadyClosed || (!!error && (committed || leftOpen)) };
+  if (checking && !incomplete && !range.alreadyClosed && !error) range.centerUnchecked = true;
   const view = (tone, title, lines, actions = []) => ({ kind: 'range', outcome: 'range', tone, title, lines, sticks: [], actions, range, repair: false });
   if (error && isPoisonError(error)) return view('bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines]);
   if (error) {
@@ -628,9 +651,68 @@ export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, er
       'Run Range calibration again and rotate both sticks all the way round, pressed against the edge.',
     ], [ACTION.range]);
   }
+  if (range.centerUnchecked) {
+    return view('ok', 'Range calibration applied (not saved yet)', [
+      'Next, the drift test measures the center again with the new range. Don’t save before it has run.',
+      RANGE_MOVES_CENTER,
+    ], [ACTION.retest]);
+  }
   return view('ok', 'Range calibration applied (not saved yet)', [
     'Check the result with the drift test and the precision test, then write it to memory to keep it.',
   ], [ACTION.retest]);
+}
+
+// Ricontrollo del centro dopo un range completo (H12). `after`: sintesi
+// (summarizeResult) del primo test drift stabile dopo il range; `before`: quella
+// dell'ultimo test drift prima del range, solo se misurato dopo l'ultimo commit
+// sullo stesso controller, altrimenti null. Il range cambia la scala, quindi
+// `before` è solo informativo: il verdetto viene da `after`, con le soglie di
+// GRID_TABLE (fuori centro = oltre "within 1 step"). Sostituisce lo stato del
+// centro con ciò che ha misurato, `committed: false`, come un Quick
+// `already-centered`: un esito vecchio non tiene Write spento su stick misurati
+// centrati, e uno stick fuori dopo il range lo rende `guarded`.
+const SETTLED_TIERS = ['centered', 'within-1-step'];
+export function rangeRecheckView({ before = null, after }) {
+  const rows = stickRows(before, after);
+  const off = rows.filter(r => !SETTLED_TIERS.includes(r.tier));
+  const worst = worstOfSummary(after);
+  const pinned = pinnedFromSummary(after);
+  // "Spostato" solo se il test di prima l'aveva misurato entro un passo.
+  const movedOff = off.filter(r => {
+    const i = SIDES.indexOf(r.side);
+    return isNum(before?.off?.[i]) && SETTLED_TIERS.includes(tierForOffset(before.off[i])?.id);
+  });
+  const moved = off.length > 0 && movedOff.length === off.length;
+  const subject = off.length === 2 ? 'Both sticks' : `The ${off[0]?.side.toLowerCase()} stick`;
+  const center = { outcome: off.length ? 'range-center-off' : 'range-recheck', worst, beforeWorst: null, bestWorst: null, pinned, committed: false };
+  const view = (tone, title, lines, actions) => ({
+    kind: 'range', outcome: 'range', recheck: true, tone, title, lines, sticks: rows, actions,
+    range: { incomplete: false, alreadyClosed: false }, center, repair: false,
+    verdict: !off.length ? 'centered' : pinned ? 'pinned' : isNum(worst) && worst >= GUIDED_ONLY_MIN ? 'far' : 'off',
+    moved,
+  });
+  if (!off.length) {
+    return view('ok', 'Range calibration applied (not saved yet)', [
+      'Center checked after the Range calibration: both sticks are within 1 step of center.',
+      'You can also check it with the precision test before writing it to memory.',
+    ], [ACTION.retest]);
+  }
+  if (pinned) {
+    return view('bad', 'An axis is still at the edge after Range', [
+      'Range calibration didn’t bring it back, and saving would store a broken calibration. Write is off.',
+      'Try Guided calibration. If the axis stays at the edge, the stick is likely faulty.',
+    ], [ACTION.guided]);
+  }
+  if (isNum(worst) && worst >= GUIDED_ONLY_MIN) {
+    return view('bad', 'Range applied, but the center is far off', [
+      `${subject} ${off.length === 2 ? 'rest' : 'rests'} ${fmt(worst)} from center after the Range calibration: too far for Quick calibration, which only starts within ${GUIDED_ONLY_MIN}%. Write is off: use Guided calibration.`,
+      RANGE_MOVES_CENTER,
+    ], [ACTION.guided]);
+  }
+  return view('warn', moved ? 'Range applied, but the center moved' : 'Range applied, but the center is off', [
+    `${subject} ${moved ? 'moved off-center' : off.length === 2 ? 'rest off-center' : 'rests off-center'} after the Range calibration. Run Quick calibration now, before saving, then write the result to memory.`,
+    RANGE_MOVES_CENTER,
+  ], [ACTION.quickNow, ACTION.retest]);
 }
 
 // rangeBegin inviato ma non accettato (codice di rifiuto, risposta incoerente
@@ -694,7 +776,7 @@ export function quickPreflightRoute(driftResult) {
     return {
       action: first,
       then,
-      text: `The ${pinned.name} stick rests at the very edge (last drift test), so Quick calibration can’t start or fix it. Try Range calibration first, then Guided if the center is still off.`,
+      text: `The ${pinned.name} stick rests at the very edge (last drift test), so Quick calibration can’t start or fix it. Try Range calibration first. ${RANGE_THEN_CENTER}`,
     };
   }
   const far = sticks.find(st => st.tier === 'guided-only');
@@ -730,7 +812,7 @@ export function quickPreflightCheckRoute(diag, driftResult = null) {
     return {
       action: first,
       then,
-      text: `The ${name} stick stayed still at the very edge during the check. If nobody is touching it, Quick calibration can’t start or fix it: try Range calibration first, then Guided if the center is still off.`,
+      text: `The ${name} stick stayed still at the very edge during the check. If nobody is touching it, Quick calibration can’t start or fix it: try Range calibration first. ${RANGE_THEN_CENTER}`,
     };
   }
   return {

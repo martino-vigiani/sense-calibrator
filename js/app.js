@@ -21,7 +21,7 @@ import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView,
+  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
   revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -848,6 +848,7 @@ function teardown(message = null) {
   wizard = null;
   quickPreflightBlocked = false;
   lastDriftResult = null;
+  rangeRecheck = null;
   lastBattery = 0;
   modalReturnFocus.clear();
   ops.reset();
@@ -1139,6 +1140,32 @@ function evaluateDriftTest() {
 }
 
 let lastDriftResult = null;
+// Numero del commit (setUnsaved(true)) dopo cui è stato misurato
+// lastDriftResult: il "prima" del ricontrollo post-range vale solo se nessuna
+// calibrazione è arrivata dopo il test.
+let lastDriftCommit = -1;
+let commitSeq = 0;
+
+// Ricontrollo del centro dopo un range completo (H12, non verificato su
+// hardware; telemetria v2: centro fuori 12 volte su 13 dopo un range
+// completo). Lo risolve il primo test drift stabile sullo stesso controller
+// senza commit in mezzo; nessun comando HID, solo la misura che il test fa già.
+// Un risultato instabile o mancante lo lascia in attesa (Write resta guarded).
+let rangeRecheck = null;
+
+function resolveRangeRecheck(result) {
+  const pending = rangeRecheck;
+  rangeRecheck = null;
+  if (pending.controller !== ds5 || pending.commit !== commitSeq) return;
+  const after = summarizeResult(result);
+  const view = rangeRecheckView({ before: pending.before, after });
+  // Solo nella cronologia locale: il contratto v2 non cambia in questo ramo.
+  recordEvent('range-recheck', { before: pending.before, after, verdict: view.verdict, moved: view.moved });
+  log(view.verdict === 'centered'
+    ? 'Center checked after the range calibration: within 1 step.'
+    : `Center off after the range calibration (worst stick ${formatOffset(view.center.worst)}).`);
+  showOutcome(view);
+}
 
 // Segno esplicito e meno tipografico (−, non -): +0.0% e −0.0% restano
 // distinguibili, e lo screen reader legge "meno".
@@ -1155,6 +1182,7 @@ function finishDriftTest(result) {
 
   const prev = lastDriftResult;
   lastDriftResult = result;
+  lastDriftCommit = commitSeq;
 
   for (const [side, el] of [['left', 'verdict-l'], ['right', 'verdict-r']]) {
     const r = result[side];
@@ -1177,14 +1205,18 @@ function finishDriftTest(result) {
     worst: +worst.toFixed(2),
     unstable: result.unstable === true,
   });
+  // Prima del messaggio: il suo invito a salvare legge il blocco di Write che
+  // il ricontrollo può cambiare.
+  if (rangeRecheck && result.unstable !== true) resolveRangeRecheck(result);
   // Testo e instradamento dal livello peggiore (js/ui/outcome.js): ≥15% →
-  // Guided, Pinned → Range poi Guided, rumore → "il rumore resta".
+  // Guided, Pinned → Range e ricontrollo del centro, rumore → "il rumore resta".
   $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved, writeLock: currentWriteLock().mode }).text;
 }
 
 /* ============================== unsaved / flash ============================== */
 
 function setUnsaved(v) {
+  if (v) commitSeq += 1;
   if (v && !unsaved) openSaveChapter();
   unsaved = v;
   $('banner-unsaved').classList.toggle('hidden', !v);
@@ -1428,7 +1460,13 @@ let shownOutcomeView = null; // la vista ora nel pannello, per l'invito a salvar
 function showOutcome(view) {
   if (view.center) {
     centerState = view.center; lastCenterView = view;
-    if (view.kind === 'quick' || view.kind === 'guided') rememberCenterResult(view);
+    if (view.kind === 'quick' || view.kind === 'guided' || view.recheck) rememberCenterResult(view);
+    // Un nuovo esito del centro (Quick, Guided) l'ha misurato dopo il range:
+    // il ricontrollo in attesa non serve più.
+    if (!view.recheck) {
+      rangeRecheck = null;
+      if (rangeState?.centerUnchecked) rangeState = { ...rangeState, centerUnchecked: false };
+    }
   }
   if (view.range) rangeState = view.range;
   shownOutcomeView = view;
@@ -3338,9 +3376,14 @@ async function startRange() {
   rangeOp = op;
   const key = deviceKey;
   const previousLock = rangeWriteLocks.get(key);
+  // Centro prima del range, per il ricontrollo: solo un test drift stabile
+  // misurato dopo l'ultimo commit (stessa connessione: teardown lo azzera).
+  const centerBefore = lastDriftResult && lastDriftResult.unstable !== true && lastDriftCommit === commitSeq
+    ? summarizeResult(lastDriftResult) : null;
+  rangeRecheck = null;
   const opening = { controller, op, key, startTs: performance.now(),
     device: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
-    tracker: null, reported: false };
+    tracker: null, reported: false, centerBefore };
   rangeOpening = opening;
   // Blocco prudenziale scritto prima del comando: una chiusura della pagina
   // durante rangeBegin non può dimenticare la sessione forse aperta.
@@ -3578,7 +3621,10 @@ async function finishRange() {
     // Un range completo sostituisce in RAM quello incompleto: il blocco di
     // QUESTO controller decade (quelli sospesi di altri controller restano).
     setRangeWriteLock(null, key);
-    showOutcome(rangeOutcomeView({}));
+    // Il centro va rimisurato prima di salvare (H12): il test drift dopo il
+    // passo di verifica lo risolve; fino ad allora Write chiede conferma.
+    rangeRecheck = { controller, before: session.centerBefore ?? null, commit: commitSeq };
+    showOutcome(rangeOutcomeView({ checking: true }));
     log('Range calibration complete.');
     ops.endOp(op);
     startRangeCheck();
@@ -3603,8 +3649,8 @@ async function finishRange() {
 
 // Verifica del range appena applicato: un altro giro sul bordo, letto con la
 // calibrazione nuova, dà l'errore di circolarità RMS sui 36 settori. Nessun
-// comando al controller; poi il test drift (il range potrebbe spostare il
-// centro: H12, non ancora verificato).
+// comando al controller; poi il test drift, che ricontrolla il centro
+// (rangeRecheck: il range potrebbe spostarlo, H12 non verificato).
 // Riga fissa sotto la barra: durante la sessione dice che non c'è Cancel e
 // che l'unica uscita è spegnere il controller. Nel controllo successivo è
 // falsa due volte (c'è "Skip check", e spegnere ora butterebbe il range appena
