@@ -21,7 +21,7 @@ import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView,
+  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView,
   revertAdvice, stickTier, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -3030,6 +3030,9 @@ let rangeClosing = null; // rangeEnd in volo: pagehide/stacco deve emettere subi
 // Verifica dopo un rangeEnd riuscito: { tracker, result }. Nessun comando HID.
 let rangeCheck = null;
 let rangeOp = null; // token di ops: la sessione range occupa il controller fino a finishRange
+// Avvii range rifiutati per controller (chiave salata, null se illeggibile) in
+// questa pagina: dal secondo il pannello dice che riavviare non è bastato.
+const rangeStartRefusals = new Map();
 const RANGE_MSG_HTML = $('range-msg').innerHTML;
 
 // Scrittura in memoria disattivata dopo un range chiuso incompleto ("Finish
@@ -3294,7 +3297,24 @@ async function startRange() {
   } catch (error) {
     ops.endOp(op);
     if (error.maybeReceived || opening.reported) reportAbandonedRange(opening);
-    else {
+    if (error.maybeReceived) {
+      // Begin arrivato al firmware e non accettato (o senza risposta): come un
+      // calibBegin rifiutato, un nuovo tentativo senza riavvio verrebbe
+      // rifiutato di nuovo (telemetria v2: fino a 4 avvii falliti di fila
+      // nella stessa visita). Il blocco di power-cycle ferma Range, Quick,
+      // Guided e Write di QUESTO controller finché il riavvio non è provato.
+      const refusals = (rangeStartRefusals.get(key) ?? 0) + 1;
+      rangeStartRefusals.set(key, refusals);
+      markPowerCycle(controller, key);
+      if (rangeOpening === opening) rangeOpening = null;
+      if (ds5 === controller) {
+        closeModal('modal-range');
+        log(`Range start failed: ${error.message}`);
+        showOutcome(rangeStartFailedView({ error, again: refusals > 1 }));
+      }
+      return;
+    }
+    if (!opening.reported) {
       // Se il comando non è partito, ripristiniamo l'eventuale blocco
       // precedente; un nuovo tentativo fallito non sana un vecchio range.
       if (previousLock) rangeWriteLocks.set(key, previousLock);
@@ -3306,9 +3326,7 @@ async function startRange() {
     if (rangeOpening === opening) rangeOpening = null;
     if (ds5 === controller) {
       closeModal('modal-range');
-      toast(error.maybeReceived ? 'Range start was not confirmed. Write is off until a complete Range calibration.'
-        + ' The session may still be open: turn the controller off (hold PS for 10 s) before trying again.'
-        : `Failed to start range calibration: ${error.message}`, 5000);
+      toast(`Failed to start range calibration: ${error.message}`, 5000);
     }
     return;
   } finally {
@@ -3407,7 +3425,12 @@ async function finishRange() {
   let finishAnyway = false;
   if (!st.complete) {
     const what = `Still needed: ${st.missing.join(', ')}.`;
-    const go = confirm(`The range calibration is incomplete. ${what} Part of the stick travel may become unreachable. `
+    // Con bordo e lati già raggiunti la corsa non diventa irraggiungibile: manca
+    // solo rotazione, e il testo dice che bastano pochi secondi per chiudere bene.
+    const why = st.rotationOnly
+      ? 'Only rotation is missing: a few more seconds of turning would finish it properly. '
+      : 'Part of the stick travel may become unreachable. ';
+    const go = confirm(`The range calibration is incomplete. ${what} ${why}`
       + 'If you finish now, writing to memory stays disabled until you repeat the range calibration. Finish anyway?');
     if (!go || rangeSession !== session) return;
     finishAnyway = true;

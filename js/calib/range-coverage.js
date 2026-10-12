@@ -48,6 +48,16 @@ export const RANGE_DEFAULTS = Object.freeze({
   fillMaxStep: Math.PI / 6,
   // Dopo quanto il gate incompleto offre "Finish anyway".
   unlockMs: 15000,
+  // ...se a mancare è soltanto la rotazione (giri o verso opposto) con bordo e
+  // quattro lati già raggiunti su entrambi gli stick. Non è un limite fisico:
+  // basta girare ancora qualche secondo. Telemetria v2 27/9–12/10: 31 range
+  // incompleti su 39 erano di questo tipo, chiusi a una mediana di 27 s
+  // (spesso lo stick destro a ~1 giro, il sinistro a decine), appena "Finish
+  // anyway" compariva; il 90% dei range completi chiude entro 58 s. Prima di
+  // questo tempo il bottone resta "Done" disattivato e il suggerimento dice
+  // cosa manca; dopo, l'uscita confermata c'è come prima. I requisiti di Done
+  // non cambiano.
+  rotationUnlockMs: 60000,
 });
 
 const TAU = 2 * Math.PI;
@@ -221,8 +231,9 @@ const DIR_NAMES = { left: 'left', right: 'right', up: 'up', down: 'down' };
 
 // Stato complessivo per la UI e per la decisione di chiusura.
 //   complete     → "Done" (range valido)
-//   canFinish    → "Finish anyway" ammesso (dopo unlockMs, e solo se ogni
-//                  direzione di ogni stick supera minExtent)
+//   canFinish    → "Finish anyway" ammesso (dopo unlockMs, o rotationUnlockMs
+//                  se manca solo la rotazione, e solo se ogni direzione di
+//                  ogni stick supera minExtent)
 //   missing      → elenco leggibile di ciò che manca ("L left", "R: 1 more turn"),
 //                  a traguardi: cambia solo quando una direzione è raggiunta,
 //                  un giro intero è completato o il verso è stato invertito
@@ -249,7 +260,10 @@ export function rangeStatus(tracker, elapsedMs = 0) {
     if (!st.reversed) missing.push(`${tag}: turn the other way too`);
   }
   const degenerate = L.shortDirs.length > 0 || R.shortDirs.length > 0;
-  const unlocked = elapsedMs >= tracker.params.unlockMs;
+  const edgesDone = [L, R].every(st => st.coverage >= tracker.params.minCoverage && st.missingDirs.length === 0);
+  const rotationOnly = !complete && edgesDone;
+  const unlockMs = rotationOnly ? Math.max(tracker.params.unlockMs, tracker.params.rotationUnlockMs) : tracker.params.unlockMs;
+  const unlocked = elapsedMs >= unlockMs;
   return {
     left: L,
     right: R,
@@ -258,6 +272,9 @@ export function rangeStatus(tracker, elapsedMs = 0) {
     missing,
     missingDirs,
     degenerate,
+    // Mancano solo giri o verso opposto: bordo e lati sono già a posto.
+    rotationOnly,
+    unlockMs,
     canFinish: complete || (unlocked && !degenerate),
     finishAnyway: !complete && unlocked && !degenerate,
   };

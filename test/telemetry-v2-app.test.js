@@ -397,7 +397,7 @@ test('Range finished anyway: an incomplete range event, and the save period ends
       return 127.5 * (ax === 0 ? Math.cos(a) : Math.sin(a));
     } });
   }
-  await h.advance(18_000);
+  await h.advance(61_000); // manca solo la rotazione: Finish anyway dopo 60 s
   h.window.confirm = () => true;
   await h.run(h.click('btn-range-done'));
   await h.advance(300);

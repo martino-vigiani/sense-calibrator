@@ -148,7 +148,11 @@ export const LOCK_REASONS = Object.freeze({
   catastrophic: { mode: 'disabled', text: 'The last result is 15% or more off-center. Saving it would make the drift permanent.' },
   pinned: { mode: 'disabled', text: 'An axis reads at the very edge. Saving would store a broken calibration.' },
   'range-incomplete': { mode: 'disabled', text: 'The range calibration didn’t cover the whole edge. Run Range calibration again before saving.' },
-  'range-already-closed': { mode: 'disabled', text: 'The range session had already closed, so its result is unknown. Run Range calibration again before saving.' },
+  // Il codice copre ogni range dall'esito ignoto: già chiuso (code 3), fallito,
+  // interrotto, non partito o ereditato da un reload (telemetria v2: 6 save
+  // con questo motivo e nessun range 'already-closed'). Il testo non dice più
+  // "già chiuso" per tutti; il codice resta per il contratto v2.
+  'range-already-closed': { mode: 'disabled', text: 'The last range calibration didn’t finish normally (it failed, was interrupted or had already closed), so the range on the controller is unknown. Run Range calibration again before saving.' },
   'center-reload': { mode: 'disabled', text: 'A previous calibration result may still be unsafe. Complete and check a new calibration before saving.' },
   'center-reload-guarded': { mode: 'guarded', text: 'A previous calibration result needs checking again before saving.' },
   'much-worse': { mode: 'disabled', text: 'The result is much worse than when you started. Saving it would make that drift permanent: run Quick calibration to bring the sticks back first.' },
@@ -594,6 +598,37 @@ export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, er
   return view('ok', 'Range calibration applied (not saved yet)', [
     'Check the result with the drift test and the precision test, then write it to memory to keep it.',
   ], [ACTION.retest]);
+}
+
+// rangeBegin inviato ma non accettato (codice di rifiuto, risposta incoerente
+// o persa dopo l'invio). Telemetria v2 27/9–12/10: 9 range 'error' su 28 erano
+// avvii falliti a durS 0, 7 dei quali ripetuti nella stessa visita dopo un
+// toast di 5 s (BDM-050 fw 17760256, anche un Quick forzato rifiutato in
+// mezzo). Riprovare subito non serve: senza un riavvio il firmware rifiuta di
+// nuovo. Pannello persistente con Restart, e la pagina blocca le calibrazioni
+// finché il riavvio non è provato. `again`: già rifiutato su questo controller
+// dopo un riavvio in questa pagina. Il timeout (controller avvelenato) ha la
+// sua vista: lì Restart non può partire.
+export function rangeStartFailedView({ error = null, again = false } = {}) {
+  if (error && isPoisonError(error)) return rangeOutcomeView({ error });
+  return {
+    kind: 'range',
+    outcome: 'range',
+    tone: 'bad',
+    title: 'Range calibration didn’t start',
+    lines: [
+      'The controller didn’t accept the start command, so no range was recorded. This usually means a calibration session is still open on it, for example after an interrupted attempt, a reload or another tool.',
+      again
+        ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
+        : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.',
+      'Calibrating and saving stay off until the controller has restarted, and Write stays off until a complete Range calibration.',
+    ],
+    sticks: [],
+    actions: [ACTION.restart, ACTION.poweredOff],
+    range: { incomplete: false, alreadyClosed: true },
+    center: null,
+    repair: false,
+  };
 }
 
 /* ------------------------------ test drift ------------------------------ */
