@@ -2,7 +2,17 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
-## Unreleased — Quick preflight (2026-10-12)
+## 2026-10-12
+
+### Search guides and phones
+
+- **Guides target the searches people make.** The drift test guide is now "PS5 controller stick drift test online" and the calibration guide "DualSense calibration online", with matching titles, descriptions and headings. Both have a short FAQ, and its structured data repeats the visible questions and answers word for word.
+- **New guide: Sense Calibrator vs dualshock-tools.** It credits the project the calibration commands come from, says which controllers each tool supports and when to use dualshock-tools instead. Facts about dualshock-tools come from its README and site, checked on 12 October 2026.
+- Every guide links to every other guide, and the homepage lists all four. The sitemap includes the new page, with every `lastmod` set to 2026-10-12.
+- **Phones get a way to keep the link.** Where WebHID is missing on a touch device, the page offers **Send link to my computer** (the system share sheet, when the browser has one) next to **Copy link**, and shows the address to type. Desktop Chrome and Edge are unchanged.
+- The homepage FAQ and the guides no longer say a power-off "should" discard an unsaved calibration. They say it has not yet been confirmed on hardware (H10). The in-app copy is unchanged.
+
+### Quick preflight
 
 From telemetry v2 (27 September – 12 October): 250 of 825 Quick runs (30%) ended in `preflight`, with nothing sent. 241 of them expired on the first 3-second wait. In the same visit, about half had a stick resting past 15% (Guided or rest measurements of 15–100%); the others had sticks that rest centered, and 64 of those retries failed again.
 
@@ -11,13 +21,13 @@ From telemetry v2 (27 September – 12 October): 250 of 825 Quick runs (30%) end
 - The cause is kept in the local session history only. The v2 event contract is unchanged; the app build is now 20261012, so the report can compare the preflight rate before and after.
 - Simulator, model-verified: preflight 24 → 17 in 714 sessions, no change in results at or above 15%, no sample after a timeout; one extra stalled pass in 714. Not tested on a physical controller.
 
-## Unreleased — Guided stop (2026-10-12)
+### Guided stop
 
 - **Guided calibration can be stopped without unplugging the controller.** In the v2 telemetry (27 Sep to 12 Oct), 81 of 320 Guided runs ended with the controller unplugged or the page closed mid-session, often after many failed waits. Before the change, Stop appeared only after two missed corners. It now also appears after any failed wait at the current step. Stop sends nothing: it leaves the session uncommitted, keeps the power-cycle lock and opens a result panel with **Restart the controller** and **I already turned it off**.
 - **A failed wait now says why.** If a stick stays beyond 50% of center when the session starts, the page says that pressing Continue again won't help. It no longer offers **My stick doesn't rest still**, because that option can't widen the 50% bound. If the stick was already that far out before Start, the page says it is probably stuck near the edge. At a corner, the message says which stick settled away from its rest point and how far. If that is still outside the looser check, the message points to Stop. The diagnosis only changes the wording. The sample rules, tolerances, escape radius and HID commands are unchanged. The v2 contract is also unchanged, so a stopped run is still reported as `error` with `needsPowerCycle`.
 - Verified with the virtual DualSense and app harness only, not with a physical controller.
 
-## Unreleased — Range starts and rotation (2026-10-12)
+### Range starts and rotation
 
 From telemetry v2, 27 September to 12 October: 215 Range calibrations, of which 124 were complete, 63 incomplete and 28 errors. These changes are verified with the virtual DualSense and app harness, not with a physical controller. Range's completion requirements, the Write lock, the HID commands and the v2 contract are unchanged.
 

@@ -16,7 +16,7 @@ FAQ, until H10 is run.
 | H0-b | **1.24 start, two passes.** Start with one stick one step off (1.24%). Record the pass-1 and pass-2 results over at least 10 runs. | In the model, pass 2 after a 1.24 first pass recovers less often with the in-session reference filter (see `ops/sim/README.md`). If it also happens on hardware, the filter is re-capturing the same 1-LSB error. |
 | H1 | Raw NVS status word after a flash | The final set of statuses that count as "saved" |
 | H3 | NVS-unlocked behaviour, if reproducible | Only a future auto-lock |
-| H10 | Does a power-off without Write revert the calibration to the last saved one? | The "turn it off, it should discard it" copy (shown only with memory `locked`), README, guide and FAQ. If it passes, the "should" can go. |
+| H10 | Does a power-off without Write revert the calibration to the last saved one? | The in-app "turn it off, it should discard it" copy (shown only with memory `locked`). Since 2026-10-12 the homepage FAQ and the guides state it as unconfirmed rather than "should". If it passes, the "should" can go and the guides can state it. |
 | H11 | Does a USB unplug without power-off keep the calibration? | The unplug copy, the range write lock across a replug |
 | H12 | Does Range move the center? | Routing pinned sticks to Range, and the Range intro warning |
 
