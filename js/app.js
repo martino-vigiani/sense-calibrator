@@ -22,7 +22,7 @@ import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffs
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView,
-  revertAdvice, stickTier, writeLockFor,
+  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
@@ -707,6 +707,7 @@ async function adopt(device, { explicit = false, previousFocus = document.active
     reapplyCenterWriteLock();
     reapplyRangeWriteLock(key);
     reapplyPowerCycle();
+    reapplyLostSave(key);
 
     // La connessione esplicita porta al test, salvo una nuova scelta di link
     // durante l'I/O. Quella automatica sposta solo il fuoco rimasto nella
@@ -815,6 +816,9 @@ function teardown(message = null) {
   if (rangeOpening) reportAbandonedRange(rangeOpening);
   if (rangeSession) reportAbandonedRange(rangeSession);
   if (rangeClosing) reportAbandonedRange(rangeClosing);
+  // Una calibrazione salvabile mai scritta: al ricollegamento dello stesso
+  // controller il pannello lo dice (unsavedLostView). Letto prima di azzerare.
+  if (unsaved && currentWriteLock().mode === 'allowed') lostSave = { key: deviceKey };
   closeSaveChapter('disconnected');
   restNoise.reset();
   const hadUnsaved = unsaved;
@@ -1387,6 +1391,10 @@ function updateWriteLock() {
   // (chiaro, bordo tratteggiato) e titolo, così la sua evidenza non fa mai
   // sembrare cliccabile un Write bloccato; il motivo resta in #banner-lock.
   $('banner-unsaved').dataset.lock = lock.mode;
+  // Invito a salvare nel pannello dell'esito: solo esito buono, non salvato,
+  // Write libero. Attributo, non un nuovo innerHTML: il pannello è una live
+  // region e riscriverlo lo farebbe annunciare di nuovo.
+  $('calib-outcome').dataset.save = saveCtaFor({ view: shownOutcomeView, unsaved, lockMode: lock.mode }) ? 'on' : 'off';
   $('save-step-kicker').textContent = lock.mode === 'disabled' ? 'Not ready to save' : 'Last step';
   $('save-step-title').textContent = lock.mode === 'disabled' ? 'Saving is off for this result' : 'Save it to the controller';
   // Prima → dopo in forma corta (solo la percentuale): il dettaglio dei passi
@@ -1416,12 +1424,14 @@ function updateWriteLock() {
 // affidava a un messaggio che spariva. Resta fino alla calibrazione successiva.
 // Uguale a scroll-margin-top di .outcome-card (la topbar fissa).
 const OUTCOME_TOP_MARGIN = 80;
+let shownOutcomeView = null; // la vista ora nel pannello, per l'invito a salvare
 function showOutcome(view) {
   if (view.center) {
     centerState = view.center; lastCenterView = view;
     if (view.kind === 'quick' || view.kind === 'guided') rememberCenterResult(view);
   }
   if (view.range) rangeState = view.range;
+  shownOutcomeView = view;
   const el = $('calib-outcome');
   // Altezza di partenza per growBlock: 0 da nascosto, quella a schermo (anche
   // a metà di un'entrata o di un'uscita) se c'era già.
@@ -1449,7 +1459,9 @@ function showOutcome(view) {
 }
 
 function clearOutcome() {
+  shownOutcomeView = null;
   const el = $('calib-outcome');
+  el.dataset.save = 'off';
   // L'uscita (lo spazio che si richiude) è in CSS, .outcome-card.hidden; il
   // contenuto resta finché dura, poi il blocco è display:none e vuoto.
   for (const anim of el.getAnimations?.() ?? []) anim.cancel();
@@ -1524,6 +1536,7 @@ function runOutcomeAction(action) {
   else if (action === 'recovery') openQuickRecovery();
   else if (action === 'restart') rebootController();
   else if (action === 'powered-off') confirmPoweredOff();
+  else if (action === 'write') openFlashModal('block');
 }
 
 // Modale di Write: le cifre dell'ultimo esito e, se l'esito è peggiore
@@ -1824,6 +1837,20 @@ function releaseSessionGuard(guard) {
 // Vale per il controller collegato (vedi powerCycleLockFor).
 function powerCycleApplies() {
   return !!ds5 && !!powerCycleLockFor(ds5, deviceKey);
+}
+
+// Calibrazione salvabile (Write libero) mai scritta quando il controller si è
+// staccato: { key } del controller, chiave salata della pagina (null se il
+// seriale non era leggibile). Al ricollegamento dello stesso controller, se
+// nessun blocco ha già occupato il pannello, lo dice una volta. Solo in
+// memoria: dopo un ricaricamento c'è già #banner-session.
+let lostSave = null;
+function reapplyLostSave(key) {
+  if (!lostSave || lostSave.key !== key) return;
+  lostSave = null;
+  if (!$('calib-outcome').classList.contains('hidden')) return;
+  log('The last calibration on this controller was never written to memory before it disconnected.');
+  showOutcome(unsavedLostView());
 }
 
 // Al collegamento: se un blocco vale per il controller appena adottato, il
@@ -3746,7 +3773,11 @@ function closeModal(id) {
     modalReturnFocus.delete(el);
     const another = activeModalEl();
     watchModalFocus(another);
-    if (!another) previous?.focus?.({ preventScroll: true });
+    // Il bottone che l'ha aperto può essere sparito nel frattempo (Write
+    // riuscito: passo di salvataggio e invito nel pannello si nascondono).
+    // Allora il fuoco va alla scheda del test drift, non al body.
+    const gone = previous?.checkVisibility?.() === false && !$('view-device').classList.contains('hidden');
+    if (!another) (gone ? $('drift-card') : previous)?.focus?.({ preventScroll: true });
     // Un commit arrivato a modale aperto: il passo di salvataggio si mostra ora.
     if (!another) revealSaveStep();
   }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
@@ -4024,8 +4055,12 @@ window.addEventListener('pagehide', () => {
   closeSaveChapter('left', { now: true });
 });
 
+// Avviso solo se c'è qualcosa da perdere che si potrebbe salvare: una
+// calibrazione in corso, o una non salvata con Write libero. Con Write spento
+// o protetto (esito da controllare) l'avviso spingerebbe a salvarla; i blocchi
+// sopravvivono comunque al ricaricamento.
 window.addEventListener('beforeunload', e => {
-  if (unsaved || ops.busy) { e.preventDefault(); e.returnValue = ''; }
+  if (ops.busy || (unsaved && currentWriteLock().mode === 'allowed')) { e.preventDefault(); e.returnValue = ''; }
 });
 
 /* ============================== consenso telemetria ============================== */

@@ -27,6 +27,18 @@ From telemetry v2 (27 September – 12 October): 250 of 825 Quick runs (30%) end
 - **A failed wait now says why.** If a stick stays beyond 50% of center when the session starts, the page says that pressing Continue again won't help. It no longer offers **My stick doesn't rest still**, because that option can't widen the 50% bound. If the stick was already that far out before Start, the page says it is probably stuck near the edge. At a corner, the message says which stick settled away from its rest point and how far. If that is still outside the looser check, the message points to Stop. The diagnosis only changes the wording. The sample rules, tolerances, escape radius and HID commands are unchanged. The v2 contract is also unchanged, so a stopped run is still reported as `error` with `needsPowerCycle`.
 - Verified with the virtual DualSense and app harness only, not with a physical controller.
 
+### Save step
+
+From telemetry v2 (27 September – 12 October): of 346 visits with a calibration, 234 saved one. 49 unsaved periods, in 41 visits, had Write allowed but never opened the Write dialog: 48 of them had seen the save step, none opened the reminder, and the median wait was 114 s (19 s to 58 min). 43 ended with the controller disconnected and 6 with the page closed. The last calibration was a centered Quick in 23, a complete Range in 12, a Guided result in 6 and Quick within 1 step in 2; the other 6 were results to check (noisy, Quick can't get closer, or none). In 24 of the 43 the visit went on after a reconnect, and in 15 of those the next calibration started from sticks off-center again. The data can't tell whether the unplug or a power-off discarded the calibration. App builds: 37 from 20261001, 8 from 20260928, 4 from 20260927.
+
+- **After a good result, the result panel itself offers Write to memory.** For a centered or within-1-step Quick or Guided result and a complete Range, with Write allowed, the panel says it isn't saved yet: turning the controller off should discard it, and unplugging the cable may too (not confirmed). The button opens the same Write dialog. Results to check, a guarded Write and a disabled Write don't show it.
+- The save step says that unplugging the cable may lose the calibration too, not confirmed.
+- **Leaving the page asks first only when there is something to save**: a calibration in progress, or an unsaved one whose Write is allowed. It no longer asks for a result whose Write is off or needs checking.
+- **Reconnecting the same controller after an unsaved calibration says so.** The panel says the last calibration wasn't saved, that we haven't confirmed whether unplugging discards it, and that the drift test shows where the sticks are now. It doesn't offer Write: that still needs a calibration made after reconnecting.
+- When the Write dialog closes and the button that opened it is gone, the focus moves to the drift test card instead of the page.
+- The v2 contract and the app build (20261012) are unchanged. The report can't tell the panel button from the save step's: both count as `opens`. Verified with the app harness only, not with a physical controller.
+- The calibration guide now says **Stop and turn off controller** appears after one failed wait at the same step as well as after two missed corners.
+
 ### Range starts and rotation
 
 From telemetry v2, 27 September to 12 October: 215 Range calibrations, of which 124 were complete, 63 incomplete and 28 errors. These changes are verified with the virtual DualSense and app harness, not with a physical controller. Range's completion requirements, the Write lock, the HID commands and the v2 contract are unchanged.

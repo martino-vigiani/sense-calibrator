@@ -58,6 +58,39 @@ export function revertAdvice(nvStatus) {
   return nvStatus === 'locked' ? `${POWER_OFF_ADVICE} ${UNPLUG_UNKNOWN}` : null;
 }
 
+// Invito a salvare nel pannello dell'esito. Telemetria v2 27/9–12/10: 49
+// periodi non salvati con Write libero, il modale mai aperto, 48 col passo di
+// salvataggio visto, mediana 114 s, chiusi staccando il controller (43) o la
+// pagina (6); 42 di 49 dopo un esito centrato, entro un passo o un range
+// completo. Compare solo con un esito buono (`tone: 'ok'`), una calibrazione
+// non salvata e Write libero (`saveCtaFor`): mai per un esito da controllare.
+// "should" per lo spegnimento (H10), "may … not confirmed" per lo stacco (H11).
+export const SAVE_CTA_TEXT = 'Not saved yet. Write it to memory now: turning the controller off should discard it, and unplugging the cable may too (not confirmed).';
+export function saveCtaFor({ view = null, unsaved = false, lockMode = 'allowed' } = {}) {
+  return !!view && view.tone === 'ok' && unsaved === true && lockMode === 'allowed' && !view.poisoned;
+}
+
+// Ricollegato dopo uno stacco con una calibrazione salvabile mai scritta. La
+// pagina non sa se lo stacco l'abbia scartata (H11): lo dice, e il test drift
+// che parte da solo mostra dove sono gli stick ora. Nessuna azione nuova:
+// Write segue solo una calibrazione fatta da questa connessione.
+export function unsavedLostView() {
+  return {
+    kind: 'lost-save',
+    outcome: 'lost-save',
+    tone: 'warn',
+    title: 'The last calibration wasn’t saved',
+    lines: [
+      'The controller disconnected before the calibration was written to memory. We haven’t confirmed whether unplugging discards it; turning the controller off should.',
+      'The drift test shows where the sticks are now. If they need it, calibrate again and write the result to memory before you disconnect.',
+    ],
+    sticks: [],
+    actions: [],
+    center: null,
+    repair: false,
+  };
+}
+
 // Un segnale rumoroso non diagnostica il guasto. Prima una nuova misura,
 // poi assistenza e diagnosi; una sostituzione non si deduce dal solo rumore.
 export const REPAIR_STEPS = Object.freeze([
@@ -791,7 +824,12 @@ export function outcomeHtml(view) {
   const actions = view.actions?.length
     ? `<div class="outcome-actions">${view.actions.map(a => `<button type="button" class="btn btn-secondary btn-sm" data-outcome-action="${e(a.id)}">${e(a.label)}</button>`).join('')}</div>`
     : '';
-  return `<h3 class="outcome-title">${e(view.title)}</h3>${rows}${lines}${repair}${actions}`;
+  // Solo per un esito buono; la pagina lo mostra (data-save="on" sul
+  // pannello) quando c'è davvero qualcosa da salvare e Write è libero.
+  const save = view.tone === 'ok' && !view.poisoned
+    ? `<div class="outcome-save"><p>${e(SAVE_CTA_TEXT)}</p><button type="button" class="btn btn-primary btn-sm" data-outcome-action="write">Write to memory</button></div>`
+    : '';
+  return `<h3 class="outcome-title">${e(view.title)}</h3>${rows}${lines}${repair}${save}${actions}`;
 }
 
 // Riga del pannello log, coerente col pannello: "complete" solo quando lo è.
