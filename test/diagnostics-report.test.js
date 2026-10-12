@@ -69,3 +69,24 @@ test('a recovered ordinary verification is excluded from catastrophic measuremen
     n: 0, stableMeasurement: 0, unstableMeasurement: 0, unknownMeasurement: 0,
   });
 });
+
+test('range errors split into start, interrupted and close; rotation-only incompletes get their own count', () => {
+  const base = { type: 'range', outcome: 'error', committed: false, allEdges: false };
+  const done = { reversed: [true, true], reverseTurns: [2, 2], missing: [[], []] };
+  const events = [
+    // rangeBegin rifiutato: nessun tracker (app vecchia senza completion, nuova con null)
+    { ...base, coverage: [0, 0], turns: [0, 0], durS: 0 },
+    { ...base, coverage: [0, 0], turns: [0, 0], durS: 0, completion: null },
+    // sessione aperta lasciata senza rangeEnd, anche a movimento zero
+    { ...base, coverage: [1, 1], turns: [12.8, 44], durS: 3600, completion: done },
+    { ...base, coverage: [0, 0], turns: [0, 0], durS: 9, completion: { reversed: [false, false], reverseTurns: [0, 0], missing: [['coverage'], ['coverage']] } },
+    // rangeEnd partito e fallito
+    { ...base, committed: true, coverage: [1, 1], turns: [5, 5], durS: 30, completion: done },
+    { type: 'range', outcome: 'incomplete', committed: true, coverage: [1, 1], turns: [20, 1.1], allEdges: true, durS: 25,
+      completion: { reversed: [true, false], reverseTurns: [8, 0], missing: [[], ['turns', 'reverse']] } },
+  ];
+  const { range } = diagnosticsReport(events);
+  assert.deepEqual(range.error, { n: 5, start: 2, interrupted: 2, close: 1 });
+  assert.equal(range.incomplete.rotationOnly, 1);
+  assert.equal(range.incomplete.mixed, 0);
+});

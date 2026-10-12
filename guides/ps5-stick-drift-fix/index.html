@@ -124,7 +124,7 @@
       <p>After calibration, Sense Calibrator shows each stick's before and after offset. Repeat the drift test and use the precision test to compare center and signal stability. A lower offset with persistent noise is an improvement in center, not a repair of the noisy signal.</p>
       <p>The controller reports sticks on an 8-bit grid. A reading of <b>0.6% &middot; at floor</b> is the closest representable center in this tool. <b>1.2% &middot; 1 step</b> is a neighboring grid position. Chasing a displayed 0.0% is not a useful goal on that grid.</p>
       <p>With controller memory confirmed locked, calibration takes effect in RAM and saving to non-volatile memory is a separate action. If memory state is unknown, changes may not be temporary: review the tool's warning first. Choose <b>Write to memory</b> only after reviewing the result. The tool disables saving for unsafe or incomplete outcomes and adds a confirmation for a result that got worse.</p>
-      <p class="guide-note"><b>If the result is wrong, do not save it.</b> Turning the controller off should return it to the last saved calibration, but this has not yet been confirmed on hardware. Unplugging USB alone is also unverified. Follow any power-off instruction shown by the tool before trying another calibration.</p>
+      <p class="guide-note"><b>If the result is wrong, do not save it.</b> Whether turning the controller off returns it to the last saved calibration has not yet been confirmed on hardware, and neither has unplugging USB alone. Follow any power-off instruction shown by the tool before trying another calibration.</p>
 
       <h2 id="returns">What if stick drift comes back?</h2>
       <p>First check whether the improved calibration was actually written to memory. A temporary result and a saved result are different. Then repeat the read-only test: a changing rest position or growing noise means the original correction may no longer fit the signal.</p>
@@ -134,10 +134,12 @@
 
       <aside class="guide-next">
         <b>Continue with your result</b>
-        <a href="../ps5-controller-stick-drift-test/">Understand your drift-test readings</a>
+        <a href="../ps5-controller-stick-drift-test/">PS5 controller stick drift test online</a>
         <span>Resting offset, noise and the limits of a read-only test.</span>
-        <a href="../calibrate-dualsense-controller/">Choose a DualSense calibration procedure</a>
+        <a href="../calibrate-dualsense-controller/">DualSense calibration online</a>
         <span>Quick, Guided, range and saving the result.</span>
+        <a href="../sense-calibrator-vs-dualshock-tools/">Sense Calibrator vs dualshock-tools</a>
+        <span>Another browser tool, with wider controller support.</span>
       </aside>
     </div>
   </article>

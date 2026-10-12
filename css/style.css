@@ -319,6 +319,8 @@ main {
   margin-top: 16px;
 }
 .unsupported-actions .btn { flex: 0 1 auto; }
+/* Con la condivisione nativa ci sono due azioni: una per riga, piena larghezza. */
+.unsupported-actions:has(#btn-share-link:not([hidden])) .btn { flex: 1 1 100%; }
 .copy-link-url {
   flex: 1 1 100%;
   width: 100%;
@@ -346,6 +348,15 @@ main {
 .result-help a:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 3px; }
 .result-help-note { color: var(--ink-3); }
 #drift-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.unsupported-address {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.unsupported-address .mono { color: var(--ink); }
+.unsupported-note a { color: var(--ink-2); text-underline-offset: 2px; }
 .unsupported-note {
   margin: 14px 0 0;
   padding-top: 13px;
@@ -2048,7 +2059,8 @@ a.btn { text-decoration: none; }
 }
 .guides-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  /* 4 guide: due per riga sul desktop, mai una sola orfana su tre colonne. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 12px;
 }
 .guide-card {
@@ -2167,6 +2179,20 @@ a.btn { text-decoration: none; }
 .outcome-repair summary { cursor: pointer; font-weight: 600; }
 .outcome-repair ol { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
 .outcome-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+/* Invito a salvare dopo un esito buono: c'è sempre nell'HTML di un esito
+   'ok', si vede solo quando la pagina mette data-save="on" (non salvato,
+   Write libero). Niente animazione: è testo del pannello. */
+.outcome-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--edge);
+}
+.outcome-save p { margin: 0; flex: 1 1 260px; color: var(--ink); }
+.outcome-card:not([data-save="on"]) .outcome-save { display: none; }
 @media (max-width: 480px) {
   .outcome-card { padding: 16px 16px 16px 22px; }
   .outcome-sticks { grid-template-columns: 1fr; }

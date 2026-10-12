@@ -22,7 +22,7 @@ import { EVENTS_V2_SCHEMA } from './telemetry-v2-schema.js';
 export const EVENTS_V2_ENDPOINT = 'https://subralabs.com/api/calib/v2/events';
 // Data della release che produce gli eventi (YYYYMMDD). Va aggiornata a ogni
 // rilascio che cambia cosa si misura, così il report separa le versioni.
-export const TELEMETRY_APP_BUILD = 20261001;
+export const TELEMETRY_APP_BUILD = 20261012;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una
 // più nuova, l'avviso ricompare prima che partano le categorie nuove.

@@ -18,17 +18,17 @@ import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitF
 import { runQuick } from './calib/quick.js';
 import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
-import { CENTERED_MAX, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
+import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  quickPreflightRoute, rangeOutcomeView,
-  revertAdvice, stickTier, writeLockFor,
+  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView,
+  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 import { rangeProgress, rangeRequirementsHtml } from './ui/range-progress.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+  WIZARD_DEFAULTS, captureRestReferenceDetailed, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 import { rangeCompletion } from './calib/range-diagnostics.js';
@@ -440,6 +440,9 @@ function showUnsupported() {
       + '<b>desktop Chrome or Edge</b> and connect a standard DualSense with a USB data cable. '
       + 'Safari and Firefox don’t support WebHID.';
   }
+  // Sul telefono il foglio di condivisione nativo (mail, messaggi, AirDrop) è
+  // il modo più rapido per ritrovare il link sul computer. Solo se esiste.
+  if (touchOnly && typeof navigator.share === 'function') $('btn-share-link').hidden = false;
   $('btn-connect').disabled = true;
   document.querySelector('.hero-cta').classList.add('hidden');
   // "NOT CONNECTED" qui è rumore: non si potrà mai connettere nulla.
@@ -447,6 +450,23 @@ function showUnsupported() {
   $('chip-conn').classList.add('hidden');
   document.body.classList.add('no-hid');
   $('unsupported').classList.remove('hidden');
+}
+
+// "Invia al computer": condivisione nativa. Annullare il foglio non è un errore;
+// se la condivisione fallisce resta "Copia link" accanto.
+const btnShareLink = $('btn-share-link');
+if (btnShareLink) {
+  btnShareLink.addEventListener('click', async () => {
+    try {
+      await navigator.share({
+        title: 'Sense Calibrator',
+        text: 'Open on a computer in Chrome or Edge, with the DualSense plugged in by USB.',
+        url: location.href,
+      });
+    } catch (error) {
+      if (error?.name !== 'AbortError') toast('Sharing didn’t work here. Use Copy link instead.');
+    }
+  });
 }
 
 // "Copia link": su mobile l'azione utile è mandarsi la pagina sul desktop.
@@ -687,6 +707,7 @@ async function adopt(device, { explicit = false, previousFocus = document.active
     reapplyCenterWriteLock();
     reapplyRangeWriteLock(key);
     reapplyPowerCycle();
+    reapplyLostSave(key);
 
     // La connessione esplicita porta al test, salvo una nuova scelta di link
     // durante l'I/O. Quella automatica sposta solo il fuoco rimasto nella
@@ -795,6 +816,9 @@ function teardown(message = null) {
   if (rangeOpening) reportAbandonedRange(rangeOpening);
   if (rangeSession) reportAbandonedRange(rangeSession);
   if (rangeClosing) reportAbandonedRange(rangeClosing);
+  // Una calibrazione salvabile mai scritta: al ricollegamento dello stesso
+  // controller il pannello lo dice (unsavedLostView). Letto prima di azzerare.
+  if (unsaved && currentWriteLock().mode === 'allowed') lostSave = { key: deviceKey };
   closeSaveChapter('disconnected');
   restNoise.reset();
   const hadUnsaved = unsaved;
@@ -959,6 +983,9 @@ function wizardHoldKnown(w) {
     if (Math.max(p.left, p.right) >= WIZARD_DEFAULTS.cornerDot) return true;
   }
   if (!w.gateTimedOut) return false;
+  // Uno stick bloccato al bordo (già oltre il 50% a mani ferme prima di
+  // calibBegin) non è "tenuto": "Stick held: let go" contraddirebbe il testo.
+  if (w.stuck) return false;
   if (!w.ref) return Math.hypot(sticks.lx, sticks.ly) > WIZARD_DEFAULTS.refRadius || Math.hypot(sticks.rx, sticks.ry) > WIZARD_DEFAULTS.refRadius;
   const tol = w.escaped ? Math.max(WIZARD_DEFAULTS.escapeLsb * STICK_LSB, w.tol ?? 0) : w.tol;
   return ['lx', 'ly', 'rx', 'ry'].some(a => Math.abs(sticks[a] - w.ref[a]) > tol);
@@ -1364,6 +1391,10 @@ function updateWriteLock() {
   // (chiaro, bordo tratteggiato) e titolo, così la sua evidenza non fa mai
   // sembrare cliccabile un Write bloccato; il motivo resta in #banner-lock.
   $('banner-unsaved').dataset.lock = lock.mode;
+  // Invito a salvare nel pannello dell'esito: solo esito buono, non salvato,
+  // Write libero. Attributo, non un nuovo innerHTML: il pannello è una live
+  // region e riscriverlo lo farebbe annunciare di nuovo.
+  $('calib-outcome').dataset.save = saveCtaFor({ view: shownOutcomeView, unsaved, lockMode: lock.mode }) ? 'on' : 'off';
   $('save-step-kicker').textContent = lock.mode === 'disabled' ? 'Not ready to save' : 'Last step';
   $('save-step-title').textContent = lock.mode === 'disabled' ? 'Saving is off for this result' : 'Save it to the controller';
   // Prima → dopo in forma corta (solo la percentuale): il dettaglio dei passi
@@ -1393,12 +1424,14 @@ function updateWriteLock() {
 // affidava a un messaggio che spariva. Resta fino alla calibrazione successiva.
 // Uguale a scroll-margin-top di .outcome-card (la topbar fissa).
 const OUTCOME_TOP_MARGIN = 80;
+let shownOutcomeView = null; // la vista ora nel pannello, per l'invito a salvare
 function showOutcome(view) {
   if (view.center) {
     centerState = view.center; lastCenterView = view;
     if (view.kind === 'quick' || view.kind === 'guided') rememberCenterResult(view);
   }
   if (view.range) rangeState = view.range;
+  shownOutcomeView = view;
   const el = $('calib-outcome');
   // Altezza di partenza per growBlock: 0 da nascosto, quella a schermo (anche
   // a metà di un'entrata o di un'uscita) se c'era già.
@@ -1426,7 +1459,9 @@ function showOutcome(view) {
 }
 
 function clearOutcome() {
+  shownOutcomeView = null;
   const el = $('calib-outcome');
+  el.dataset.save = 'off';
   // L'uscita (lo spazio che si richiude) è in CSS, .outcome-card.hidden; il
   // contenuto resta finché dura, poi il blocco è display:none e vuoto.
   for (const anim of el.getAnimations?.() ?? []) anim.cancel();
@@ -1501,6 +1536,7 @@ function runOutcomeAction(action) {
   else if (action === 'recovery') openQuickRecovery();
   else if (action === 'restart') rebootController();
   else if (action === 'powered-off') confirmPoweredOff();
+  else if (action === 'write') openFlashModal('block');
 }
 
 // Modale di Write: le cifre dell'ultimo esito e, se l'esito è peggiore
@@ -1801,6 +1837,20 @@ function releaseSessionGuard(guard) {
 // Vale per il controller collegato (vedi powerCycleLockFor).
 function powerCycleApplies() {
   return !!ds5 && !!powerCycleLockFor(ds5, deviceKey);
+}
+
+// Calibrazione salvabile (Write libero) mai scritta quando il controller si è
+// staccato: { key } del controller, chiave salata della pagina (null se il
+// seriale non era leggibile). Al ricollegamento dello stesso controller, se
+// nessun blocco ha già occupato il pannello, lo dice una volta. Solo in
+// memoria: dopo un ricaricamento c'è già #banner-session.
+let lostSave = null;
+function reapplyLostSave(key) {
+  if (!lostSave || lostSave.key !== key) return;
+  lostSave = null;
+  if (!$('calib-outcome').classList.contains('hidden')) return;
+  log('The last calibration on this controller was never written to memory before it disconnected.');
+  showOutcome(unsavedLostView());
 }
 
 // Al collegamento: se un blocco vale per il controller appena adottato, il
@@ -2209,8 +2259,10 @@ function feedRestNoise(now) {
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
 // Accanto c'è il misuratore "mani lontane" (js/ui/hands-off.js), che reagisce
 // in tempo reale; questi testi dicono cosa sta facendo l'algoritmo.
-function quickProgressHtml({ phase, pass, worst }) {
+function quickProgressHtml({ phase, pass, worst, side, offset }) {
   if (phase === 'preflight') return 'Release both sticks. Waiting for centered, stable readings…';
+  if (phase === 'settled') return 'Readings are still and centered. Measuring the starting point… <b>Don’t touch the sticks.</b>';
+  if (phase === 'off-center') return `The ${side === 'right' ? 'right' : 'left'} stick is still but reads ${formatOffset(offset)} from center. <b>If you’re touching it, let go.</b> Quick only starts within ${GUIDED_ONLY_MIN}%.`;
   if (phase === 'noisy') return 'The readings are jumping around. <b>Let go of both sticks</b> and keep the controller flat on the table. If nobody is touching them, repeat the test to check the signal at rest.';
   if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b> A held stick would be saved as the new center.';
   if (phase === 'pass' || phase === 'resumed') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
@@ -2312,7 +2364,13 @@ async function quickCalibrate() {
       isCurrent: () => ds5 === controller,
       isCancelled: () => quickCancelRequested,
       force,
-      params: recovery ? { maxPasses: 1 } : {},
+      params: {
+        ...(recovery ? { maxPasses: 1 } : {}),
+        // Il test drift ha visto entrambi gli stick fermi dentro il raggio: uno
+        // stick fermo fuori raggio adesso è un pollice, e conviene aspettare
+        // che si stacchi invece di fermarsi dopo 3 s (solo l'attesa cambia).
+        ...(['left', 'right'].every(side => driftRestedInside(lastDriftResult, side)) ? { preflightOffCenterMs: Infinity } : {}),
+      },
       repairStaleSession: repairAllowed,
       onSession: state => {
         if (state === 'opening') guard = openSessionGuard();
@@ -2321,7 +2379,8 @@ async function quickCalibrate() {
       onProgress: event => {
         if (ops.isCurrent(op)) {
           if (event.phase === 'held' || event.phase === 'stalled' || event.phase === 'unstable') quickHoldKnown = true;
-          else if (event.bar !== undefined || ['pass', 'resumed', 'verify', 'next'].includes(event.phase)) quickHoldKnown = false;
+          // Fermo fuori raggio: il misuratore mostra il movimento che vede (nessuno).
+          else if (event.bar !== undefined || ['pass', 'resumed', 'verify', 'next', 'off-center', 'settled'].includes(event.phase)) quickHoldKnown = false;
         }
         if (event.phase === 'committed') {
           // La RAM è appena cambiata (calibEnd, o riparazione di calibBegin):
@@ -2396,7 +2455,11 @@ async function quickCalibrate() {
       // Quick (o al bordo), nessuno lo sta toccando: il testo lo dice per primo
       // e il bottone porta a Guided (Pinned: Range). Niente "Stick held": il
       // misuratore mostrerebbe una mano che non c'è.
-      const route = quickPreflightRoute(lastDriftResult);
+      // Poi la causa vista dall'attesa stessa (run.preflight, vedi
+      // createQuickPreflightProbe): fermo fuori raggio → Guided (Pinned: Range),
+      // nessun report → cavo, movimento → "Release both sticks".
+      const diag = run.preflight ?? {};
+      const route = quickPreflightRoute(lastDriftResult) ?? quickPreflightCheckRoute(diag, lastDriftResult);
       if (route) {
         quickRouteNext = route.action.id;
         $('btn-quick-go').textContent = route.action.label;
@@ -2404,9 +2467,34 @@ async function quickCalibrate() {
         log(`Quick calibration not started: ${route.text}`);
         return;
       }
-      // Il modale dice "Release both sticks": il misuratore non deve dire il contrario.
-      if (ops.isCurrent(op)) quickHoldKnown = true;
-      blockedMessage = 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
+      if (diag.reason === 'no-input') {
+        // Nessun report: nessuna mano da indicare al misuratore.
+        if (ops.isCurrent(op)) quickHoldKnown = false;
+        blockedMessage = 'Calibration has not started. <b>No readings arrived from the controller.</b> Check the USB cable and keep this tab in front, then try again.';
+        log('Quick calibration not started: no stick readings from the controller.');
+        return;
+      }
+      if (diag.reason === 'gaps') {
+        // Report a singhiozzo: la finestra ferma non arriva mai, ma nulla dice
+        // che ci sia una mano. Niente "Release both sticks" né "Stick held".
+        if (ops.isCurrent(op)) quickHoldKnown = false;
+        blockedMessage = 'Calibration has not started. <b>The controller’s readings kept pausing</b>, so the sticks could not be checked. '
+          + 'Connect the cable directly to the computer, without a hub, keep this tab in front, then try again.';
+        log('Quick calibration not started: stick readings kept pausing.');
+        return;
+      }
+      // Il modale dice "Release both sticks": il misuratore non deve dire il
+      // contrario. Con stick fermi e centrati (`settled`: l'arresto è un buco
+      // nei report) non c'è nessuna tenuta da mostrare.
+      if (ops.isCurrent(op)) quickHoldKnown = diag.reason !== 'settled';
+      // Fermo fuori raggio su uno stick che il test drift ha visto centrato:
+      // quasi certamente un pollice, e lo si dice con il dato.
+      const heldStill = diag.reason === 'off-center' && driftRestedInside(lastDriftResult, diag.side);
+      blockedMessage = heldStill
+        ? `Calibration has not started: the ${diag.side === 'right' ? 'right' : 'left'} stick was held still at ${esc(formatOffset(diag.offset))} from center, but the last drift test found it centered. <b>Release both sticks</b>, then try again.`
+        : diag.reason === 'moving'
+        ? 'Calibration has not started: the sticks didn’t stay still and centered. <b>Release both sticks</b> and leave the controller flat on a table, then try again. If nobody is touching them and this repeats, use guided calibration.'
+        : 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
       log('Quick calibration not started: centered, stable stick readings are required.');
       return;
     }
@@ -2511,18 +2599,83 @@ function wizardHideLive() {
 const wizardCurrent = w => wizard === w && !w.interrupted && !!w.controller && ds5 === w.controller;
 const wizardGone = () => Object.assign(new Error('Controller disconnected'), { gone: true });
 
+// Uscita sicura a sessione aperta (fasi 'ref' e 'corner'): dopo un timeout
+// del gate nello stesso passo, o dopo 2 angoli mancati. Telemetria v2 (27
+// set–12 ott): 81 sessioni Guided su 320 finivano `disconnected`, tutte con la
+// sessione aperta, 33 al passo 0 e 39 al primo angolo, con fino a 15 timeout:
+// fuori dai due angoli mancati non c'era nessuna uscita, solo staccare il cavo
+// o chiudere la pagina. Stop fa la stessa cosa (nessun calibEnd, blocco di
+// spegnimento) ma lo dice e offre il riavvio. Mai durante un'attesa (`running`).
+function wizardStopOffered(w) {
+  return !!w && (w.phase === 'ref' || w.phase === 'corner')
+    && (w.timeoutsAtStep >= 1 || w.cornerMissesAtStep >= 2);
+}
+function syncWizardStop(w) {
+  const btn = $('btn-wizard-cancel');
+  const show = wizardStopOffered(w);
+  if (show) btn.textContent = 'Stop and turn off controller';
+  btn.classList.toggle('hidden', !show);
+}
+
+const WIZARD_SIDE_INDEX = { left: 0, right: 1 };
+function wizardSticksPhrase(sides, values) {
+  const what = sides.length === 2 ? 'Both sticks' : `The ${sides[0]} stick`;
+  const nums = sides.map(side => Math.round(values[WIZARD_SIDE_INDEX[side]] * 100));
+  const amount = nums.length === 2 && nums[0] !== nums[1] ? `${nums[0]}% and ${nums[1]}%` : `${Math.max(...nums)}%`;
+  return { what, amount, verb: sides.length === 2 ? 'stay' : 'stays', settle: sides.length === 2 ? 'settle' : 'settles' };
+}
+
 // Timeout del gate: nessun campione. Il riferimento non si allarga da solo;
-// dopo `escapeAfter` timeout compare l'uscita esplicita.
-function wizardTimeout(w, why) {
+// dopo `escapeAfter` timeout compare l'uscita esplicita, se può servire.
+// `diagnosis` (wizard-gate.js, diagnoseRestTimeout) decide solo il testo.
+function wizardTimeout(w, diagnosis = null) {
   w.timeouts += 1;
+  w.timeoutsAtStep += 1;
   w.gateTimedOut = true;
-  const offerEscape = !w.escaped && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
+  w.lastWhy = diagnosis?.why ?? 'moving';
+  const refPhase = w.phase === 'ref';
+  const far = diagnosis?.why === 'far' ? diagnosis.far : [];
+  // Passo 0, stick fermo oltre il raggio di plausibilità del riferimento: il
+  // limite non si allarga mai (nemmeno con l'uscita), quindi né Continue né
+  // l'uscita possono riuscire finché resta lì. Se lo stesso stick era già oltre
+  // il 50% nella misura di partenza (a mani ferme, prima di calibBegin), è
+  // quasi certamente bloccato al bordo, non tenuto da un pollice.
+  w.stuck = refPhase && far.length > 0
+    && far.every(side => (w.before?.off?.[WIZARD_SIDE_INDEX[side]] ?? 0) >= WIZARD_DEFAULTS.refRadius * 100);
+  const escapeUseless = refPhase && far.length > 0;
+  const offerEscape = !w.escaped && !escapeUseless && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
   $('btn-wizard-escape').classList.toggle('hidden', !offerEscape);
+  syncWizardStop(w);
   const escapeHint = offerEscape
     ? '<br>If your stick never settles at the same point, use <b>My stick doesn’t rest still</b>.'
     : '';
-  $('wizard-msg').innerHTML = `${why} No sample was taken. <b>Let go of both sticks</b>, wait until they settle, `
-    + `then press <b>Continue</b>.${escapeHint}`;
+  const stopHint = '<br>If this keeps failing, <b>Stop and turn off controller</b> ends the calibration without committing it.';
+  let msg;
+  if (diagnosis?.why === 'no-data') {
+    msg = 'The controller stopped sending stick readings. No sample was taken. Check the USB cable, then press <b>Continue</b>.'
+      + stopHint;
+  } else if (refPhase && far.length) {
+    const s = wizardSticksPhrase(far, diagnosis.radius);
+    msg = w.stuck
+      ? `<b>${s.what} ${s.verb} about ${s.amount} from center with nobody touching ${far.length === 2 ? 'them' : 'it'}.</b> `
+        + 'Guided calibration needs a resting point within 50% of center, so pressing Continue again won’t help. '
+        + 'The stick is probably stuck near the edge. Choose <b>Stop and turn off controller</b>.'
+      : `<b>${s.what} ${s.verb} about ${s.amount} from center.</b> Guided calibration needs a resting point within 50% of center. `
+        + '<b>Let go of both sticks</b>, then press <b>Continue</b>. If nobody is touching them, pressing Continue again won’t help: '
+        + 'choose <b>Stop and turn off controller</b>.';
+  } else if (far.length && diagnosis.dist) {
+    const s = wizardSticksPhrase(far, diagnosis.dist);
+    msg = `<b>${s.what} ${s.settle} about ${s.amount} away from where ${far.length === 2 ? 'they' : 'it'} rested at the start.</b> `
+      + 'No sample was taken. <b>Let go of both sticks</b>, wait until they settle, then press <b>Continue</b>.';
+    msg += offerEscape ? escapeHint
+      : w.escaped ? '<br>That is outside even the looser check. If nobody is touching the sticks, choose <b>Stop and turn off controller</b>.'
+        : stopHint;
+  } else {
+    msg = `${refPhase ? 'The sticks did not come to rest.' : 'The sticks are still moving or being touched.'} No sample was taken. `
+      + '<b>Let go of both sticks</b>, wait until they settle, then press <b>Continue</b>.'
+      + (offerEscape ? escapeHint : stopHint);
+  }
+  $('wizard-msg').innerHTML = msg;
 }
 
 // Punto di riposo di riferimento, preso a sessione aperta (stesso frame dei
@@ -2532,15 +2685,18 @@ async function wizardCaptureRef(w, ensure, isCancelled) {
   const btn = $('btn-wizard-next');
   btn.textContent = 'Waiting…';
   $('wizard-msg').innerHTML = 'Keep your hands off the sticks: measuring where they rest…';
-  const ref = await captureRestReference(stickSource, pageClock, { escaped: w.escaped, isCancelled });
+  const { center: ref, diagnosis } = await captureRestReferenceDetailed(stickSource, pageClock, { escaped: w.escaped, isCancelled });
   ensure();
   if (!ref) {
     btn.textContent = 'Continue';
-    wizardTimeout(w, 'The sticks did not come to rest.');
+    wizardTimeout(w, diagnosis);
     return;
   }
   w.ref = ref;
   w.gateTimedOut = false;
+  w.stuck = false;
+  w.timeoutsAtStep = 0;
+  w.cornerMissesAtStep = 0;
   w.phase = 'corner';
   w.corner = 0;
   w.step = 1;
@@ -2578,12 +2734,9 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
       const exit = w.cornerMissesAtStep >= 2
         ? ' If this corner cannot be reached, choose <b>Stop and turn off controller</b>. No partial sample will be committed.' : '';
       wizardShowCorner(i, `<b>${what}</b>${hint} No sample was taken.${exit}`);
-      if (w.cornerMissesAtStep >= 2) {
-        $('btn-wizard-cancel').textContent = 'Stop and turn off controller';
-        $('btn-wizard-cancel').classList.remove('hidden');
-      }
+      syncWizardStop(w);
     } else {
-      wizardTimeout(w, 'The sticks are not resting where they started.');
+      wizardTimeout(w, gate.diagnosis ?? null);
     }
     return;
   }
@@ -2591,6 +2744,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   ensure();
   w.samples += 1;
   w.cornerMissesAtStep = 0;
+  w.timeoutsAtStep = 0;
   $('btn-wizard-cancel').classList.add('hidden');
   w.gateTimedOut = false;
   $('btn-wizard-escape').classList.add('hidden');
@@ -2778,8 +2932,11 @@ async function wizardNext() {
       w.phase = 'ref';
       await wizardCaptureRef(w, ensure, isCancelled);
     } else if (w.phase === 'ref') {
+      // Stop non è cliccabile durante l'attesa: ricompare se fallisce di nuovo.
+      $('btn-wizard-cancel').classList.add('hidden');
       await wizardCaptureRef(w, ensure, isCancelled);
     } else if (w.phase === 'corner') {
+      $('btn-wizard-cancel').classList.add('hidden');
       await wizardSampleCorner(w, ensure, isCancelled);
     } else {
       closeModal('modal-wizard');
@@ -2865,17 +3022,23 @@ function wizardEscape() {
   else $('wizard-msg').innerHTML = note;
 }
 
-// Un angolo irraggiungibile non deve intrappolare l'utente. Non mandiamo
-// calibEnd con campioni mancanti: lasciamo la sessione aperta, blocchiamo
-// altri comandi e chiediamo uno spegnimento vero del controller.
-function stopWizardAtCorner() {
+// Un passo che non riesce (angolo irraggiungibile, stick che non torna al
+// riposo, riferimento fuori portata) non deve intrappolare l'utente. Non
+// mandiamo calibEnd con campioni mancanti: lasciamo la sessione aperta,
+// blocchiamo altri comandi e chiediamo uno spegnimento vero del controller,
+// con il riavvio a un click nel pannello dell'esito.
+function stopWizard() {
   const w = wizard;
-  if (!w || w.phase !== 'corner' || w.running || w.cornerMissesAtStep < 2) return;
-  if (!confirm('Stop this calibration and turn the controller off (hold PS for 10 s)? The partial session cannot be saved or continued after stopping. No incomplete calibration will be committed.')) return;
+  if (!w || w.running || !wizardStopOffered(w)) return;
+  if (!confirm('Stop this calibration? Nothing from it will be committed, but the controller stays mid-calibration until it is turned off: restart it (or hold PS for 10 s) before calibrating or saving again.')) return;
+  const why = w.cornerMissesAtStep >= 2 && w.timeoutsAtStep === 0 ? 'corner'
+    : w.stuck ? 'stuck' : w.lastWhy === 'far' ? 'far' : 'rest';
   w.interrupted = true;
   w.tracker = null;
   w.reported = true;
   markPowerCycle(w.controller, w.key);
+  // v2: stesso evento di prima (`error`, sessione aperta); il contratto non
+  // ha un esito "stopped" e cambiarlo richiede la copia nel servizio.
   emitCalibV2(ctx => buildGuidedEvent(ctx, {
     outcome: 'error', committed: !!w.committed, needsPowerCycle: true,
     step: w.step, before: w.before, after: null, timeouts: w.timeouts,
@@ -2883,12 +3046,12 @@ function stopWizardAtCorner() {
   }), { device: w.device, controller: w.controller, epoch: w.op?.epoch });
   recordEvent('wizard', { done: false, step: w.step, before: w.before ?? null,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses,
-    escaped: w.escaped, aborted: 'corner-unreachable' });
+    escaped: w.escaped, aborted: why === 'corner' ? 'corner-unreachable' : 'stopped', stopWhy: why });
   ops.endOp(w.op);
   wizard = null;
   closeModal('modal-wizard');
-  showOutcome(guidedOutcomeView({ before: w.before, error: new Error('The requested corner could not be reached'),
-    committed: !!w.committed, leftOpen: true }, { nvStatus: lastNvStatus }));
+  showOutcome(guidedOutcomeView({ before: w.before, committed: !!w.committed, leftOpen: true,
+    stopped: { why, step: w.step } }, { nvStatus: lastNvStatus }));
 }
 
 function openWizard() {
@@ -2897,7 +3060,8 @@ function openWizard() {
   wizard = {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
-    samples: 0, timeouts: 0, cornerMisses: 0, cornerMissesAtStep: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
+    samples: 0, timeouts: 0, timeoutsAtStep: 0, cornerMisses: 0, cornerMissesAtStep: 0, lastWhy: null, stuck: false,
+    escaped: false, committed: false, sessionOpen: false, guard: null,
     running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
@@ -2906,7 +3070,7 @@ function openWizard() {
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
   $('btn-wizard-escape').classList.add('hidden');
-  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started, keep the page open and the controller connected. If the same corner cannot be reached twice, Stop will ask you to turn the controller off without committing a partial calibration.';
+  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started, keep the page open and the controller connected. If a step keeps failing, <b>Stop</b> ends it without committing a partial calibration; the controller then needs a restart.';
   $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
   $('btn-wizard-cancel').textContent = 'Cancel';
@@ -2922,6 +3086,9 @@ let rangeClosing = null; // rangeEnd in volo: pagehide/stacco deve emettere subi
 // Verifica dopo un rangeEnd riuscito: { tracker, result }. Nessun comando HID.
 let rangeCheck = null;
 let rangeOp = null; // token di ops: la sessione range occupa il controller fino a finishRange
+// Avvii range rifiutati per controller (chiave salata, null se illeggibile) in
+// questa pagina: dal secondo il pannello dice che riavviare non è bastato.
+const rangeStartRefusals = new Map();
 const RANGE_MSG_HTML = $('range-msg').innerHTML;
 
 // Scrittura in memoria disattivata dopo un range chiuso incompleto ("Finish
@@ -3186,7 +3353,24 @@ async function startRange() {
   } catch (error) {
     ops.endOp(op);
     if (error.maybeReceived || opening.reported) reportAbandonedRange(opening);
-    else {
+    if (error.maybeReceived) {
+      // Begin arrivato al firmware e non accettato (o senza risposta): come un
+      // calibBegin rifiutato, un nuovo tentativo senza riavvio verrebbe
+      // rifiutato di nuovo (telemetria v2: fino a 4 avvii falliti di fila
+      // nella stessa visita). Il blocco di power-cycle ferma Range, Quick,
+      // Guided e Write di QUESTO controller finché il riavvio non è provato.
+      const refusals = (rangeStartRefusals.get(key) ?? 0) + 1;
+      rangeStartRefusals.set(key, refusals);
+      markPowerCycle(controller, key);
+      if (rangeOpening === opening) rangeOpening = null;
+      if (ds5 === controller) {
+        closeModal('modal-range');
+        log(`Range start failed: ${error.message}`);
+        showOutcome(rangeStartFailedView({ error, again: refusals > 1 }));
+      }
+      return;
+    }
+    if (!opening.reported) {
       // Se il comando non è partito, ripristiniamo l'eventuale blocco
       // precedente; un nuovo tentativo fallito non sana un vecchio range.
       if (previousLock) rangeWriteLocks.set(key, previousLock);
@@ -3198,9 +3382,7 @@ async function startRange() {
     if (rangeOpening === opening) rangeOpening = null;
     if (ds5 === controller) {
       closeModal('modal-range');
-      toast(error.maybeReceived ? 'Range start was not confirmed. Write is off until a complete Range calibration.'
-        + ' The session may still be open: turn the controller off (hold PS for 10 s) before trying again.'
-        : `Failed to start range calibration: ${error.message}`, 5000);
+      toast(`Failed to start range calibration: ${error.message}`, 5000);
     }
     return;
   } finally {
@@ -3299,7 +3481,12 @@ async function finishRange() {
   let finishAnyway = false;
   if (!st.complete) {
     const what = `Still needed: ${st.missing.join(', ')}.`;
-    const go = confirm(`The range calibration is incomplete. ${what} Part of the stick travel may become unreachable. `
+    // Con bordo e lati già raggiunti la corsa non diventa irraggiungibile: manca
+    // solo rotazione, e il testo dice che bastano pochi secondi per chiudere bene.
+    const why = st.rotationOnly
+      ? 'Only rotation is missing: a few more seconds of turning would finish it properly. '
+      : 'Part of the stick travel may become unreachable. ';
+    const go = confirm(`The range calibration is incomplete. ${what} ${why}`
       + 'If you finish now, writing to memory stays disabled until you repeat the range calibration. Finish anyway?');
     if (!go || rangeSession !== session) return;
     finishAnyway = true;
@@ -3595,7 +3782,11 @@ function closeModal(id) {
     modalReturnFocus.delete(el);
     const another = activeModalEl();
     watchModalFocus(another);
-    if (!another) previous?.focus?.({ preventScroll: true });
+    // Il bottone che l'ha aperto può essere sparito nel frattempo (Write
+    // riuscito: passo di salvataggio e invito nel pannello si nascondono).
+    // Allora il fuoco va alla scheda del test drift, non al body.
+    const gone = previous?.checkVisibility?.() === false && !$('view-device').classList.contains('hidden');
+    if (!another) (gone ? $('drift-card') : previous)?.focus?.({ preventScroll: true });
     // Un commit arrivato a modale aperto: il passo di salvataggio si mostra ora.
     if (!another) revealSaveStep();
   }, reduceMotion.matches ? 0 : MODAL_CLOSE_MS));
@@ -3744,7 +3935,7 @@ $('btn-quick-go').addEventListener('click', quickCalibrate);
 
 $('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
 $('btn-wizard-cancel').addEventListener('click', () => {
-  if (wizard?.phase === 'corner') stopWizardAtCorner();
+  if (wizard?.phase === 'corner' || wizard?.phase === 'ref') stopWizard();
   else closeModal('modal-wizard');
 });
 $('btn-wizard-next').addEventListener('click', wizardNext);
@@ -3873,8 +4064,12 @@ window.addEventListener('pagehide', () => {
   closeSaveChapter('left', { now: true });
 });
 
+// Avviso solo se c'è qualcosa da perdere che si potrebbe salvare: una
+// calibrazione in corso, o una non salvata con Write libero. Con Write spento
+// o protetto (esito da controllare) l'avviso spingerebbe a salvarla; i blocchi
+// sopravvivono comunque al ricaricamento.
 window.addEventListener('beforeunload', e => {
-  if (unsaved || ops.busy) { e.preventDefault(); e.returnValue = ''; }
+  if (ops.busy || (unsaved && currentWriteLock().mode === 'allowed')) { e.preventDefault(); e.returnValue = ''; }
 });
 
 /* ============================== consenso telemetria ============================== */

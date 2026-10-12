@@ -5,7 +5,7 @@ import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../js/calib/quick-polic
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
   FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
-  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, render,
+  guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView, render,
   revertAdvice, stickRows, stuckAxes, writeLockFor,
 } from '../js/ui/outcome.js';
 import { replayOutcomes } from '../ops/sim/replay-telemetry.mjs';
@@ -388,6 +388,23 @@ test('the power-cycle reminder offers Restart and an explicit power-off confirma
   assert.match(textOf(powerCycleReminderView({ reload: true })), /reloaded/);
 });
 
+test('a Range start the controller did not accept asks for a restart, never a retry or a reconnect for Write', () => {
+  const refused = Object.assign(new Error('Failed to start range calibration (0x83010203)'), { maybeReceived: true });
+  const view = rangeStartFailedView({ error: refused });
+  assert.deepEqual(view.actions.map(a => a.id), ['restart', 'powered-off']);
+  assert.equal(view.tone, 'bad');
+  assert.match(textOf(view), /Restart the controller first/);
+  assert.match(textOf(view), /Write stays off until a complete Range calibration/);
+  assert.doesNotMatch(textOf(view), /0x8301|unplug/i, 'raw HID words stay in the log; no unplug advice');
+  assert.equal(writeLockFor({ range: view.range, needsPowerCycle: true }).mode, 'disabled');
+  assert.match(textOf(rangeStartFailedView({ error: refused, again: true })), /happened again after a restart/);
+  // Un timeout: la vista del controller avvelenato (Restart lì non parte).
+  const timeout = Object.assign(new Error('Controller not responding'), { timeout: true, maybeReceived: true });
+  const poisoned = rangeStartFailedView({ error: timeout });
+  assert.match(poisoned.title, /stopped responding/);
+  assert.equal(poisoned.actions.some(a => a.id === 'restart'), false);
+});
+
 test('pinned after calibration disables Write and routes to Range, then Guided', () => {
   const after = summary([100.1, 0.555], { xy: [[99.6, 8], [0.39, 0.39]] });
   assert.equal(pinnedFromSummary(after), true);
@@ -600,7 +617,8 @@ test('an incomplete range disables Write until a complete range runs', async () 
   const { h, dev } = await connectedApp();
   await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
   // Da WS7 un range a movimento zero non si chiude mai: un giro solo, in un
-  // verso, basta per "Finish anyway" (manca il cambio di verso) dopo 15 s.
+  // verso, basta per "Finish anyway" (manca il cambio di verso); con bordo e
+  // lati completi l'uscita compare dopo rotationUnlockMs (60 s), non 15 s.
   const from = h.clock.now() + 10;
   for (const stick of [0, 1]) {
     dev.touches.push({
@@ -608,7 +626,7 @@ test('an incomplete range disables Write until a complete range runs', async () 
       at: (t, ax) => 127.5 * (ax === 0 ? Math.cos(2 * Math.PI * (t - from) / 800) : Math.sin(2 * Math.PI * (t - from) / 800)),
     });
   }
-  await h.advance(16000);
+  await h.advance(61_000);
   assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
   h.window.confirm = () => true;
   await h.run(h.click('btn-range-done'));
@@ -779,4 +797,27 @@ test('a Quick result names the axis that stays off-center pass after pass', () =
   const v = quickOutcomeView({ outcome: 'residual-deterministic', worst: 5.11, beforeWorst: 4.33,
     session: { before: null, after: null, passXY: ly } });
   assert.match(textOf(v), /the left stick’s Y axis stays about 6\.5 steps above center/);
+});
+
+// Stop del wizard a sessione aperta: non è un errore del controller e non è
+// un successo; Write resta bloccato, le uscite sono Restart e "already off".
+test('a stopped Guided run reads as stopped, offers the restart exits and never enables Write', () => {
+  for (const why of ['corner', 'stuck', 'far', 'rest']) {
+    for (const committed of [false, true]) {
+      const view = guidedOutcomeView({ before: summary([70, 0.555]), committed, leftOpen: true, stopped: { why, step: 0 } });
+      const text = textOf(view);
+      assert.equal(view.title, 'Guided calibration stopped');
+      assert.doesNotMatch(text, /The controller reported/);
+      assert.doesNotMatch(text, SUCCESS);
+      assert.match(text, /hold PS for 10 s/);
+      assert.match(text, committed ? /already changed the calibration/ : /Nothing from this run was committed/);
+      assert.deepEqual(view.actions.map(a => a.id), ['restart', 'powered-off']);
+      // il blocco vero è quello di spegnimento (la pagina lo passa sempre);
+      // anche da solo l'esito non lascia Write libero
+      assert.notEqual(writeLockFor({ center: view.center }).mode, 'allowed');
+      assert.equal(writeLockFor({ center: view.center, needsPowerCycle: true }).mode, 'disabled');
+    }
+  }
+  assert.match(textOf(guidedOutcomeView({ stopped: { why: 'stuck' }, leftOpen: true, committed: false })),
+    /stuck near the edge[\s\S]*haven’t confirmed/);
 });

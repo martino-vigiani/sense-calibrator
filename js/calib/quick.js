@@ -19,10 +19,12 @@ import {
   QUICK_STABLE_SPREAD,
   QUICK_STABLE_TIMEOUT,
   STICK_LSB,
+  reportTimeOf,
   measureOffset as measureOffsetFrom,
   waitForStable as waitForStableFrom,
 } from './sampling.js';
 import { POLICY_DEFAULTS, classifyOutcome, decideAfterPass, decideBeforeStart } from './quick-policy.js';
+import { createQuickPreflightProbe } from '../quick-center-guard.js';
 
 export const QUICK_MAX_PASSES = 4;
 export const QUICK_SAMPLES_PER_PASS = 12;
@@ -74,7 +76,21 @@ export const QUICK_DEFAULTS = Object.freeze({
   // Attesa iniziale col gate largo del test drift: serve solo a lasciar
   // staccare la mano, non a giudicare il jitter proprio dello stick.
   preflightSpread: DRIFT_MOVE_SPREAD,
-  preflightTimeoutMs: 3000,
+  // Tempo concesso alla prima tenuta: lo stesso della tenuta prima di ogni
+  // passata (holdTimeoutMs), che controlla la stessa cosa. Era 3 s: nella
+  // telemetria v2 (27/9–12/10) 241 preflight su 250 scadevano proprio lì, e in
+  // 64 casi su stick che nella stessa visita riposavano centrati il tentativo
+  // successivo falliva di nuovo. Cambia solo quanto si aspetta: raggio, spread,
+  // 300 ms di report continui e tutto ciò che segue restano identici, e nessun
+  // comando parte prima che la tenuta passi.
+  preflightTimeoutMs: 8000,
+  // Stick fermi ma fuori dal raggio per tutto questo tempo: si smette di
+  // aspettare (è il vecchio timeout, quindi nessuno aspetta più di prima) e la
+  // pagina instrada a Guided: uno stick che riposa lì non cambierà. Ma fermo
+  // fuori raggio può anche essere un pollice: quando l'ultimo test drift ha
+  // visto entrambi gli stick riposare dentro il raggio, la pagina passa
+  // `Infinity` e si aspetta tutto preflightTimeoutMs. Solo il tempo d'attesa.
+  preflightOffCenterMs: 3000,
   baselineMs: 1000,
   verifyMs: 1500,
   // Gate adattivo: vedi il commento nel ciclo.
@@ -135,7 +151,9 @@ export const QUICK_DEFAULTS = Object.freeze({
 
 // Esiti:
 //   'preflight'        nessun comando inviato (preflight, baseline o tenuta
-//                      prima della passata 1 falliti)
+//                      prima della passata 1 falliti); il ritorno porta
+//                      `preflight: { stage, reason, side?, offset?, result? }`
+//                      (createQuickPreflightProbe), la sessione la sua sintesi
 //   'already-centered' entrambi gli stick già sotto okMax: nessun comando
 //                      (`force: true` lo scavalca)
 //   'moved'            tenuta fallita prima di una passata successiva: la RAM
@@ -161,7 +179,9 @@ export const QUICK_DEFAULTS = Object.freeze({
 //               runQuick({ …, force: true, params: { maxPasses: 1 } }):
 //               passa comunque dalla tenuta entro il 15%.
 //   onProgress  riceve { phase, pass?, worst?, noise? } e { bar } per la UI.
-//               Fasi: preflight, noisy, held, pass, unstable, stalled,
+//               Fasi: preflight, off-center ({ side, offset }: stick fermi
+//               fuori raggio durante la prima tenuta), settled (prima tenuta
+//               passata dopo un invito), noisy, held, pass, unstable, stalled,
 //               resumed, verify, next, committed (la RAM è appena cambiata:
 //               un calibEnd riuscito o una riparazione di calibBegin)
 //   log         messaggi per il pannello log
@@ -261,9 +281,47 @@ export async function runQuick({
   const ensureCurrent = () => {
     if (!isCurrent()) throw Object.assign(new Error('Controller disconnected'), { disconnected: true });
   };
+  // Diagnosi della preflight, solo osservativa (createQuickPreflightProbe):
+  // alimentata dagli stessi input report, dice perché la tenuta non passa e,
+  // durante la prima attesa, aggiorna il messaggio. Non cambia nessun gate.
+  const probe = createQuickPreflightProbe({ spread: p.preflightSpread, holdMs: p.stableMs });
+  const probeStart = now();
+  let preflightStage = 'settle';
+  let preflightPrompt = null;
+  let stopProbe = source?.subscribe ? source.subscribe(() => {
+    const t = reportTimeOf(source);
+    probe.push(source.sticks, t);
+    if (preflightStage !== 'settle' || t - probeStart < p.holdPromptMs) return;
+    const { reason, side, offset } = probe.status(t);
+    const key = reason === 'off-center' ? `${reason}:${side}` : reason;
+    if (key === preflightPrompt) return;
+    preflightPrompt = key;
+    if (reason === 'moving') onProgress({ phase: 'held', pass: 1 });
+    else if (reason === 'off-center') onProgress({ phase: 'off-center', side, offset });
+  }) : null;
+  const endProbe = () => {
+    stopProbe?.();
+    stopProbe = null;
+  };
+  // Ora corrente per la diagnosi del silenzio: reportTime è il tempo
+  // dell'ULTIMO report e non avanza quando i report si fermano, quindi con
+  // quello un controller muto dopo qualche report non risultava mai muto.
+  // source.now() è lo stesso orologio di event.timeStamp (app.js: stickSource);
+  // il massimo copre un timeStamp di pochi ms avanti. Solo testo: le decisioni
+  // (attesa, uscita anticipata) restano sul tempo dei report.
+  const probeNow = () => {
+    const t = reportTimeOf(source);
+    const n = source?.now?.();
+    if (!Number.isFinite(n)) return t;
+    return Number.isFinite(t) ? Math.max(n, t) : n;
+  };
   const blocked = () => {
+    const diag = stopProbe ? probe.status(probeNow()) : { reason: 'unknown' };
+    endProbe();
     session.aborted = 'preflight';
-    return { session, outcome: 'preflight', committed: false };
+    session.preflight = { stage: preflightStage, reason: diag.reason };
+    if (diag.reason === 'off-center') Object.assign(session.preflight, { side: diag.side, offset: +diag.offset.toFixed(2) });
+    return { session, outcome: 'preflight', committed: false, preflight: { stage: preflightStage, ...diag } };
   };
   // Tenuta prima di una passata. Il messaggio "lascia gli stick" parte da un
   // timer solo come UI: la decisione resta sugli input report.
@@ -283,10 +341,17 @@ export async function runQuick({
   };
   try {
     onProgress({ phase: 'preflight' });
-    const settled = await waitForStable({ spread: p.preflightSpread, holdMs: p.stableMs, timeoutMs: p.preflightTimeoutMs, requireCentered: true });
+    const settled = await waitForStable({
+      spread: p.preflightSpread, holdMs: p.stableMs, timeoutMs: p.preflightTimeoutMs, requireCentered: true,
+      isCancelled: () => stopProbe !== null && probe.stillOffMs(reportTimeOf(source)) >= p.preflightOffCenterMs,
+    });
     if (!settled || !isCurrent()) return blocked();
+    // Dopo un invito a lasciare gli stick, la UI torna a dire cosa succede.
+    if (preflightPrompt !== null) onProgress({ phase: 'settled' });
+    preflightStage = 'baseline';
     const before = await measureOffset(p.baselineMs, { requireCentered: true });
     if (!before || !isCurrent()) return blocked();
+    preflightStage = 'hold';
     session.before = summarizeResult(before);
     session.verification.baselineNoise = verificationPair(before, 'noise');
     session.verification.baselineRawNoise = verificationValue(before.rawNoise);
@@ -363,6 +428,7 @@ export async function runQuick({
       // Passata 1: nessun comando è ancora partito, quindi resta l'esito
       // 'preflight' di sempre anche se il controller è sparito nel frattempo.
       if (pass === 1 && (!held || !isCurrent())) return blocked();
+      endProbe();
       ensureCurrent();
       if (!held) {
         session.aborted = 'moved';
@@ -635,5 +701,8 @@ export async function runQuick({
     session.aborted = 'error';
     session.err = String(error?.message || error).slice(0, 120);
     return { session, outcome: 'error', error, committed, ...extra };
+  } finally {
+    // Nessun listener resta appeso alla sorgente, qualunque sia l'uscita.
+    endProbe();
   }
 }

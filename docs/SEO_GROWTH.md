@@ -1,6 +1,6 @@
 # SEO and GitHub growth
 
-Updated: 2026-09-16
+Updated: 2026-10-12
 Site: https://martino-vigiani.github.io/sense-calibrator/
 Repository: https://github.com/martino-vigiani/sense-calibrator
 
@@ -41,6 +41,43 @@ Search Console for 2026-08-17 through 2026-09-13 reports 95 clicks, 1,122 impres
 
 Google's last recorded crawl was 2026-08-07, before the 2026-09-12 release. These numbers therefore validate the stick-drift page, not the experimental sensitivity copy. Preserve that search intent until a fresh crawl and enough post-crawl data exist.
 
+## Search Console on 2026-10-12
+
+Period 2026-09-13 to 2026-10-11, compared with 2026-08-16 to 2026-09-12.
+
+| Signal | Now | Before |
+|---|---:|---:|
+| Clicks | 166 | 96 |
+| Impressions | 1,059 | 1,106 |
+| CTR | 15.7% | 8.7% |
+| Average position | 4.9 | 21.5 |
+
+The gain is mostly brand demand. The query `sense calibrator` brings 97 of the 166 clicks at position 2.1. Generic queries barely appear yet:
+
+| Query | Impressions | Position |
+|---|---:|---:|
+| `dualsense calibration` | 2 | 9 |
+| `ps5 controller stick drift fix website` | 2 | 40 |
+| `controller recenter test` | not recorded | 13.5 |
+| `dualsense calibration gui` | not recorded | 65 |
+| `dualshock tools github io ps5` | 25 | 8.6 |
+| `dualshock-tools github io ps5` | 8 | not recorded |
+| `ps5 stick drift test` | almost none | not recorded |
+
+Pages: the homepage has 164 clicks from 1,049 impressions. `guides/ps5-controller-stick-drift-test/` has 1 click from 35 impressions at position 9.5, `guides/calibrate-dualsense-controller/` 0 from 8, `guides/ps5-stick-drift-fix/` no data. All guides were indexed on 2026-10-04; the sitemap submitted that day had not been fetched yet.
+
+Desktop brings 86% of clicks. Mobile CTR is 7.9%, which fits a tool that needs desktop Chrome or Edge. Top countries: United States, France, Iran, United Kingdom, Germany, Italy.
+
+What changed on 2026-10-12, and why:
+
+- The guide titles, descriptions and headings now match the generic intent: "PS5 controller stick drift test online" and "DualSense calibration online".
+- The two guides carry a short visible FAQ. Its `FAQPage` data repeats the visible text exactly. Google shows FAQ rich results only for a few authoritative sites, so the value is the answers themselves, not a snippet.
+- Searches for dualshock-tools reach this site at position 8.6. Instead of competing for that brand, `guides/sense-calibrator-vs-dualshock-tools/` explains honestly when to use each tool and credits the shared protocol.
+- Every guide links to every other guide and the homepage lists all four.
+- Phone visitors get **Send link to my computer** and the typed address, so the visit can continue on a desktop.
+
+Next check: the first full 28 days after Google fetches the new sitemap. Compare non-brand clicks (excluding `sense calibrator`) and the impressions of the four guide URLs, not total clicks.
+
 ## Search queries to watch
 
 | Query group | What the visitor wants |
@@ -48,6 +85,7 @@ Google's last recorded crawl was 2026-08-07, before the 2026-09-12 release. Thes
 | `ps5 stick drift test`, `dualsense drift test online` | Check whether a stick moves at rest |
 | `dualsense calibration online`, `ps5 controller calibration browser` | Recalibrate a standard DualSense |
 | `can calibration fix dualsense drift`, `calibration vs repair` | Decide between calibration and repair |
+| `dualshock tools github io ps5`, `dualshock-tools vs` | Choose between the two browser tools; answer with the comparison guide, never by imitating their brand |
 | `sense calibrator` | Return to the product |
 
 Do not target sensitivity, polling-rate or latency queries while those tools remain preview-only. Gameplay Lab measures USB report timing and browser frame pacing, not complete input latency.
@@ -83,7 +121,7 @@ The project MIT license belongs in `LICENSE`. The original dualshock-tools licen
 
 1. Select `https://martino-vigiani.github.io/sense-calibrator/`.
 2. Confirm the deployed page before requesting a crawl.
-3. Submit `https://martino-vigiani.github.io/sense-calibrator/sitemap.xml` after deployment. The submission from 2026-07-30 was still pending on 2026-09-16.
+3. Submit `https://martino-vigiani.github.io/sense-calibrator/sitemap.xml` after deployment. The submission from 2026-07-30 was still pending on 2026-09-16, and the one from 2026-10-04 had not been fetched on 2026-10-12.
 4. Inspect the canonical homepage and request indexing once.
 5. Compare the first complete 28-day period after the crawl with the preceding period.
 6. Export queries, pages, devices and countries.
@@ -133,7 +171,7 @@ The strongest long term feature is a result card that users can save and share. 
 
 | Project | What to learn |
 |---|---|
-| [dualshock-tools](https://dualshock-tools.github.io/) | Broad support and strong community trust. It had 737 stars and 257 forks on 2026-09-12. Keep the warning that calibration cannot repair wear. |
+| [dualshock-tools](https://dualshock-tools.github.io/) | Broad support and strong community trust. It had 737 stars and 257 forks on 2026-09-12 and 765 stars on 2026-10-12. Keep the warning that calibration cannot repair wear. The comparison guide states only what its README and site say; recheck them before editing that page. |
 | [ControllerTesting.com](https://controllertesting.com/test/controller/ps-calibration) | Many dedicated tools and pages. Stay narrower and clearer. |
 | [GPadTester](https://gpadtester.com/calibration) | Strong repair content. Publish replacement hardware instructions only after testing it. |
 | [DualSense Studio](https://dualsense.studio/) | Good playground and presets. Keep hardware calibration and repeatable comparison as the difference. |

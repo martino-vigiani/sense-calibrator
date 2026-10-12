@@ -173,6 +173,118 @@ test('N5: two misses at one Guided corner offer a safe stop without calibEnd', a
   assert.equal(h.eval('tabPowerCycleFlag()'), true);
 });
 
+// Telemetria v2 (27 set–12 ott): 81 Guided su 320 `disconnected`, 33 al passo
+// 0 con uno stick oltre il 37% (31 con un asse a fondo scala) e fino a 15
+// timeout. Il riferimento in sessione chiede entrambi gli stick entro il 50%:
+// Continue e l'uscita non potevano riuscire, e l'unica uscita era il cavo.
+const v2Guided = h => JSON.parse(JSON.stringify(h.window.__senseTelemetryV2()))
+  .map(item => item.event).filter(e => e.type === 'guided');
+
+test('a stick stuck near the edge at step 0: the page says why, never offers the useless escape, and Stop exits without calibEnd', async () => {
+  const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
+  await startWizard(h);
+  assert.equal(A.counts.begin, 1, 'the session was opened');
+  assert.equal(h.peek().wizard.phase, 'ref');
+  assert.match(h.$('wizard-msg').innerHTML, /The left stick stays about 7\d% from center with nobody touching it/);
+  assert.match(h.$('wizard-msg').innerHTML, /pressing Continue again won’t help/);
+  assert.equal(h.visible('btn-wizard-cancel'), true, 'Stop after the first failed wait');
+  assert.equal(h.$('btn-wizard-cancel').textContent, 'Stop and turn off controller');
+  assert.doesNotMatch(h.$('wizard-handsoff').textContent, /Stick held/, 'nobody is holding a stuck stick');
+  // altri tentativi: l'uscita non viene mai offerta (non tocca il limite del 50%)
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.peek().wizard.timeouts, 3);
+  assert.equal(h.visible('btn-wizard-escape'), false);
+  assert.equal(A.counts.sample, 0);
+  // Stop chiede conferma: annullata, il modale resta
+  h.confirmAnswer = false;
+  await h.click('btn-wizard-cancel');
+  assert.equal(h.visible('modal-wizard'), true, 'Stop needs a confirmation');
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-cancel');
+  await h.advance(400);
+  assert.equal(h.visible('modal-wizard'), false);
+  assert.deepEqual([A.counts.begin, A.counts.sample, A.counts.end], [1, 0, 0], 'never a calibEnd with missing samples');
+  assert.ok(A.cal, 'the session stays open in the firmware');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.peek().unsaved, false, 'nothing was committed');
+  assert.equal(h.eval('powerCycleApplies()'), true);
+  assert.equal(h.eval('tabPowerCycleFlag()'), true);
+  assert.equal(h.$('btn-flash').disabled, true);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.match(panel, /Guided calibration stopped/);
+  assert.match(panel, /stuck near the edge/);
+  assert.match(panel, /Nothing from this run was committed/);
+  assert.match(panel, /hold PS for 10 s/);
+  assert.match(panel, /data-outcome-action="restart"/);
+  assert.match(panel, /data-outcome-action="powered-off"/);
+  assert.doesNotMatch(panel, /The controller reported/, 'a user stop is not a controller error');
+  const ev = h.sessions().filter(s => s.kind === 'wizard').at(-1);
+  assert.deepEqual([ev.done, ev.aborted, ev.stopWhy, ev.step], [false, 'stopped', 'stuck', 0]);
+  const g = v2Guided(h).at(-1);
+  assert.deepEqual([g.outcome, g.needsPowerCycle, g.committed, g.step, g.timeouts], ['error', true, false, 0, 3]);
+  assert.equal(v2Guided(h).length, 1, 'one v2 event, no later `disconnected`');
+  // il riavvio a un click toglie il blocco, senza staccare il cavo prima
+  await h.run(h.eval("runOutcomeAction('restart')"));
+  A.powerCycle();
+  A.unplug(); h.hid.fire('disconnect', A);
+  await h.advance(1000);
+  assert.equal(v2Guided(h).length, 1, 'the restart does not report the stopped run again');
+  A.unplugged = false; A.open(); A.stopped = false; A.schedule();
+  h.hid.fire('connect', A);
+  await h.advance(5000);
+  assert.equal(h.eval('powerCycleApplies()'), false);
+});
+
+test('Stop is offered after one rest timeout at a corner, hidden during the next wait, and gone once the step succeeds', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  assert.equal(h.visible('btn-wizard-cancel'), false, 'no Stop on the happy path');
+  await moveToCorner(h, A, CORNERS[0]);
+  const thumb = touch(A, { stick: 1, t0: h.clock.now(), dur: 60_000, amp: [30, 0] });
+  await h.advance(100);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 0);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  assert.match(h.$('wizard-msg').innerHTML, /The right stick settles about 2\d% away from where it rested at the start/);
+  assert.match(h.$('wizard-msg').innerHTML, /Stop and turn off controller/);
+  // durante l'attesa Stop non c'è (un click verrebbe ignorato)
+  const wait = h.click('btn-wizard-next');
+  await h.advance(1000);
+  assert.equal(h.visible('btn-wizard-cancel'), false);
+  await h.run(wait);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  release(h, thumb);
+  await h.advance(200);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 1);
+  assert.equal(h.visible('btn-wizard-cancel'), false);
+  assert.equal(h.peek().wizard.timeoutsAtStep, 0);
+});
+
+test('after the escape, a stick still settling outside the looser check is told to Stop', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  await moveToCorner(h, A, CORNERS[0]);
+  // pollice (o stick che non torna) fermo a ~31% dal riposo: oltre i 24 LSB dell'uscita
+  touch(A, { stick: 0, t0: h.clock.now(), dur: 600_000, amp: [40, 0] });
+  await h.advance(100);
+  await h.run(h.click('btn-wizard-next'));
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-escape'), true);
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-escape');
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 0, 'never sampled, escape or not');
+  assert.match(h.$('wizard-msg').innerHTML, /outside even the looser check/);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  await h.click('btn-wizard-cancel');
+  assert.deepEqual([A.counts.sample, A.counts.end], [0, 0]);
+  assert.equal(h.eval('powerCycleApplies()'), true);
+  assert.equal(h.sessions().filter(s => s.kind === 'wizard').at(-1).stopWhy, 'far');
+});
+
 test('N2: an unstable final Guided measurement above 15% still disables Write', async () => {
   const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
   const command = A.command.bind(A);
@@ -681,8 +793,9 @@ async function finishAnywayThenUnplug({ serial = null, backSerial = serial, mode
     assert.equal(h.peek().ds5.device, dev);
   }
   await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  // Bordo completo, manca solo la rotazione: Finish anyway dopo 60 s.
   const end = rotate(h, dev, { turns: 1 });
-  await h.advance(end - h.clock.now() + 15_500);
+  await h.advance(end - h.clock.now() + 60_500);
   assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
   assert.equal(h.peek().rangeWriteLock, 'error', 'an open Range session is locked until rangeEnd confirms closure');
 
@@ -826,4 +939,143 @@ test('Guided on sticks within one step sends nothing and points to Quick', async
   assert.equal(A.counts.begin, 0, 'no calibBegin');
   assert.match(h.$('wizard-msg').innerHTML, /within one step of center: nothing was sent[\s\S]*Quick calibration/);
   assert.equal(h.$('btn-wizard-next').textContent, 'Calibrate anyway');
+});
+
+// ------------------------------------------------- range: avvio rifiutato
+// Telemetria v2 27/9–12/10: 9 range 'error' su 28 erano avvii falliti (durS 0,
+// nessun tracker), 7 ripetuti nella stessa visita subito dopo il primo rifiuto.
+// Ora il rifiuto mette il blocco di power-cycle e un pannello persistente con
+// Restart: nessun nuovo comando finché il riavvio non è provato.
+
+function refuseRangeBegin(dev) {
+  const command = dev.command.bind(dev);
+  dev.command = (id, buf) => {
+    command(id, buf);
+    if (dev.refuseRange && id === 0x82 && buf[2] === 2 && buf[0] === 1) dev.response = [0x83, 1, 2, 3];
+  };
+  dev.refuseRange = true;
+  return dev;
+}
+const v2Range = h => JSON.parse(JSON.stringify(h.window.__senseTelemetryV2()))
+  .map(item => item.event).filter(event => event.type === 'range');
+async function restartAndReplug(h, dev) {
+  await h.run(h.eval("runOutcomeAction('restart')"));
+  dev.unplug(); h.hid.fire('disconnect', dev);
+  await h.advance(1000);
+  dev.unplugged = false; dev.open(); dev.stopped = false; dev.schedule();
+  h.hid.fire('connect', dev);
+  await h.advance(5000);
+}
+
+test('a refused rangeBegin asks for a restart in the outcome panel and blocks an immediate retry', async () => {
+  const { h, A } = await setup();
+  refuseRangeBegin(A);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await h.advance(300);
+  assert.equal(A.counts.range, 1);
+  assert.equal(h.visible('modal-range'), false);
+  assert.equal(h.peek().busy, false);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.match(panel, /Range calibration didn’t start/);
+  assert.match(panel, /Restart the controller first/);
+  assert.match(panel, /data-outcome-action="restart"/);
+  assert.match(panel, /data-outcome-action="powered-off"/);
+  assert.equal(h.$('btn-flash').disabled, true);
+  // Un nuovo tentativo subito non invia nulla: né Range né Quick né Guided.
+  await h.run(h.click('btn-range'));
+  assert.equal(h.visible('modal-range'), false);
+  await h.click('btn-quick');
+  await h.click('btn-wizard');
+  await h.advance(2000);
+  assert.equal(A.counts.range, 1);
+  assert.equal(A.counts.begin, 0);
+  assert.ok(h.toasts().some(t => /^Restart the controller/.test(t)));
+  // Un solo evento v2: il comando è partito, non è un range completato.
+  const events = v2Range(h);
+  assert.equal(events.length, 1);
+  assert.deepEqual([events[0].outcome, events[0].committed, events[0].durS, events[0].completion],
+    ['error', false, 0, null]);
+});
+
+test('after a restart Range runs again; a second refusal says the restart did not help', async () => {
+  const { h, A } = await setup();
+  refuseRangeBegin(A);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await restartAndReplug(h, A);
+  // Il riavvio è provato: Range riparte, il firmware rifiuta ancora.
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await h.advance(300);
+  assert.equal(A.counts.range, 2);
+  assert.match(h.$('calib-outcome').innerHTML, /happened again after a restart/);
+  assert.equal(v2Range(h).length, 2);
+  // Un firmware che ora accetta: la sessione si apre normalmente.
+  A.refuseRange = false;
+  await restartAndReplug(h, A);
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  assert.equal(A.counts.range, 3);
+  assert.ok(h.peek().rangeSession, 'the range session is open');
+  assert.equal(h.visible('btn-range-done'), true);
+});
+
+test('a rangeBegin with no reply poisons the connection and needs a restart after reconnect', async () => {
+  const { h, A } = await setup();
+  const send = A.sendFeatureReport.bind(A);
+  A.sendFeatureReport = (id, buf) => (id === 0x82 && buf[2] === 2 && buf[0] === 1
+    ? (A.counts.range += 1, new Promise(() => {})) : send(id, buf));
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await h.advance(2000);
+  assert.equal(h.peek().ds5.poisoned !== null, true);
+  assert.match(h.$('calib-outcome').innerHTML, /stopped responding/);
+  assert.equal(v2Range(h).length, 1);
+  A.sendFeatureReport = send;
+  A.unplug(); h.hid.fire('disconnect', A);
+  await h.advance(1000);
+  A.unplugged = false; A.open(); A.stopped = false; A.schedule();
+  h.hid.fire('connect', A);
+  await h.advance(5000);
+  assert.match(h.$('calib-outcome').innerHTML, /Restart the controller before calibrating/);
+  await h.run(h.click('btn-range'));
+  assert.equal(h.visible('modal-range'), false, 'reconnecting is not a restart');
+  assert.equal(A.counts.range, 1);
+});
+
+// ----------------------------------------- range: manca solo la rotazione
+// Telemetria v2: 31 incompleti su 39 avevano bordo e lati completi e
+// mancavano solo giri o verso opposto (spesso lo stick destro a ~1 giro),
+// chiusi con "Finish anyway" appena compariva a 15 s. Ora l'uscita arriva a
+// 60 s, il suggerimento dice quanto manca per stick e Done resta com'era.
+
+test('only rotation missing: no Finish anyway at 15 s, a per-stick instruction, then the confirmed exit at 60 s', async () => {
+  const { h, A } = await setup();
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  const endLeft = rotate(h, A, { turns: 2.2, sticks: [0] });
+  const endBack = rotate(h, A, { turns: 1.2, dir: -1, sticks: [0], from: endLeft });
+  const endRight = rotate(h, A, { turns: 1.2, sticks: [1], from: endBack });
+  await h.advance(endRight - h.clock.now() + 1500);
+  await h.advance(Math.max(0, 20_000 - (h.clock.now() - h.peek().rangeSession.startTs)));
+  const st = h.eval('rangeStatus(rangeSession.tracker, performance.now() - rangeSession.startTs)');
+  assert.equal(st.left.complete, true);
+  assert.equal(st.rotationOnly, true);
+  assert.equal(h.$('btn-range-done').disabled, true, 'no exit at 20 s while only rotation is missing');
+  assert.equal(h.$('btn-range-done').textContent, 'Done');
+  assert.match(h.$('range-hint').textContent,
+    /^The left stick is complete\. Right stick: 1 more full turn against the rim, then half a turn the other way\.$/);
+  await h.advance(41_000);
+  assert.equal(h.$('btn-range-done').disabled, false);
+  assert.equal(h.$('btn-range-done').textContent, 'Finish anyway');
+  let asked = '';
+  h.window.confirm = msg => { asked = msg; return false; };
+  await h.run(h.click('btn-range-done'));
+  assert.match(asked, /Only rotation is missing/);
+  assert.doesNotMatch(asked, /unreachable/);
+  assert.equal(A.counts.range, 1, 'declined: the session stays open');
+  // Girare ancora chiude normalmente, con Done e senza conferme.
+  const more = rotate(h, A, { turns: 1.2, sticks: [1] });
+  const back = rotate(h, A, { turns: 0.8, dir: -1, sticks: [1], from: more });
+  await h.advance(back - h.clock.now() + 1500);
+  assert.equal(h.$('btn-range-done').textContent, 'Done');
+  h.window.confirm = () => { throw new Error('a complete range asks nothing'); };
+  await h.run(h.click('btn-range-done'));
+  assert.equal(A.counts.range, 2);
+  assert.equal(h.peek().rangeWriteLock, null);
 });

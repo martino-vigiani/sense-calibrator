@@ -252,7 +252,7 @@ const PEEK = new vm.Script(`({
 
 // `session`: una Map condivisa tra due loadApp simula un ricaricamento nella
 // stessa scheda (sessionStorage sopravvive, localStorage anche).
-export async function loadApp({ authorized = [], chooser = [], hidAvailable = true, search = '', hostname = 'sense.test', clock = new VClock(), storage = {}, telemetryNoticeSeen = true, session = new Map() } = {}) {
+export async function loadApp({ authorized = [], chooser = [], hidAvailable = true, search = '', hostname = 'sense.test', clock = new VClock(), storage = {}, telemetryNoticeSeen = true, session = new Map(), pointerCoarse = false, share = null } = {}) {
   const doc = makeDocument();
   const hid = makeHid();
   hid.authorized.push(...authorized);
@@ -277,7 +277,11 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
   const sandbox = {
     console: { ...console, info: (...args) => consoleCalls.push(['info', ...args]) },
     document: doc,
-    navigator: hidAvailable ? { hid, clipboard: { writeText: async () => {} } } : { clipboard: { writeText: async () => {} } },
+    navigator: {
+      ...(hidAvailable ? { hid } : {}),
+      clipboard: { writeText: async () => {} },
+      ...(share ? { share } : {}),
+    },
     location: { hostname, search, hash: '', href: `https://${hostname}/${search}`, protocol: 'https:' },
     localStorage: {
       getItem: key => (store.has(key) ? store.get(key) : null),
@@ -289,7 +293,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       setItem: (key, value) => { session.set(key, String(value)); },
       removeItem: key => { session.delete(key); },
     },
-    matchMedia: () => ({ matches: false, addEventListener: noop, removeEventListener: noop }),
+    matchMedia: query => ({ matches: pointerCoarse && /pointer:\s*coarse/.test(query), addEventListener: noop, removeEventListener: noop }),
     // rAF a ~60 Hz sull'orologio virtuale; in una tab nascosta il browser lo
     // sospende, e l'harness lo imita accodando i callback finché non riappare.
     requestAnimationFrame: cb => {

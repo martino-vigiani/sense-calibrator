@@ -58,6 +58,39 @@ export function revertAdvice(nvStatus) {
   return nvStatus === 'locked' ? `${POWER_OFF_ADVICE} ${UNPLUG_UNKNOWN}` : null;
 }
 
+// Invito a salvare nel pannello dell'esito. Telemetria v2 27/9–12/10: 49
+// periodi non salvati con Write libero, il modale mai aperto, 48 col passo di
+// salvataggio visto, mediana 114 s, chiusi staccando il controller (43) o la
+// pagina (6); 42 di 49 dopo un esito centrato, entro un passo o un range
+// completo. Compare solo con un esito buono (`tone: 'ok'`), una calibrazione
+// non salvata e Write libero (`saveCtaFor`): mai per un esito da controllare.
+// "should" per lo spegnimento (H10), "may … not confirmed" per lo stacco (H11).
+export const SAVE_CTA_TEXT = 'Not saved yet. Write it to memory now: turning the controller off should discard it, and unplugging the cable may too (not confirmed).';
+export function saveCtaFor({ view = null, unsaved = false, lockMode = 'allowed' } = {}) {
+  return !!view && view.tone === 'ok' && unsaved === true && lockMode === 'allowed' && !view.poisoned;
+}
+
+// Ricollegato dopo uno stacco con una calibrazione salvabile mai scritta. La
+// pagina non sa se lo stacco l'abbia scartata (H11): lo dice, e il test drift
+// che parte da solo mostra dove sono gli stick ora. Nessuna azione nuova:
+// Write segue solo una calibrazione fatta da questa connessione.
+export function unsavedLostView() {
+  return {
+    kind: 'lost-save',
+    outcome: 'lost-save',
+    tone: 'warn',
+    title: 'The last calibration wasn’t saved',
+    lines: [
+      'The controller disconnected before the calibration was written to memory. We haven’t confirmed whether unplugging discards it; turning the controller off should.',
+      'The drift test shows where the sticks are now. If they need it, calibrate again and write the result to memory before you disconnect.',
+    ],
+    sticks: [],
+    actions: [],
+    center: null,
+    repair: false,
+  };
+}
+
 // Un segnale rumoroso non diagnostica il guasto. Prima una nuova misura,
 // poi assistenza e diagnosi; una sostituzione non si deduce dal solo rumore.
 export const REPAIR_STEPS = Object.freeze([
@@ -148,7 +181,11 @@ export const LOCK_REASONS = Object.freeze({
   catastrophic: { mode: 'disabled', text: 'The last result is 15% or more off-center. Saving it would make the drift permanent.' },
   pinned: { mode: 'disabled', text: 'An axis reads at the very edge. Saving would store a broken calibration.' },
   'range-incomplete': { mode: 'disabled', text: 'The range calibration didn’t cover the whole edge. Run Range calibration again before saving.' },
-  'range-already-closed': { mode: 'disabled', text: 'The range session had already closed, so its result is unknown. Run Range calibration again before saving.' },
+  // Il codice copre ogni range dall'esito ignoto: già chiuso (code 3), fallito,
+  // interrotto, non partito o ereditato da un reload (telemetria v2: 6 save
+  // con questo motivo e nessun range 'already-closed'). Il testo non dice più
+  // "già chiuso" per tutti; il codice resta per il contratto v2.
+  'range-already-closed': { mode: 'disabled', text: 'The last range calibration didn’t finish normally (it failed, was interrupted or had already closed), so the range on the controller is unknown. Run Range calibration again before saving.' },
   'center-reload': { mode: 'disabled', text: 'A previous calibration result may still be unsafe. Complete and check a new calibration before saving.' },
   'center-reload-guarded': { mode: 'guarded', text: 'A previous calibration result needs checking again before saving.' },
   'much-worse': { mode: 'disabled', text: 'The result is much worse than when you started. Saving it would make that drift permanent: run Quick calibration to bring the sticks back first.' },
@@ -470,7 +507,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
 // Esito della procedura guidata: prima e dopo misurati dal wizard, stessa
 // classificazione (e stessi margini) della rapida, con la partenza come unico
 // riferimento. `error` se la procedura è fallita dopo un commit.
-export function guidedOutcomeView({ before = null, after = null, error = null, committed = true, leftOpen = false } = {}, { nvStatus = null } = {}) {
+export function guidedOutcomeView({ before = null, after = null, error = null, committed = true, leftOpen = false, stopped = null } = {}, { nvStatus = null } = {}) {
   const beforeWorst = worstOfSummary(before);
   const worst = worstOfSummary(after);
   const pinned = pinnedFromSummary(after);
@@ -489,6 +526,24 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   if (error && isPoisonError(error)) {
     return view('error', 'bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines], [],
       { center: { ...center, outcome: 'error', worst: null, committed: true }, poisoned: true });
+  }
+  if (stopped) {
+    // Stop scelto dall'utente a sessione aperta (nessun calibEnd): non è un
+    // errore del controller. Le uscite sono quelle del promemoria di
+    // spegnimento (riavvio, o conferma di averlo spento a mano), così non serve
+    // staccare il cavo. Il blocco di Write resta quello dell'errore.
+    const why = {
+      corner: 'The requested corner could not be reached.',
+      stuck: 'A stick stayed too far from center with nobody touching it, so Guided calibration could not use it as the center. It is probably stuck near the edge. Range calibration may help afterwards; we haven’t confirmed that it does for a stick like this.',
+      far: 'A stick kept settling too far from where it rested at the start.',
+      rest: 'The sticks didn’t settle where they rested at the start.',
+    }[stopped.why] ?? null;
+    return view('error', 'bad', 'Guided calibration stopped', [
+      why,
+      committed ? 'Closing a leftover calibration session at the start already changed the calibration, and it hasn’t been saved.'
+        : 'Nothing from this run was committed.',
+      'The controller is still mid-calibration. Restart it, or turn it off (hold PS for 10 s), before calibrating or saving again.',
+    ], [ACTION.restart, ACTION.poweredOff], { center: { ...center, outcome: 'error', worst: null, committed: true } });
   }
   if (error) {
     return view('error', committed || leftOpen ? 'bad' : 'warn', 'Guided calibration failed', [
@@ -578,6 +633,37 @@ export function rangeOutcomeView({ incomplete = false, alreadyClosed = false, er
   ], [ACTION.retest]);
 }
 
+// rangeBegin inviato ma non accettato (codice di rifiuto, risposta incoerente
+// o persa dopo l'invio). Telemetria v2 27/9–12/10: 9 range 'error' su 28 erano
+// avvii falliti a durS 0, 7 dei quali ripetuti nella stessa visita dopo un
+// toast di 5 s (BDM-050 fw 17760256, anche un Quick forzato rifiutato in
+// mezzo). Riprovare subito non serve: senza un riavvio il firmware rifiuta di
+// nuovo. Pannello persistente con Restart, e la pagina blocca le calibrazioni
+// finché il riavvio non è provato. `again`: già rifiutato su questo controller
+// dopo un riavvio in questa pagina. Il timeout (controller avvelenato) ha la
+// sua vista: lì Restart non può partire.
+export function rangeStartFailedView({ error = null, again = false } = {}) {
+  if (error && isPoisonError(error)) return rangeOutcomeView({ error });
+  return {
+    kind: 'range',
+    outcome: 'range',
+    tone: 'bad',
+    title: 'Range calibration didn’t start',
+    lines: [
+      'The controller didn’t accept the start command, so no range was recorded. This usually means a calibration session is still open on it, for example after an interrupted attempt, a reload or another tool.',
+      again
+        ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
+        : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.',
+      'Calibrating and saving stay off until the controller has restarted, and Write stays off until a complete Range calibration.',
+    ],
+    sticks: [],
+    actions: [ACTION.restart, ACTION.poweredOff],
+    range: { incomplete: false, alreadyClosed: true },
+    center: null,
+    repair: false,
+  };
+}
+
 /* ------------------------------ test drift ------------------------------ */
 
 // Messaggio del test drift e raccomandazione, dal livello peggiore dei due
@@ -621,6 +707,46 @@ export function quickPreflightRoute(driftResult) {
     };
   }
   return null;
+}
+
+// Quick non è partito e la sua stessa attesa ha visto uno stick FERMO oltre il
+// raggio (diagnosi `off-center` di createQuickPreflightProbe, in
+// js/quick-center-guard.js): riprovare Quick darebbe lo stesso esito, finché
+// lo stick resta lì. A differenza del test drift, questa misura non distingue
+// uno stick che riposa lì da un pollice che lo tiene fermo: il testo lo dice.
+// Il bordo (Pinned, stessa regola del test drift) va a Range e poi Guided,
+// tutto il resto a Guided, anche uno stick a cavallo del 15%. Null per ogni
+// altra diagnosi, e quando l'ultimo test drift (stabile) ha visto proprio quello
+// stick riposare entro il raggio: allora fermo fuori raggio adesso è con ogni
+// probabilità un pollice, e il messaggio resta "Release both sticks".
+export function quickPreflightCheckRoute(diag, driftResult = null) {
+  if (diag?.reason !== 'off-center' || !diag.result) return null;
+  const name = diag.side === 'right' ? 'right' : 'left';
+  const stick = diag.result[name];
+  if (!stick || !isNum(stick.offset)) return null;
+  if (driftRestedInside(driftResult, name)) return null;
+  if (stickTier(diag.result, name)?.id === 'pinned') {
+    const [first, then] = routeFor(null, true);
+    return {
+      action: first,
+      then,
+      text: `The ${name} stick stayed still at the very edge during the check. If nobody is touching it, Quick calibration can’t start or fix it: try Range calibration first, then Guided if the center is still off.`,
+    };
+  }
+  return {
+    action: ACTION.guided,
+    then: null,
+    text: `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check, and Quick only starts within ${GUIDED_ONLY_MIN}%. If nobody is touching it, use Guided calibration.`,
+  };
+}
+
+// Il test drift ha misurato questo stick fermo (risultato non `unstable`) e
+// dentro il raggio di Quick.
+export function driftRestedInside(driftResult, side) {
+  if (!driftResult || driftResult.unstable === true) return false;
+  const tier = stickTier(driftResult, side)?.id;
+  return !!tier && !['guided-only', 'pinned', 'moving'].includes(tier)
+    && isNum(driftResult[side]?.offset) && driftResult[side].offset < GUIDED_ONLY_MIN;
 }
 
 // `writeLock`: la modalità di writeLockFor per lo stato attuale ('allowed',
@@ -698,7 +824,12 @@ export function outcomeHtml(view) {
   const actions = view.actions?.length
     ? `<div class="outcome-actions">${view.actions.map(a => `<button type="button" class="btn btn-secondary btn-sm" data-outcome-action="${e(a.id)}">${e(a.label)}</button>`).join('')}</div>`
     : '';
-  return `<h3 class="outcome-title">${e(view.title)}</h3>${rows}${lines}${repair}${actions}`;
+  // Solo per un esito buono; la pagina lo mostra (data-save="on" sul
+  // pannello) quando c'è davvero qualcosa da salvare e Write è libero.
+  const save = view.tone === 'ok' && !view.poisoned
+    ? `<div class="outcome-save"><p>${e(SAVE_CTA_TEXT)}</p><button type="button" class="btn btn-primary btn-sm" data-outcome-action="write">Write to memory</button></div>`
+    : '';
+  return `<h3 class="outcome-title">${e(view.title)}</h3>${rows}${lines}${repair}${save}${actions}`;
 }
 
 // Riga del pannello log, coerente col pannello: "complete" solo quando lo è.
