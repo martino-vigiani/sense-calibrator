@@ -27,7 +27,7 @@ process.env.DIAG_DIR_LIMIT = String(1024 * 1024);
 process.env.PORT = '0';
 process.env.NODE_ENV = 'test';
 
-const { app, cleanupDiagnostics } = require('./server');
+const { app, cleanupDiagnostics, pruneRateLimits } = require('./server');
 const { createInProcessFetch } = require('./in-process-fetch');
 
 let server;
@@ -172,4 +172,20 @@ test('tetto per IP sulle 24 ore: un indirizzo non esaurisce da solo la quota glo
   assert.equal(reports().length, 2);
   // Un altro indirizzo usa ancora la quota globale.
   assert.equal((await postReport()).status, 201);
+});
+
+test('la pulizia periodica delle quote non dimentica il tetto per IP sulle 24 ore', async () => {
+  const post = () => testFetch(`${baseUrl}/api/calib/v2/diagnostics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.42.0.1' },
+    body: JSON.stringify(SMALL),
+  });
+  assert.equal((await post()).status, 201);
+  assert.equal((await post()).status, 201);
+  // Due ore dopo: la finestra oraria è vuota, quella del giorno no.
+  pruneRateLimits(Date.now() + 2 * 60 * 60 * 1000);
+  assert.equal((await post()).status, 429);
+  // Dopo 25 ore la voce si può togliere.
+  pruneRateLimits(Date.now() + 25 * 60 * 60 * 1000);
+  assert.equal((await post()).status, 201);
 });
