@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runQuick } from '../js/calib/quick.js';
+import { QUICK_DEFAULTS, runQuick } from '../js/calib/quick.js';
 import { measureOffset, waitForStable } from '../js/calib/sampling.js';
 import { QUICK_CENTER_RADIUS } from '../js/quick-center-guard.js';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
 import { VClock } from '../ops/sim/vclock.mjs';
+import { FakeDualSense } from '../ops/sim/fake-dualsense.mjs';
+import { makeSimInstance } from '../ops/sim/harness.mjs';
 
 // Esegue il vero runQuick (js/calib/quick.js) con attese sceneggiate: niente
 // browser, controller fisico o attese di wall clock. La UI del prompt bloccato
@@ -203,5 +205,178 @@ test('real stability waiter rejects steady deflection and cleans up on timeout o
     assert.equal(await promise, false);
     assert.equal(source.listeners.size, 0);
     assert.equal(cleared, true);
+  }
+});
+
+// ------------------------------------------- attesa iniziale e diagnosi (v2)
+
+// Telemetria v2 (27/9–12/10, 250 preflight su 825 Quick): 241 scadevano sulla
+// prima attesa di 3 s. Ora l'attesa vale holdTimeoutMs (8 s), con la stessa
+// guardia; uno stick fermo fuori raggio smette dopo 3 s (il vecchio tempo).
+// Tutto sul DualSense virtuale: model-verified, non hardware.
+async function simQuick({ schedule = [], params = {}, drift = [[3.2, -0.3], [-0.1, 0.4]] } = {}) {
+  const clock = new VClock();
+  const dev = new FakeDualSense({
+    clock,
+    seed: 11,
+    sticks: drift.map(d => ({ drift: d, noise: 0.05, bias: { axis: 0, B: 0 } })),
+    fw: { sf: 0, cmdMs: [2, 6] },
+    timing: { period: 4, jitter: 0.3, gapProb: 0, gapMs: [30, 200] },
+    hand: { schedule },
+  });
+  const events = [];
+  const inst = makeSimInstance(clock, dev, { board: 'TEST', fw: 0 }, params, {
+    onProgress: e => { if (e.phase) events.push({ t: clock.now(), ...e }); },
+  });
+  const res = await clock.run(inst.run());
+  dev.close();
+  const begins = dev.commandLog.filter(c => c.op === 'begin').map(c => c.t);
+  return { res, dev, events, begins, end: clock.now() };
+}
+// Mano che si muove sullo stick sinistro (oscillazione di ±25 LSB, ~20%).
+const movingHand = (dur, t0 = 0) => ({ stick: 0, t0, dur, tail: 100, amp: [0, 0], at: t => 25 * Math.sin(2 * Math.PI * t / 300) });
+// Pollice fermo al ~31% sullo stick sinistro.
+const stillThumb = (dur, t0 = 0) => ({ stick: 0, t0, dur, tail: 100, amp: [40, 0] });
+
+test('preflight: the first wait now has holdTimeoutMs, so a hand that lets go after 3 s no longer blocks Quick', async () => {
+  assert.equal(QUICK_DEFAULTS.preflightTimeoutMs, QUICK_DEFAULTS.holdTimeoutMs);
+  const old = await simQuick({ schedule: [movingHand(5000)], params: { preflightTimeoutMs: 3000 } });
+  assert.equal(old.res.outcome, 'preflight', 'the old 3 s wait gave up');
+  assert.equal(old.begins.length, 0);
+
+  const now = await simQuick({ schedule: [movingHand(5000)] });
+  assert.notEqual(now.res.outcome, 'preflight');
+  assert.ok(now.begins.length >= 1);
+  // Primo comando solo dopo il rilascio (5 s; la coda decade in poche decine
+  // di ms) e le tenute di sempre: 300 ms, baseline di 1 s, 300 ms.
+  assert.ok(now.begins[0] > 5000 + QUICK_DEFAULTS.baselineMs + 2 * QUICK_DEFAULTS.stableMs, `begin at ${now.begins[0]}`);
+  // Il messaggio "lascia gli stick" compare durante l'attesa, dopo holdPromptMs.
+  const held = now.events.find(e => e.phase === 'held');
+  assert.ok(held && held.t >= QUICK_DEFAULTS.holdPromptMs && held.t < 5000, JSON.stringify(held));
+  const settled = now.events.find(e => e.phase === 'settled');
+  assert.ok(settled && settled.t > 5000 && settled.t < now.begins[0], 'the prompt is withdrawn once the wait passes');
+});
+
+test('preflight: a hand that never stops is blocked after the full wait, with reason "moving" and no command', async () => {
+  const { res, dev, end } = await simQuick({ schedule: [movingHand(120_000)] });
+  assert.equal(res.outcome, 'preflight');
+  assert.deepEqual([dev.counts.begin, dev.counts.sample, dev.counts.end], [0, 0, 0]);
+  assert.deepEqual(res.session.preflight, { stage: 'settle', reason: 'moving' });
+  assert.equal(res.preflight.reason, 'moving');
+  assert.ok(end >= QUICK_DEFAULTS.preflightTimeoutMs && end < QUICK_DEFAULTS.preflightTimeoutMs + 500, `ended at ${end}`);
+});
+
+test('preflight: a stick held still past the radius stops after 3 s with its side and offset; the page can wait longer', async () => {
+  const fast = await simQuick({ schedule: [stillThumb(120_000)] });
+  assert.equal(fast.res.outcome, 'preflight');
+  assert.equal(fast.dev.counts.begin, 0);
+  assert.equal(fast.res.session.preflight.stage, 'settle');
+  assert.equal(fast.res.session.preflight.reason, 'off-center');
+  assert.equal(fast.res.session.preflight.side, 'left');
+  assert.ok(fast.res.session.preflight.offset > 25 && fast.res.session.preflight.offset < 40, `${fast.res.session.preflight.offset}`);
+  assert.ok(fast.res.preflight.result?.left, 'a drift-shaped result for routing');
+  assert.ok(fast.end < QUICK_DEFAULTS.preflightOffCenterMs + QUICK_DEFAULTS.stableMs + 300, `ended at ${fast.end}`);
+  assert.ok(fast.events.some(e => e.phase === 'off-center' && e.side === 'left'), 'live off-center prompt');
+  assert.ok(!fast.events.some(e => e.phase === 'held'), 'a still stick is not told it is moving');
+
+  const patient = await simQuick({ schedule: [stillThumb(120_000)], params: { preflightOffCenterMs: Infinity } });
+  assert.equal(patient.res.outcome, 'preflight');
+  assert.equal(patient.dev.counts.begin, 0);
+  assert.ok(patient.end >= QUICK_DEFAULTS.preflightTimeoutMs, `ended at ${patient.end}`);
+
+  const released = await simQuick({ schedule: [stillThumb(5000)], params: { preflightOffCenterMs: Infinity } });
+  assert.notEqual(released.res.outcome, 'preflight');
+  assert.ok(released.begins[0] > 5100, `begin at ${released.begins[0]}`);
+});
+
+test('preflight: no calibBegin while a hand is on a stick, for hands that leave at any time up to 12 s', async () => {
+  for (const kind of ['moving', 'still']) {
+    for (const params of [{}, { preflightOffCenterMs: Infinity }]) {
+      for (let dur = 0; dur <= 12_000; dur += 1500) {
+        const touch = kind === 'moving' ? movingHand(dur) : stillThumb(dur);
+        const { res, begins, dev } = await simQuick({ schedule: dur ? [touch] : [], params });
+        const label = `${kind} ${dur} ms ${JSON.stringify(params)} → ${res.outcome}`;
+        if (begins.length) assert.ok(begins[0] > touch.t0 + dur + touch.tail, label);
+        if (res.outcome === 'preflight') assert.equal(dev.commandLog.filter(c => ['begin', 'sample', 'end'].includes(c.op)).length, 0, label);
+      }
+    }
+  }
+});
+
+test('preflight: the probe detaches from the stick source whatever the outcome', async () => {
+  for (const schedule of [[], [movingHand(120_000)], [stillThumb(120_000)]]) {
+    const clock = new VClock();
+    const dev = new FakeDualSense({
+      clock, seed: 3, sticks: [[3.2, -0.3], [-0.1, 0.4]].map(d => ({ drift: d, noise: 0.05, bias: { axis: 0, B: 0 } })),
+      fw: { sf: 0, cmdMs: [2, 6] }, timing: { period: 4, jitter: 0.3, gapProb: 0, gapMs: [30, 200] }, hand: { schedule },
+    });
+    const inst = makeSimInstance(clock, dev, { board: 'TEST', fw: 0 }, {});
+    await clock.run(inst.run());
+    dev.close();
+    assert.equal(inst.source.listenerCount, 0, JSON.stringify(schedule));
+  }
+});
+
+// ------------------------------------------- UI: messaggio per causa (app reale)
+
+test('app: with no drift-test evidence, a stick held still past the radius is routed to Guided with a hedged message', async () => {
+  const { h, dev } = await connectedApp();
+  dev.touches.push({ stick: 0, t0: 0, dur: 600_000, tail: 0, amp: [40, 0] }); // ~31%, fermo
+  await h.click('btn-quick');
+  await h.advance(400);
+  h.eval('lastDriftResult = null');
+  const go = h.click('btn-quick-go');
+  await h.advance(1500);
+  assert.match(h.$('quick-msg').innerHTML, /^The left stick is still but reads 3\d\.\d% from center\. <b>If you’re touching it, let go\.<\/b>/);
+  await h.advance(20_000);
+  await h.run(go);
+  assert.deepEqual([dev.counts.begin, dev.counts.sample, dev.counts.end], [0, 0, 0]);
+  const msg = h.$('quick-msg').innerHTML;
+  assert.match(msg, /^Calibration has not started\. <b>The left stick stayed still at 3\d\.\d% from center during the check, and Quick only starts within 15%\. If nobody is touching it, use Guided calibration\.<\/b>/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
+  assert.equal(h.eval('quickHoldKnown'), false, 'the meter is not forced to "Stick held"');
+  const [session] = h.sessions().filter(s => s.kind === 'quick');
+  assert.equal(session.preflight.reason, 'off-center');
+  assert.equal(session.preflight.side, 'left');
+});
+
+test('app: a stick the drift test saw centered, now held still off-center, waits the full time and says to let go', async () => {
+  const { h, dev } = await connectedApp();
+  assert.equal(h.eval("driftRestedInside(lastDriftResult, 'left') && driftRestedInside(lastDriftResult, 'right')"), true);
+  await h.click('btn-quick');
+  dev.touches.push({ stick: 0, t0: 0, dur: 600_000, tail: 0, amp: [40, 0] });
+  await h.advance(400);
+  const started = h.clock.now();
+  await h.run(h.click('btn-quick-go'));
+  assert.ok(h.clock.now() - started >= QUICK_DEFAULTS.preflightTimeoutMs, 'no early stop: it is probably a thumb');
+  assert.equal(dev.counts.begin, 0);
+  assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started: the left stick was held still at 3\d\.\d% from center, but the last drift test found it centered\. <b>Release both sticks<\/b>/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
+  assert.equal(h.eval('quickHoldKnown'), true);
+});
+
+test('app: a hand that keeps moving gets the movement message; a silent controller gets the cable message', async () => {
+  {
+    const { h, dev } = await connectedApp();
+    await h.click('btn-quick');
+    dev.touches.push({ stick: 1, t0: 0, dur: 600_000, tail: 0, amp: [0, 0], at: t => 25 * Math.sin(2 * Math.PI * t / 300) });
+    const go = h.click('btn-quick-go');
+    await h.advance(20_000);
+    await h.run(go);
+    assert.equal(dev.counts.begin, 0);
+    assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started: the sticks didn’t stay still and centered\. <b>Release both sticks<\/b>/);
+    assert.equal(h.eval('quickHoldKnown'), true);
+  }
+  {
+    const { h, dev } = await connectedApp();
+    await h.click('btn-quick');
+    const go = h.click('btn-quick-go');
+    dev.stopped = true; // il controller smette di mandare input report
+    await h.advance(20_000);
+    await h.run(go);
+    assert.equal(dev.counts.begin, 0);
+    assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started\. <b>No readings arrived from the controller\.<\/b> Check the USB cable/);
+    assert.equal(h.eval('quickHoldKnown'), false);
+    assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
   }
 });

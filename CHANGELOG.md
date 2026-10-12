@@ -2,6 +2,15 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## Unreleased — Quick preflight (2026-10-12)
+
+From telemetry v2 (27 September – 12 October): 250 of 825 Quick runs (30%) ended in `preflight`, with nothing sent. 241 of them expired on the first 3-second wait. In the same visit, about half had a stick resting past 15% (Guided or rest measurements of 15–100%); the others had sticks that rest centered, and 64 of those retries failed again.
+
+- **The first Quick wait lasts up to 8 seconds**, the same time already allowed before every pass. The check is unchanged: both sticks still and within 15% for 300 ms of fresh reports, then the 1-second baseline and a second hold before any command.
+- **Quick says why it didn't start.** While it waits, the dialog says whether a stick is moving or held still off-center (with its reading). A blocked start names the cause: a stick held still past 15% is routed to Guided (Range for an edge), saying "if nobody is touching it"; no readings point to the cable; a moving stick still gets "Release both sticks". A stick held still past 15% stops the wait after 3 seconds, as before, unless the last drift test saw both sticks resting centered.
+- The cause is kept in the local session history only. The v2 event contract is unchanged; the app build is now 20261012, so the report can compare the preflight rate before and after.
+- Simulator, model-verified: preflight 24 → 17 in 714 sessions, no change in results at or above 15%, no sample after a timeout; one extra stalled pass in 714. Not tested on a physical controller.
+
 ## 2026-10-01
 
 - Range shows each stick's edge coverage, four sides, full turns and direction reversal separately. A full coverage bar no longer hides a missing reversal; short sectors are marked on the dials. Completion and Write safety requirements are unchanged.

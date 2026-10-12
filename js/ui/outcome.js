@@ -623,6 +623,46 @@ export function quickPreflightRoute(driftResult) {
   return null;
 }
 
+// Quick non è partito e la sua stessa attesa ha visto uno stick FERMO oltre il
+// raggio (diagnosi `off-center` di createQuickPreflightProbe, in
+// js/quick-center-guard.js): riprovare Quick darebbe lo stesso esito, finché
+// lo stick resta lì. A differenza del test drift, questa misura non distingue
+// uno stick che riposa lì da un pollice che lo tiene fermo: il testo lo dice.
+// Il bordo (Pinned, stessa regola del test drift) va a Range e poi Guided,
+// tutto il resto a Guided, anche uno stick a cavallo del 15%. Null per ogni
+// altra diagnosi, e quando l'ultimo test drift (stabile) ha visto proprio quello
+// stick riposare entro il raggio: allora fermo fuori raggio adesso è con ogni
+// probabilità un pollice, e il messaggio resta "Release both sticks".
+export function quickPreflightCheckRoute(diag, driftResult = null) {
+  if (diag?.reason !== 'off-center' || !diag.result) return null;
+  const name = diag.side === 'right' ? 'right' : 'left';
+  const stick = diag.result[name];
+  if (!stick || !isNum(stick.offset)) return null;
+  if (driftRestedInside(driftResult, name)) return null;
+  if (stickTier(diag.result, name)?.id === 'pinned') {
+    const [first, then] = routeFor(null, true);
+    return {
+      action: first,
+      then,
+      text: `The ${name} stick stayed still at the very edge during the check. If nobody is touching it, Quick calibration can’t start or fix it: try Range calibration first, then Guided if the center is still off.`,
+    };
+  }
+  return {
+    action: ACTION.guided,
+    then: null,
+    text: `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check, and Quick only starts within ${GUIDED_ONLY_MIN}%. If nobody is touching it, use Guided calibration.`,
+  };
+}
+
+// Il test drift ha misurato questo stick fermo (risultato non `unstable`) e
+// dentro il raggio di Quick.
+export function driftRestedInside(driftResult, side) {
+  if (!driftResult || driftResult.unstable === true) return false;
+  const tier = stickTier(driftResult, side)?.id;
+  return !!tier && !['guided-only', 'pinned', 'moving'].includes(tier)
+    && isNum(driftResult[side]?.offset) && driftResult[side].offset < GUIDED_ONLY_MIN;
+}
+
 // `writeLock`: la modalità di writeLockFor per lo stato attuale ('allowed',
 // 'guarded', 'disabled'): l'invito a salvare compare solo con Write libero.
 export function driftMessage(result, { previous = null, unsaved = false, writeLock = 'allowed' } = {}) {

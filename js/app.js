@@ -18,10 +18,10 @@ import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitF
 import { runQuick } from './calib/quick.js';
 import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
-import { CENTERED_MAX, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
+import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  quickPreflightRoute, rangeOutcomeView,
+  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView,
   revertAdvice, stickTier, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -2209,8 +2209,10 @@ function feedRestNoise(now) {
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
 // Accanto c'è il misuratore "mani lontane" (js/ui/hands-off.js), che reagisce
 // in tempo reale; questi testi dicono cosa sta facendo l'algoritmo.
-function quickProgressHtml({ phase, pass, worst }) {
+function quickProgressHtml({ phase, pass, worst, side, offset }) {
   if (phase === 'preflight') return 'Release both sticks. Waiting for centered, stable readings…';
+  if (phase === 'settled') return 'Readings are still and centered. Measuring the starting point… <b>Don’t touch the sticks.</b>';
+  if (phase === 'off-center') return `The ${side === 'right' ? 'right' : 'left'} stick is still but reads ${formatOffset(offset)} from center. <b>If you’re touching it, let go.</b> Quick only starts within ${GUIDED_ONLY_MIN}%.`;
   if (phase === 'noisy') return 'The readings are jumping around. <b>Let go of both sticks</b> and keep the controller flat on the table. If nobody is touching them, repeat the test to check the signal at rest.';
   if (phase === 'held') return 'Hold detected: <b>let go of the sticks.</b> A held stick would be saved as the new center.';
   if (phase === 'pass' || phase === 'resumed') return `Pass ${pass}: calibrating. <b>Don’t touch the sticks.</b>`;
@@ -2312,7 +2314,13 @@ async function quickCalibrate() {
       isCurrent: () => ds5 === controller,
       isCancelled: () => quickCancelRequested,
       force,
-      params: recovery ? { maxPasses: 1 } : {},
+      params: {
+        ...(recovery ? { maxPasses: 1 } : {}),
+        // Il test drift ha visto entrambi gli stick fermi dentro il raggio: uno
+        // stick fermo fuori raggio adesso è un pollice, e conviene aspettare
+        // che si stacchi invece di fermarsi dopo 3 s (solo l'attesa cambia).
+        ...(['left', 'right'].every(side => driftRestedInside(lastDriftResult, side)) ? { preflightOffCenterMs: Infinity } : {}),
+      },
       repairStaleSession: repairAllowed,
       onSession: state => {
         if (state === 'opening') guard = openSessionGuard();
@@ -2321,7 +2329,8 @@ async function quickCalibrate() {
       onProgress: event => {
         if (ops.isCurrent(op)) {
           if (event.phase === 'held' || event.phase === 'stalled' || event.phase === 'unstable') quickHoldKnown = true;
-          else if (event.bar !== undefined || ['pass', 'resumed', 'verify', 'next'].includes(event.phase)) quickHoldKnown = false;
+          // Fermo fuori raggio: il misuratore mostra il movimento che vede (nessuno).
+          else if (event.bar !== undefined || ['pass', 'resumed', 'verify', 'next', 'off-center', 'settled'].includes(event.phase)) quickHoldKnown = false;
         }
         if (event.phase === 'committed') {
           // La RAM è appena cambiata (calibEnd, o riparazione di calibBegin):
@@ -2396,7 +2405,11 @@ async function quickCalibrate() {
       // Quick (o al bordo), nessuno lo sta toccando: il testo lo dice per primo
       // e il bottone porta a Guided (Pinned: Range). Niente "Stick held": il
       // misuratore mostrerebbe una mano che non c'è.
-      const route = quickPreflightRoute(lastDriftResult);
+      // Poi la causa vista dall'attesa stessa (run.preflight, vedi
+      // createQuickPreflightProbe): fermo fuori raggio → Guided (Pinned: Range),
+      // nessun report → cavo, movimento → "Release both sticks".
+      const diag = run.preflight ?? {};
+      const route = quickPreflightRoute(lastDriftResult) ?? quickPreflightCheckRoute(diag, lastDriftResult);
       if (route) {
         quickRouteNext = route.action.id;
         $('btn-quick-go').textContent = route.action.label;
@@ -2404,9 +2417,25 @@ async function quickCalibrate() {
         log(`Quick calibration not started: ${route.text}`);
         return;
       }
-      // Il modale dice "Release both sticks": il misuratore non deve dire il contrario.
-      if (ops.isCurrent(op)) quickHoldKnown = true;
-      blockedMessage = 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
+      if (diag.reason === 'no-input') {
+        // Nessun report: nessuna mano da indicare al misuratore.
+        if (ops.isCurrent(op)) quickHoldKnown = false;
+        blockedMessage = 'Calibration has not started. <b>No readings arrived from the controller.</b> Check the USB cable and keep this tab in front, then try again.';
+        log('Quick calibration not started: no stick readings from the controller.');
+        return;
+      }
+      // Il modale dice "Release both sticks": il misuratore non deve dire il
+      // contrario. Con stick fermi e centrati (`settled`: l'arresto è un buco
+      // nei report) non c'è nessuna tenuta da mostrare.
+      if (ops.isCurrent(op)) quickHoldKnown = diag.reason !== 'settled';
+      // Fermo fuori raggio su uno stick che il test drift ha visto centrato:
+      // quasi certamente un pollice, e lo si dice con il dato.
+      const heldStill = diag.reason === 'off-center' && driftRestedInside(lastDriftResult, diag.side);
+      blockedMessage = heldStill
+        ? `Calibration has not started: the ${diag.side === 'right' ? 'right' : 'left'} stick was held still at ${esc(formatOffset(diag.offset))} from center, but the last drift test found it centered. <b>Release both sticks</b>, then try again.`
+        : diag.reason === 'moving'
+        ? 'Calibration has not started: the sticks didn’t stay still and centered. <b>Release both sticks</b> and leave the controller flat on a table, then try again. If nobody is touching them and this repeats, use guided calibration.'
+        : 'Calibration has not started. <b>Release both sticks</b> and keep the controller still, then try again. Check the USB connection if readings have stopped. If a released stick stays far from center, use guided calibration.';
       log('Quick calibration not started: centered, stable stick readings are required.');
       return;
     }

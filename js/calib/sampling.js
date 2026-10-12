@@ -29,7 +29,9 @@ export const QUICK_STABLE_TIMEOUT = 5000;
 export const STICK_LSB = 1 / 127.5;
 export const MAX_REPORT_GAP_MS = 100;
 export const MAX_MEASURE_GAP_RETRIES = 2;
-const sampleTime = source => Number.isFinite(source.reportTime) ? source.reportTime : source.now();
+// Tempo di un input report: il timestamp dell'evento HID quando c'è.
+export const reportTimeOf = source => Number.isFinite(source.reportTime) ? source.reportTime : source.now();
+const sampleTime = reportTimeOf;
 
 // Attende che tutti gli assi restino entro `spread` per `holdMs` consecutivi.
 // Ritorna false se il segnale non si stabilizza entro `timeoutMs` (o se

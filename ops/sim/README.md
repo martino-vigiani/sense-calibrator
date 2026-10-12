@@ -65,6 +65,23 @@ node ops/sim/equivalence.mjs --restricted 1 --refresh-golden 1
 node ops/sim/equivalence.mjs --restricted 1
 ```
 
+### Gate 2 rebaseline (Quick preflight wait, 2026-10-12)
+
+The first Quick wait went from 3 s to `preflightTimeoutMs` = 8 s, with an
+early stop after 3 s of sticks held still past the 15% radius, and preflight
+sessions now carry `preflight: { stage, reason, side?, offset? }`. Before the
+refresh, the new code against the old goldens changed **only sessions that
+were `preflight` in the golden** (0 other sessions): normal
+`preflight>centered` 1 and one preflight with new fields; hold
+`preflight>centered` 1, `preflight>within-1-step` 1, `preflight>stalled` 1.
+Paired runs on 714 real-template sessions per scenario (seed 1; old timing as
+`{"preflightTimeoutMs":3000,"preflightOffCenterMs":1e12}`): preflight 24 → 17
+(normal, rim-hold, moving-hold, noisy-hold) and 33 → 27 (hold, forced-hold);
+final ≥15% unchanged (4 → 4, attributable 0 → 0 on rim-hold), no
+`calibSample` after a timeout, worse-than-start delta 0, one more `stalled`
+per 714 in four scenarios (a rescued start disturbed later in pass 1). All
+model-verified.
+
 ## Commands
 
 ```sh
