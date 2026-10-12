@@ -18,7 +18,7 @@ FAQ, until H10 is run.
 | H3 | NVS-unlocked behaviour, if reproducible | Only a future auto-lock |
 | H10 | Does a power-off without Write revert the calibration to the last saved one? | The in-app "turn it off, it should discard it" copy (shown only with memory `locked`). Since 2026-10-12 the homepage FAQ and the guides state it as unconfirmed rather than "should". If it passes, the "should" can go and the guides can state it. |
 | H11 | Does a USB unplug without power-off keep the calibration? | The unplug copy, the range write lock across a replug |
-| H12 | Does Range move the center? | Routing pinned sticks to Range, and the Range intro warning |
+| H12 | Does Range move the center? Run a complete Range on a centered stick (drift test ≤1.25% just before), then the drift test again, over at least 10 runs; note the per-axis offsets before and after. | Routing pinned sticks to Range, the Range intro warning, and the post-Range center recheck (2026-10-13): after a complete range the page measures the center with the drift test, guards Write (`range-center-unchecked`, then `range-center-off`) and offers Quick, or Guided from 15%. **Telemetry v2 hint (27 Sep–12 Oct, not a hardware check):** in the first resting window after a Quick/Guided result within 1 step, a stick was off-center (>1.25%) in 12 of 13 cases with a complete committed Range in between (worst stick 1.7–11.4%, every one under 15%), against 29 of 93 without one. Small sample, one visit each; the copy cites it as a hint. If H12 passes (Range moves the center), the recheck stays and the copy can say so; if it fails, the recheck can go back to information only. |
 
 ## Manual checklist (after the preconditions)
 

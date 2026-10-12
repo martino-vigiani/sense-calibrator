@@ -6,10 +6,12 @@ import { initSensitivityFinder } from './sensitivity.js';
 import { initPlaytest } from './playtest.js';
 import { uploadCalibrationEvent } from './telemetry.js';
 import {
-  TELEMETRY_SCOPE, buildFlashEvent, buildGuidedEvent, buildQuickEvent, buildRangeEvent, buildRestEvent, buildSaveEvent,
-  flashResultFor, uploadEventV2, validateEventV2,
+  TELEMETRY_SCOPE, buildFlashEvent, buildGuidedEvent, buildLandingEvent, buildQuickEvent, buildRangeEvent, buildRestEvent,
+  buildSaveEvent, flashResultFor, uploadEventV2, validateEventV2,
 } from './telemetry-v2.js';
+import { createCalTimeline } from './telemetry-timeline.js';
 import { createRestNoiseCollector } from './calib/rest-noise.js';
+import { createLandingDetector } from './calib/landing.js';
 import {
   DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
@@ -21,7 +23,7 @@ import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView,
+  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
   revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -32,6 +34,12 @@ import {
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 import { rangeCompletion } from './calib/range-diagnostics.js';
+import {
+  createDiagRecorder, diagnosticsContents, diagnosticsJson, uploadDiagnostics, validateDiagnostics,
+} from './diag/recorder.js';
+import {
+  diagChartLabel, diagChartSvg, landingRowsHtml, landingSummaryText, sendSummaryText,
+} from './diag/view.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const $ = id => document.getElementById(id);
@@ -604,6 +612,7 @@ async function refreshNv(controller = ds5) {
   if (ds5 !== controller) return nv;
   nvStatus = nv.status;
   setNvChip(controller.poisoned ? { status: 'poisoned' } : nv);
+  diagNote('nv', { nv: nv.status });
   return nv;
 }
 
@@ -699,9 +708,11 @@ async function adopt(device, { explicit = false, previousFocus = document.active
     if (ds5 !== candidate) return;
     deviceInfo = info;
     renderDeviceInfo(info);
+    diagNote('connect', { board: info.board, fw: info.fwversion });
     const key = await localDeviceKey(info.serial);
     if (ds5 !== candidate) return;
     deviceKey = key;
+    calTimeline.connected(key);
     const nv = await refreshNv();
     if (ds5 !== candidate) return;
     reapplyCenterWriteLock();
@@ -821,6 +832,12 @@ function teardown(message = null) {
   if (unsaved && currentWriteLock().mode === 'allowed') lostSave = { key: deviceKey };
   closeSaveChapter('disconnected');
   restNoise.reset();
+  landingDetector.reset();
+  calTimeline.disconnected();
+  if (diag.active) {
+    diagNote('disconnect');
+    diag.gap();
+  }
   const hadUnsaved = unsaved;
   const nvAtExit = lastNvStatus;
   ds5 = null;
@@ -848,6 +865,7 @@ function teardown(message = null) {
   wizard = null;
   quickPreflightBlocked = false;
   lastDriftResult = null;
+  rangeRecheck = null;
   lastBattery = 0;
   modalReturnFocus.clear();
   ops.reset();
@@ -933,6 +951,7 @@ function onInputReport(event) {
     && eventAt <= handledAt + 50 && eventAt >= handledAt - 60_000 ? eventAt : handledAt;
   sticks = parsed;
   notifyStickSample();
+  if (diag.active) feedDiag();
   playtest?.feedSample(sticks, performance.now());
 
   if (driftTest) driftSample();
@@ -948,6 +967,7 @@ function onInputReport(event) {
   const now = performance.now();
   feedHandsOff(now);
   feedRestNoise(now);
+  feedLandings(now);
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
     battery = ds5.parseBattery(d);
@@ -1139,6 +1159,32 @@ function evaluateDriftTest() {
 }
 
 let lastDriftResult = null;
+// Numero del commit (setUnsaved(true)) dopo cui è stato misurato
+// lastDriftResult: il "prima" del ricontrollo post-range vale solo se nessuna
+// calibrazione è arrivata dopo il test.
+let lastDriftCommit = -1;
+let commitSeq = 0;
+
+// Ricontrollo del centro dopo un range completo (H12, non verificato su
+// hardware; telemetria v2: centro fuori 12 volte su 13 dopo un range
+// completo). Lo risolve il primo test drift stabile sullo stesso controller
+// senza commit in mezzo; nessun comando HID, solo la misura che il test fa già.
+// Un risultato instabile o mancante lo lascia in attesa (Write resta guarded).
+let rangeRecheck = null;
+
+function resolveRangeRecheck(result) {
+  const pending = rangeRecheck;
+  rangeRecheck = null;
+  if (pending.controller !== ds5 || pending.commit !== commitSeq) return;
+  const after = summarizeResult(result);
+  const view = rangeRecheckView({ before: pending.before, after });
+  // Solo nella cronologia locale: il contratto v2 non cambia in questo ramo.
+  recordEvent('range-recheck', { before: pending.before, after, verdict: view.verdict, moved: view.moved });
+  log(view.verdict === 'centered'
+    ? 'Center checked after the range calibration: within 1 step.'
+    : `Center off after the range calibration (worst stick ${formatOffset(view.center.worst)}).`);
+  showOutcome(view);
+}
 
 // Segno esplicito e meno tipografico (−, non -): +0.0% e −0.0% restano
 // distinguibili, e lo screen reader legge "meno".
@@ -1155,6 +1201,7 @@ function finishDriftTest(result) {
 
   const prev = lastDriftResult;
   lastDriftResult = result;
+  lastDriftCommit = commitSeq;
 
   for (const [side, el] of [['left', 'verdict-l'], ['right', 'verdict-r']]) {
     const r = result[side];
@@ -1177,14 +1224,22 @@ function finishDriftTest(result) {
     worst: +worst.toFixed(2),
     unstable: result.unstable === true,
   });
+  // Prima del messaggio: il suo invito a salvare legge il blocco di Write che
+  // il ricontrollo può cambiare.
+  if (rangeRecheck && result.unstable !== true) resolveRangeRecheck(result);
+  diagNote('drift', { auto, res: summarizeResult(result), unstable: result.unstable === true });
   // Testo e instradamento dal livello peggiore (js/ui/outcome.js): ≥15% →
-  // Guided, Pinned → Range poi Guided, rumore → "il rumore resta".
+  // Guided, Pinned → Range e ricontrollo del centro, rumore → "il rumore resta".
   $('drift-status').textContent = driftMessage(result, { previous: prev, unsaved, writeLock: currentWriteLock().mode }).text;
 }
 
 /* ============================== unsaved / flash ============================== */
 
 function setUnsaved(v) {
+  if (v) commitSeq += 1;
+  // Con il controller ancora collegato: allo scollegamento la pagina dimentica
+  // lo stato, ma il controller non ha salvato nulla.
+  if (v !== unsaved && ds5) diagNote('unsaved', { on: v });
   if (v && !unsaved) openSaveChapter();
   unsaved = v;
   $('banner-unsaved').classList.toggle('hidden', !v);
@@ -1428,7 +1483,13 @@ let shownOutcomeView = null; // la vista ora nel pannello, per l'invito a salvar
 function showOutcome(view) {
   if (view.center) {
     centerState = view.center; lastCenterView = view;
-    if (view.kind === 'quick' || view.kind === 'guided') rememberCenterResult(view);
+    if (view.kind === 'quick' || view.kind === 'guided' || view.recheck) rememberCenterResult(view);
+    // Un nuovo esito del centro (Quick, Guided) l'ha misurato dopo il range:
+    // il ricontrollo in attesa non serve più.
+    if (!view.recheck) {
+      rangeRecheck = null;
+      if (rangeState?.centerUnchecked) rangeState = { ...rangeState, centerUnchecked: false };
+    }
   }
   if (view.range) rangeState = view.range;
   shownOutcomeView = view;
@@ -1621,6 +1682,7 @@ async function doFlash() {
   const chapter = saveChapter;
   $('btn-flash-go').disabled = true;
   const op = ops.beginOp();
+  diagNote('start', { op: 'flash' });
   closeModal('modal-flash');
   flashing = true;
   if (saveChapter) saveChapter.attempts += 1;
@@ -1628,6 +1690,7 @@ async function doFlash() {
   const noteFlash = (error, nv) => {
     const result = flashResultFor(error, nv);
     if (ds5 === controller && ops.isCurrent(op) && saveChapter === chapter && chapter) chapter.lastFlash = result;
+    calTimeline.op('flash');
     emitV2(ctx => buildFlashEvent(ctx, { result, nv, attempt, lock: lock.mode }), { device: flashDevice });
   };
   try {
@@ -1755,6 +1818,7 @@ function syncPowerCycleFlag() {
 // esenzioni (il controller illeggibile potrebbe essere uno di quelli esentati).
 function markPowerCycle(controller, key) {
   powerCycleLocks.set(key ?? null, { controller, reload: false, exempt: new Set() });
+  diagNote('power-cycle', { lock: 'marked' });
   repairAllowed = false;
   // Il blocco sostituisce il segno provvisorio della sessione in volo: il suo
   // rilascio non deve più togliere nulla.
@@ -1797,6 +1861,7 @@ function clearPowerCycle(reason, controller = ds5, key = deviceKey) {
   for (const [lockKey, lock] of powerCycleLocks) {
     if (controller && lock.controller === controller) powerCycleLocks.delete(lockKey);
   }
+  diagNote('power-cycle', { lock: 'cleared' });
   syncPowerCycleFlag();
   if (powerCycleLockFor(controller, key)) {
     log('Another controller used in this tab still has a calibration pass left open, and this one can’t be told apart from it (its serial number can’t be read): calibration and saving stay blocked.');
@@ -1880,6 +1945,7 @@ function confirmPoweredOff() {
   if (!powerCycleApplies() || ops.busy) return;
   const ok = confirm('Continue only if you turned the controller off (held PS for 10 s until the light went out, or used Restart) after the calibration pass was left open. Disconnecting or unplugging the cable doesn’t count. Did you turn it off?');
   if (!ok) return;
+  calTimeline.op('power-cycle');
   clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.');
   // Un controller dal seriale illeggibile non toglie i blocchi con chiave
   // (vedi clearPowerCycle): se uno vale ancora, il promemoria resta.
@@ -2106,7 +2172,7 @@ let consentEpoch = 0;
 // (window.__senseTelemetryV2) e per i controlli headless: stato 'queued',
 // 'sent', 'failed', 'discarded'. Mai persistito.
 const v2Outbox = [];
-let lastCalibV2 = null; // { seq, committed, claimed, at }
+let lastCalibV2 = null; // { seq, diagSeq, committed, claimed, at, owner, epoch }
 // Una calibrazione registrata poco prima che `unsaved` si alzi (lo stallo, il
 // range completo) apre lei il periodo. Oltre questa finestra l'evento è di
 // un'altra storia, per esempio l'esito 'disconnected' di un ciclo orfano
@@ -2138,7 +2204,11 @@ function sendV2(item, { now = false } = {}) {
 // seq e la scheda del controller; `device` sovrascrive board/fw quando
 // l'evento arriva dopo il teardown (esito 'disconnected'). Con la
 // condivisione spenta non costruisce nemmeno l'evento.
-function emitV2(build, { device = null, now = false } = {}) {
+// `diagBuild` sostituisce `build` per il report diagnostico quando l'evento
+// rimanda ad altri per numero (il `ref` di `save`): lì vale la numerazione del
+// report, non quella della telemetria.
+function emitV2(build, { device = null, now = false, diag = true, diagBuild = build } = {}) {
+  if (diag) diagCalib(diagBuild, device);
   if (!telemetryEnabled() || v2Seq >= V2_MAX_PER_LOAD || v2Seq > 255) return null;
   const ctx = {
     sid: V2_SID,
@@ -2170,19 +2240,55 @@ function flushV2(keepSharing) {
 // Evento di una calibrazione (quick, guided, range): lo lega al periodo "non
 // salvato" in corso, o a quello che si apre subito dopo (lo stallo registra la
 // sessione prima di alzare `unsaved`).
+// Due numerazioni: `seq` è quella della telemetria (null con la condivisione
+// spenta), `diagSeq` quella del report diagnostico in corso (null senza
+// registrazione). Il periodo le tiene separate, così il `save` di ciascuno
+// rimanda a un evento che sta nello stesso flusso.
 function emitCalibV2(build, options) {
-  const event = emitV2(build, options);
-  if (!event) return;
+  const diagEvent = diagCalib(build, options?.device ?? null);
+  const event = emitV2(build, { ...options, diag: false });
+  noteCalibTimeline(event, build, options);
+  const sample = event ?? diagEvent;
+  if (!sample) return;
   const owner = options?.controller ?? null;
   const epoch = options?.epoch;
-  lastCalibV2 = { seq: event.seq, committed: event.committed, claimed: false, at: performance.now(), owner, epoch };
+  lastCalibV2 = {
+    seq: event ? event.seq : null, diagSeq: diagEvent ? diagEvent.seq : null,
+    committed: sample.committed, claimed: false, at: performance.now(), owner, epoch,
+  };
   // L'evento di un ciclo orfano resta registrato, ma non si attribuisce al
   // periodo di salvataggio aperto dal controller arrivato dopo.
   if (saveChapter && saveChapter.owner === owner && saveChapter.epoch === epoch) {
-    saveChapter.ref = event.seq;
-    saveChapter.sessions += 1;
-    lastCalibV2.claimed = true;
+    claimCalib(saveChapter, lastCalibV2);
   }
+}
+
+function claimCalib(chapter, calib) {
+  calib.claimed = true;
+  if (calib.seq !== null) {
+    chapter.ref = calib.seq;
+    chapter.sessions += 1;
+  }
+  if (calib.diagSeq !== null) {
+    chapter.diagRef = calib.diagSeq;
+    chapter.diagSessions += 1;
+  }
+}
+
+// La cronologia della visita (js/telemetry-timeline.js) segue le calibrazioni
+// anche con la condivisione spenta: se la persona la riaccende dal footer,
+// sinceCalS non deve dire "nessuna calibrazione" quando c'è stata. Senza
+// evento inviato il builder gira solo per leggere tipo e commit. L'esito di un
+// ciclo orfano, arrivato quando è già collegato un altro controller, non è
+// una calibrazione di questo.
+function noteCalibTimeline(event, build, options) {
+  const owner = options?.controller ?? null;
+  if (ds5 && owner && owner !== ds5) return;
+  let probe = event;
+  if (!probe) {
+    try { probe = build({ sid: '00000000', seq: 0, board: null, fw: null }); } catch { return; }
+  }
+  calTimeline.calibration({ type: probe?.type, committed: probe?.committed, ref: event ? event.seq : null }, performance.now());
 }
 
 /* --------- periodo "non salvato": si salva davvero? --------- */
@@ -2200,17 +2306,16 @@ function openSaveChapter() {
   const seed = lastCalibV2 && !lastCalibV2.claimed && lastCalibV2.committed
     && lastCalibV2.owner === ds5 && lastCalibV2.epoch === ops.epoch
     && performance.now() - lastCalibV2.at <= CALIB_SEED_MS ? lastCalibV2 : null;
-  if (seed) seed.claimed = true;
   saveChapter = {
     owner: ds5,
     epoch: ops.epoch,
     startedAt: performance.now(),
-    ref: seed ? seed.seq : null,
-    sessions: seed ? 1 : 0,
+    ref: null, sessions: 0, diagRef: null, diagSessions: 0,
     opens: 0, reminderOpens: 0, cancels: 0, attempts: 0,
     lastFlash: null,
     seen: saveStepInView,
   };
+  if (seed) claimCalib(saveChapter, seed);
 }
 
 function closeSaveChapter(result, { now = false } = {}) {
@@ -2218,9 +2323,11 @@ function closeSaveChapter(result, { now = false } = {}) {
   if (!chapter) return;
   saveChapter = null;
   const lock = currentWriteLock();
-  emitV2(ctx => buildSaveEvent(ctx, {
-    ...chapter, result, lock, waitMs: performance.now() - chapter.startedAt,
-  }), { now });
+  const data = { ...chapter, result, lock, waitMs: performance.now() - chapter.startedAt };
+  emitV2(ctx => buildSaveEvent(ctx, data), {
+    now,
+    diagBuild: ctx => buildSaveEvent(ctx, { ...data, ref: chapter.diagRef, sessions: chapter.diagSessions }),
+  });
 }
 
 /* --------- rumore a riposo (js/calib/rest-noise.js) --------- */
@@ -2253,7 +2360,43 @@ function feedRestNoise(now) {
   }
   const summary = restNoise.push(sticks, now, { drift: !!driftTest });
   if (!summary) return;
-  emitV2(ctx => buildRestEvent(ctx, { summary, drift: summary.drift, state: restState(), discarded: summary.discarded }));
+  const timing = calTimeline.rest(now);
+  emitV2(ctx => buildRestEvent(ctx, { summary, drift: summary.drift, state: restState(), discarded: summary.discarded, timing }));
+}
+
+/* --------- rilasci (js/calib/landing.js) --------- */
+// Dove si ferma ogni stick dopo un rilascio, dagli stessi input report.
+// Solo con un controller, nessuna calibrazione, flash o range in corso e la
+// condivisione non negata; i modali non contano (il test di precisione fa
+// proprio dei rilasci). Restano in memoria (calTimeline) e partono riassunti
+// nell'evento `landing`: al più due per caricamento, a 20 rilasci dopo una
+// calibrazione e all'uscita dalla pagina.
+const calTimeline = createCalTimeline();
+const landingDetector = createLandingDetector();
+let landingSlowCheckAt = -Infinity;
+let landingSlowBlocked = false;
+function landingAllowed(now) {
+  if (!ds5 || ops.busy || flashing || wizard || rangeSession || rangeCheck) return false;
+  if (now - landingSlowCheckAt > 200 || now < landingSlowCheckAt) {
+    landingSlowCheckAt = now;
+    landingSlowBlocked = !telemetryEnabled();
+  }
+  return !landingSlowBlocked;
+}
+function feedLandings(now) {
+  if (!landingAllowed(now)) {
+    landingDetector.reset();
+    return;
+  }
+  for (const landing of landingDetector.push(sticks, lastStickReportAt ?? now)) {
+    if (calTimeline.landing(landing, landing.t)) emitLandings('count');
+  }
+}
+function emitLandings(trigger, { now = false } = {}) {
+  const pending = calTimeline.pending(trigger, performance.now());
+  if (!pending) return;
+  // Non nel report diagnostico: lì i rilasci ci sono già, uno per uno.
+  if (emitV2(ctx => buildLandingEvent(ctx, pending), { now, diag: false })) calTimeline.sent(trigger);
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).
@@ -2302,6 +2445,7 @@ async function quickCalibrate() {
   const force = quickForceNext || recovery;
   cancelDriftTest();
   const op = ops.beginOp();
+  diagNote('start', { op: 'quick' });
   clearOutcome();
   const bar = $('quick-bar');
   quickPreflightBlocked = false;
@@ -2842,6 +2986,7 @@ async function wizardNext() {
       // ogni calibrazione successiva fino al reload.
       $('btn-wizard-cancel').classList.add('hidden');
       w.op = ops.beginOp();
+      diagNote('start', { op: 'guided' });
       w.startedAt = performance.now();
       w.device = { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null };
       w.controller = ds5;
@@ -3335,12 +3480,18 @@ async function startRange() {
   rangeIntro = null;
   const controller = ds5;
   const op = ops.beginOp();
+  diagNote('start', { op: 'range' });
   rangeOp = op;
   const key = deviceKey;
   const previousLock = rangeWriteLocks.get(key);
+  // Centro prima del range, per il ricontrollo: solo un test drift stabile
+  // misurato dopo l'ultimo commit (stessa connessione: teardown lo azzera).
+  const centerBefore = lastDriftResult && lastDriftResult.unstable !== true && lastDriftCommit === commitSeq
+    ? summarizeResult(lastDriftResult) : null;
+  rangeRecheck = null;
   const opening = { controller, op, key, startTs: performance.now(),
     device: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
-    tracker: null, reported: false };
+    tracker: null, reported: false, centerBefore };
   rangeOpening = opening;
   // Blocco prudenziale scritto prima del comando: una chiusura della pagina
   // durante rangeBegin non può dimenticare la sessione forse aperta.
@@ -3578,7 +3729,10 @@ async function finishRange() {
     // Un range completo sostituisce in RAM quello incompleto: il blocco di
     // QUESTO controller decade (quelli sospesi di altri controller restano).
     setRangeWriteLock(null, key);
-    showOutcome(rangeOutcomeView({}));
+    // Il centro va rimisurato prima di salvare (H12): il test drift dopo il
+    // passo di verifica lo risolve; fino ad allora Write chiede conferma.
+    rangeRecheck = { controller, before: session.centerBefore ?? null, commit: commitSeq };
+    showOutcome(rangeOutcomeView({ checking: true }));
     log('Range calibration complete.');
     ops.endOp(op);
     startRangeCheck();
@@ -3603,8 +3757,8 @@ async function finishRange() {
 
 // Verifica del range appena applicato: un altro giro sul bordo, letto con la
 // calibrazione nuova, dà l'errore di circolarità RMS sui 36 settori. Nessun
-// comando al controller; poi il test drift (il range potrebbe spostare il
-// centro: H12, non ancora verificato).
+// comando al controller; poi il test drift, che ricontrolla il centro
+// (rangeRecheck: il range potrebbe spostarlo, H12 non verificato).
 // Riga fissa sotto la barra: durante la sessione dice che non c'è Cancel e
 // che l'unica uscita è spegnere il controller. Nel controllo successivo è
 // falsa due volte (c'è "Skip check", e spegnere ora butterebbe il range appena
@@ -3864,7 +4018,10 @@ async function rebootController() {
   // ritorni. Se il riavvio c'è stato ma il blocco restasse per errore, il
   // prossimo calibBegin (senza riparazione) verrebbe rifiutato: mai un commit.
   rebootPending = { controller, at: performance.now() };
+  diagNote('start', { op: 'restart' });
   const { sent } = await controller.reboot();
+  diagNote('restart', { sent });
+  if (sent) calTimeline.op('power-cycle');
   if (ds5 !== controller) {
     toast('Controller restarting: reconnect it once it has powered off.', 5000);
     return;
@@ -4062,6 +4219,7 @@ window.addEventListener('pagehide', () => {
   if (rangeSession) reportAbandonedRange(rangeSession, { now: true });
   if (rangeClosing) reportAbandonedRange(rangeClosing, { now: true });
   closeSaveChapter('left', { now: true });
+  emitLandings('left', { now: true });
 });
 
 // Avviso solo se c'è qualcosa da perdere che si potrebbe salvare: una
@@ -4081,6 +4239,10 @@ function setConsent(on) {
   if (!on) {
     consentEpoch += 1;
     for (const item of v2Outbox) if (item.state === 'queued') item.state = 'discarded';
+    // I rilasci raccolti finora non partono più, nemmeno se la condivisione
+    // torna accesa più tardi.
+    calTimeline.clearLandings();
+    landingDetector.reset();
   }
   storageWrite(TELEMETRY_CONSENT_KEY, on ? '1' : '0');
   for (const box of consentBoxes) box.checked = on;
@@ -4130,9 +4292,11 @@ function resolveNotice(keepSharing) {
   if (!noticeOpen) return;
   noticeOpen = false;
   storageWrite(TELEMETRY_NOTICE_KEY, '1');
-  // Anche con "Don't share": la persona ha visto la descrizione attuale, e se
-  // un giorno riaccende la condivisione dal footer non va richiesto di nuovo.
-  storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
+  // Lo scope si scrive solo con "Keep sharing": "Don't share" non accetta la
+  // descrizione. Se poi la persona rispunta la casella del modale Quick, le
+  // categorie v2 aspettano l'avviso al prossimo caricamento; il footer, che le
+  // nomina tutte, lo scrive da sé.
+  if (keepSharing) storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
   setConsent(keepSharing);
   const queued = pendingUploads;
   pendingUploads = [];
@@ -4175,6 +4339,257 @@ if (navigator.hid && telemetryEnabled() && !scopeAccepted()) {
   requestAnimationFrame(() => $('btn-notice-optout').focus());
 }
 
+/* ============================== registrazione diagnostica ============================== */
+
+// Per "poco dopo la calibrazione lo stick torna fuori centro": un registro di
+// al più 30 minuti (js/diag/recorder.js) con connessioni, operazioni, Write, i
+// rilasci di js/calib/landing.js e la posizione a riposo una volta al secondo.
+// Parte solo dal pannello aperto dal footer, vive in memoria in questa scheda e
+// non dipende dal consenso della telemetria, perché non manda nulla da solo:
+// l'invio è un'azione a parte, con una sua conferma, e il consenso non cambia.
+// Tempi relativi all'inizio, mai un orario; nessun seriale né chiave.
+const diag = createDiagRecorder();
+let diagStopTimer = null;
+let diagRenderQueued = false;
+let diagSentCode = null;
+let diagSendReport = null; // il report mostrato nella conferma, quello che parte
+let diagSending = false;
+let diagSeq = 0;
+const DIAG_ISSUE_URL = 'https://github.com/martino-vigiani/sense-calibrator/issues/new?template=bug-report.yml';
+
+function diagNote(type, data) {
+  if (!diag.active) return;
+  if (diag.note(performance.now(), type, data)) scheduleDiagRender();
+}
+
+// Gli eventi v2 di una calibrazione, di un Write o di un periodo non salvato:
+// stessi builder della telemetria, costruiti anche con la condivisione spenta
+// (dal report escono solo su conferma), con un sid fisso e un contatore
+// proprio. Questo non li rende scollegabili: i valori (beforeAxes, afterAxes,
+// passAxes, durate, board, fw) sono gli stessi degli eventi inviati, quindi
+// con la condivisione accesa un report si può abbinare alla telemetria della
+// stessa visita. Lo dicono docs/PRIVACY.md e il modale di invio.
+function diagCalib(build, device) {
+  if (!diag.active) return null;
+  let event;
+  try {
+    event = build({
+      sid: '00000000',
+      seq: Math.min(255, diagSeq),
+      board: device ? device.board : deviceInfo?.board ?? null,
+      fw: device ? device.fw : deviceInfo?.fwversion ?? null,
+    });
+  } catch { return null; }
+  diagSeq += 1;
+  diagNote('calib', { event });
+  return event;
+}
+
+// Dagli input report, come ogni altra misura: tempo del report HID.
+function feedDiag() {
+  const out = diag.push(sticks, lastStickReportAt ?? performance.now());
+  if (out.stopped) diagStopped();
+  else if (out.landings.length || out.row) scheduleDiagRender();
+}
+
+// Il disegno al frame successivo, al più uno per frame (una riga di traccia al
+// secondo e qualche rilascio): in una tab nascosta aspetta il ritorno.
+function scheduleDiagRender() {
+  if (diagRenderQueued || $('diag-panel').classList.contains('hidden')) return;
+  diagRenderQueued = true;
+  requestAnimationFrame(() => {
+    diagRenderQueued = false;
+    renderDiag();
+  });
+}
+
+function diagStatusText() {
+  if (diag.active) return 'Recording. It stops by itself after 30 minutes.';
+  if (!diag.started) return 'Not recording.';
+  const minutes = Math.max(1, Math.round(diag.elapsed(performance.now()) / 60_000));
+  const why = diag.stopReason === 'time-limit' ? 'Stopped at the 30-minute limit' : `Stopped after ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return diagSentCode ? `${why}. Sent: code ${diagSentCode}.` : `${why}. Download it or send it to the developer.`;
+}
+
+function renderDiag() {
+  const now = performance.now();
+  setLive($('diag-status'), diagStatusText());
+  $('btn-diag-start').classList.toggle('hidden', diag.active);
+  $('btn-diag-start').textContent = diag.started ? 'Start a new recording' : 'Start recording';
+  $('btn-diag-stop').classList.toggle('hidden', !diag.active);
+  $('btn-diag-download').disabled = !diag.started;
+  $('btn-diag-send').disabled = !diag.started || diagSending;
+  // Contatori che cambiano di continuo: testo normale, mai una regione live.
+  const elapsed = Math.floor(diag.elapsed(now) / 1000);
+  setLive($('diag-elapsed'), diag.started
+    ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} recorded · ${diag.landings.length} release${diag.landings.length === 1 ? '' : 's'} · ${diag.events.length} event${diag.events.length === 1 ? '' : 's'}`
+    : '');
+  const parts = { trace: diag.trace, landings: diag.landings, events: diag.events, durMs: diag.elapsed(now) };
+  const chart = $('diag-chart');
+  const width = Math.max(280, Math.round(chart.clientWidth || 640));
+  chart.innerHTML = diagChartSvg(parts, { width, height: 180 });
+  chart.setAttribute('aria-label', diagChartLabel(parts));
+  $('diag-landings').innerHTML = landingRowsHtml(diag.landings);
+  setLive($('diag-summary'), diag.landings.length ? landingSummaryText(diag.summary()) : '');
+}
+
+function openDiagPanel() {
+  const panel = $('diag-panel');
+  panel.classList.remove('hidden');
+  $('btn-diag-open').setAttribute('aria-expanded', 'true');
+  renderDiag();
+  panel.scrollIntoView?.({ block: 'start', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  panel.focus({ preventScroll: true });
+}
+
+function closeDiagPanel() {
+  // Chiudere il pannello non ferma la registrazione: il link del footer lo riapre.
+  $('diag-panel').classList.add('hidden');
+  $('btn-diag-open').setAttribute('aria-expanded', 'false');
+  $('btn-diag-open').focus();
+}
+
+function startDiag() {
+  if (diag.active) return;
+  if (diag.started && !diagSentCode
+    && !confirm('Start a new recording? The current one is discarded unless you downloaded it.')) return;
+  diag.start(performance.now());
+  // Numerazione nuova: un rimando a un evento della registrazione precedente
+  // non vale più.
+  diagSeq = 0;
+  if (saveChapter) { saveChapter.diagRef = null; saveChapter.diagSessions = 0; }
+  if (lastCalibV2) lastCalibV2.diagSeq = null;
+  diagSentCode = null;
+  $('diag-sent').classList.add('hidden');
+  // Lo stato di partenza, se un controller è già collegato.
+  if (ds5 && deviceInfo) {
+    diagNote('connect', { board: deviceInfo.board, fw: deviceInfo.fwversion });
+    if (nvStatus) diagNote('nv', { nv: nvStatus });
+    if (unsaved) diagNote('unsaved', { on: true });
+    if (powerCycleApplies()) diagNote('power-cycle', { lock: 'marked' });
+  }
+  // Guardia per i 30 minuti senza report (controller scollegato): i report,
+  // quando arrivano, fermano la registrazione da soli.
+  clearTimeout(diagStopTimer);
+  diagStopTimer = setTimeout(() => {
+    diagStopTimer = null;
+    if (diag.tick(performance.now())) diagStopped();
+  }, diag.limits.maxMs + 1000);
+  log('Diagnostic recording started.');
+  renderDiag();
+}
+
+function stopDiag() {
+  if (!diag.stop(performance.now(), 'user')) return;
+  clearTimeout(diagStopTimer);
+  diagStopTimer = null;
+  log('Diagnostic recording stopped.');
+  renderDiag();
+  // Il bottone premuto sparisce: il fuoco va al passo successivo.
+  $('btn-diag-download').focus();
+}
+
+function diagStopped() {
+  clearTimeout(diagStopTimer);
+  diagStopTimer = null;
+  log('Diagnostic recording stopped at the 30-minute limit.');
+  renderDiag();
+}
+
+function downloadDiag() {
+  if (!diag.started) return;
+  const report = diag.report(performance.now());
+  const error = validateDiagnostics(report);
+  if (error) { log(`Diagnostic report not valid: ${error}.`); toast('The recording could not be exported.', 5000, { alert: true }); return; }
+  try {
+    const url = URL.createObjectURL(new Blob([diagnosticsJson(report)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    // Nessuna data nel nome: il file non porta orari.
+    a.download = 'sense-calibrator-diagnostics.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    log(`Diagnostic download failed: ${e.message || e}.`);
+    toast('The download could not start in this browser.', 5000, { alert: true });
+  }
+}
+
+// La conferma mostra il report che partirà, con le sue dimensioni: è quello,
+// fotografato all'apertura, che "Send report" manda.
+function openDiagSend() {
+  if (!diag.started || diagSending) return;
+  diagSendReport = diag.report(performance.now());
+  const error = validateDiagnostics(diagSendReport);
+  const info = diagnosticsContents(diagSendReport);
+  const tooLarge = info.bytes > diag.limits.maxBytes;
+  setLive($('diag-send-what'), error ? 'This recording can’t be sent: download it instead and attach it to an issue.'
+    : tooLarge ? 'This recording is too large to send: download it instead and attach it to an issue.'
+      : sendSummaryText(info));
+  setLive($('diag-send-msg'), '');
+  $('btn-diag-send-go').disabled = !!error || tooLarge;
+  $('btn-diag-send-go').textContent = 'Send report';
+  if (error) log(`Diagnostic report not valid: ${error}.`);
+  openModal('modal-diag-send');
+}
+
+const DIAG_SEND_ERRORS = {
+  429: 'Too many reports from this connection in the last hour. Try again later, or download the file and attach it to an issue.',
+  413: 'The report is too large to send. Download the file and attach it to an issue.',
+  507: 'The report store is full right now. Download the file and attach it to an issue.',
+};
+
+async function sendDiag() {
+  const report = diagSendReport;
+  if (!report || diagSending) return;
+  diagSending = true;
+  const btn = $('btn-diag-send-go');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  setLive($('diag-send-msg'), 'Sending…');
+  try {
+    const code = await uploadDiagnostics(report, { fetchImpl: (url, init) => fetch(url, init) });
+    diagSentCode = code;
+    diagSendReport = null;
+    closeModal('modal-diag-send');
+    const sent = $('diag-sent');
+    sent.innerHTML = `<p>Sent. Your report code is <code>${esc(code)}</code>. Quote it in a GitHub issue so the developer can find the report.</p>`
+      + `<p><a href="${DIAG_ISSUE_URL}&amp;diagnostic-code=${encodeURIComponent(code)}" target="_blank" rel="noopener">Open an issue with this code</a></p>`;
+    sent.classList.remove('hidden');
+    log(`Diagnostic report sent: ${code}.`);
+    renderDiag();
+  } catch (error) {
+    const text = DIAG_SEND_ERRORS[error.status]
+      ?? (error.reason === 'http' ? `The server refused the report (HTTP ${error.status}). Download the file and attach it to an issue.`
+        : 'Couldn’t reach the server. Check the connection and try again, or download the file and attach it to an issue.');
+    setLive($('diag-send-msg'), text);
+    btn.textContent = 'Try again';
+    btn.disabled = error.status === 413 || error.status === 507 || error.reason === 'invalid' || error.reason === 'too-large';
+    log(`Diagnostic report not sent: ${error.message || error}.`);
+  } finally {
+    diagSending = false;
+    $('btn-diag-send').disabled = !diag.started;
+  }
+}
+
+$('btn-diag-open').addEventListener('click', () => {
+  if ($('diag-panel').classList.contains('hidden')) openDiagPanel();
+  else closeDiagPanel();
+});
+$('btn-diag-close').addEventListener('click', closeDiagPanel);
+$('btn-diag-start').addEventListener('click', startDiag);
+$('btn-diag-stop').addEventListener('click', stopDiag);
+$('btn-diag-download').addEventListener('click', downloadDiag);
+$('btn-diag-send').addEventListener('click', openDiagSend);
+$('btn-diag-send-go').addEventListener('click', () => sendDiag());
+$('btn-diag-send-cancel').addEventListener('click', () => {
+  if (diagSending) return;
+  diagSendReport = null;
+  closeModal('modal-diag-send');
+});
+
 /* ============================== tastiera ============================== */
 
 // Esc chiude solo ciò che è annullabile senza lasciare il controller in uno
@@ -4189,6 +4604,7 @@ const ESC_DISMISS = {
   'modal-game': 'btn-game-exit',
   'modal-sensitivity': 'btn-sensitivity-exit',
   'modal-playtest': 'btn-playtest-exit',
+  'modal-diag-send': 'btn-diag-send-cancel',
 };
 
 document.addEventListener('keydown', e => {
@@ -4283,6 +4699,8 @@ window.__senseExtractStable = extractStableSamples;
 window.__senseWaitForStable = waitForStable;
 // Storico locale delle calibrazioni (telemetria per futura calibrazione ML).
 window.__senseCalibSessions = () => JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
+// Il report diagnostico com'è ora (lo stesso che Download JSON salverebbe).
+window.__senseDiagnostics = () => (diag.started ? diag.report(performance.now()) : null);
 // Eventi v2 di questa pagina con il loro stato (queued, sending, sent, failed,
 // discarded). Solo memoria: ricaricare la pagina li perde.
 window.__senseTelemetryV2 = () => v2Outbox.map(item => ({ state: item.state, event: JSON.parse(JSON.stringify(item.event)) }));

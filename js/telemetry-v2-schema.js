@@ -6,7 +6,7 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://subralabs.com/schemas/calib-events-v2.json",
   "title": "CalibrationEventV2",
-  "description": "One anonymous Sense-Calibrator telemetry event (contract v2). Exactly one of six event types, selected by `type`. Base fields are required; verification and completion diagnostics are optional for compatibility with older pages. Every diagnostic object is closed and requires all its fields. Unknown fields are rejected, strings are enums (only `sid` is a pattern). No serial number, device identifier, free text or client timestamp.",
+  "description": "One anonymous Sense-Calibrator telemetry event (contract v2). Exactly one of seven event types, selected by `type`. Base fields are required; verification and completion diagnostics and the rest timing fields are optional for compatibility with older pages. Every diagnostic object is closed and requires all its fields. Unknown fields are rejected, strings are enums (only `sid` is a pattern). No serial number, device identifier, free text or client timestamp: times are relative to the last calibration of the page load, rounded to 10 seconds.",
   "oneOf": [
     {
       "$ref": "#/$defs/QuickEvent"
@@ -25,6 +25,9 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
     },
     {
       "$ref": "#/$defs/RestEvent"
+    },
+    {
+      "$ref": "#/$defs/LandingEvent"
     }
   ],
   "discriminator": {
@@ -35,7 +38,8 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
       "range": "#/$defs/RangeEvent",
       "flash": "#/$defs/FlashEvent",
       "save": "#/$defs/SaveEvent",
-      "rest": "#/$defs/RestEvent"
+      "rest": "#/$defs/RestEvent",
+      "landing": "#/$defs/LandingEvent"
     }
   },
   "$defs": {
@@ -188,6 +192,112 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
       "type": "number",
       "minimum": 0,
       "maximum": 256
+    },
+    "SinceCalS": {
+      "description": "Seconds since the last Quick or Guided calibration that changed the controller RAM in this page load, rounded to 10 s and capped at 3600; null when there was none (or a different controller was connected since).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 3600
+    },
+    "OpType": {
+      "enum": [
+        "quick",
+        "guided",
+        "range",
+        "flash",
+        "reconnect",
+        "power-cycle"
+      ]
+    },
+    "OpsSince": {
+      "description": "The calibration that SinceCalS counts from (quick or guided), then each other kind of operation since then, once, in the order first seen: range (a Range that may have changed the RAM), flash (a Write to memory attempt), reconnect (the controller connected again), power-cycle (a Restart sent or a power-off confirmed). Null when SinceCalS is null.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/OpType"
+      }
+    },
+    "LandingPoint": {
+      "description": "Where a stick stopped after one release: the mean of a still window in the reported (calibrated) frame.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axes",
+        "sinceCalS"
+      ],
+      "properties": {
+        "axes": {
+          "$ref": "#/$defs/AxisPair"
+        },
+        "sinceCalS": {
+          "$ref": "#/$defs/SinceCalS"
+        }
+      }
+    },
+    "StickLandings": {
+      "description": "Releases of one stick since the calibration in SinceCalS (since the page load when there was none). With count 0 every other field is null and recent is empty.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "median",
+        "spread",
+        "firstS",
+        "lastS",
+        "recent"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "median": {
+          "description": "Per-axis median of the landing points, in half-LSB units.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/HalfLsb"
+          }
+        },
+        "spread": {
+          "description": "[50th, 95th percentile] distance of the landing points from their median, in LSB.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/Lsb"
+          }
+        },
+        "firstS": {
+          "$ref": "#/$defs/SinceCalS"
+        },
+        "lastS": {
+          "$ref": "#/$defs/SinceCalS"
+        },
+        "recent": {
+          "description": "The last landing points, oldest first.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/LandingPoint"
+          }
+        }
+      }
     },
     "StickNoise": {
       "type": "object",
@@ -955,6 +1065,91 @@ export const EVENTS_V2_SCHEMA = Object.freeze({
           "maxItems": 2,
           "items": {
             "$ref": "#/$defs/StickNoise"
+          }
+        },
+        "sinceCalS": {
+          "description": "At the end of the window. Older events omit this field.",
+          "$ref": "#/$defs/SinceCalS"
+        },
+        "opsSince": {
+          "$ref": "#/$defs/OpsSince"
+        },
+        "landings": {
+          "description": "Releases of either stick since that calibration; null when SinceCalS is null.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "LandingEvent": {
+      "description": "Where the sticks stopped after each release (thumb pushed past 25% and let go) since the last calibration, from the same input reports as the rest summaries. Sent at most twice per page load: after 20 releases following a calibration, and when the page is left.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "type",
+        "sid",
+        "seq",
+        "app",
+        "board",
+        "trigger",
+        "ref",
+        "sinceCalS",
+        "opsSince",
+        "sticks"
+      ],
+      "properties": {
+        "v": {
+          "$ref": "#/$defs/Version"
+        },
+        "type": {
+          "const": "landing"
+        },
+        "sid": {
+          "$ref": "#/$defs/Sid"
+        },
+        "seq": {
+          "$ref": "#/$defs/Seq"
+        },
+        "app": {
+          "$ref": "#/$defs/App"
+        },
+        "board": {
+          "$ref": "#/$defs/Board"
+        },
+        "trigger": {
+          "description": "count: 20 releases after a calibration; left: the page was left.",
+          "enum": [
+            "count",
+            "left"
+          ]
+        },
+        "ref": {
+          "description": "`seq` of the calibration event SinceCalS counts from, or null.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 255
+        },
+        "sinceCalS": {
+          "$ref": "#/$defs/SinceCalS"
+        },
+        "opsSince": {
+          "$ref": "#/$defs/OpsSince"
+        },
+        "sticks": {
+          "description": "[left, right].",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/StickLandings"
           }
         }
       }

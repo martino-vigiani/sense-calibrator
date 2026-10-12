@@ -202,7 +202,7 @@ test('modals keep the focus: panel fallback, visible-only trap, autofocus on the
   const css = await readFile(cssPath, 'utf8');
   const app = await readFile(new URL('../js/app.js', import.meta.url), 'utf8');
   const panels = html.match(/<div class="modal-panel[^"]*"[^>]*>/g);
-  assert.equal(panels.length, 7);
+  assert.equal(panels.length, 8);
   for (const panel of panels) assert.match(panel, /tabindex="-1"/);
   assert.match(ruleBody(css, '.modal-panel:focus'), /outline:\s*none/);
   for (const id of ['btn-quick-go', 'btn-wizard-next', 'btn-game-start'])
@@ -211,6 +211,9 @@ test('modals keep the focus: panel fallback, visible-only trap, autofocus on the
   assert.doesNotMatch(tagOf(html, 'telemetry-consent'), /data-autofocus/);
   // Nel modale flash il default resta Cancel (WS5 mette l'attributo quando serve).
   assert.doesNotMatch(tagOf(html, 'btn-flash-go'), /data-autofocus/);
+  // Invio del report diagnostico: conferma esplicita, si apre su Cancel.
+  assert.match(tagOf(html, 'btn-diag-send-cancel'), /data-autofocus/);
+  assert.doesNotMatch(tagOf(html, 'btn-diag-send-go'), /data-autofocus/);
   assert.match(app, /typeof el\.checkVisibility === 'function'/);
   const trap = app.match(/if \(e\.key === 'Tab' && activeModal\) \{([\s\S]*?)\n  \}/)?.[1];
   assert.ok(trap, 'Tab trap should exist');

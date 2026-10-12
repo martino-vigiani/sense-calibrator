@@ -92,6 +92,13 @@ function check(root, schema, value, path, errors) {
   return true;
 }
 
+// Lo stesso sottoinsieme per un altro contratto (il report diagnostico,
+// diagnostics.js): null se `value` rispetta `schema`, altrimenti il primo errore.
+function validateSchema(value, schema) {
+  const errors = [];
+  return check(schema, schema, value, '$', errors) ? null : (errors[0] || '$: invalid');
+}
+
 // null se l'evento rispetta il contratto, altrimenti il primo errore (percorso
 // e regola, mai il valore ricevuto).
 function validateEventV2(event, schema = SCHEMA) {
@@ -118,4 +125,4 @@ function validateEventV2(event, schema = SCHEMA) {
   return null;
 }
 
-module.exports = { SCHEMA, validateEventV2 };
+module.exports = { SCHEMA, validateEventV2, validateSchema };

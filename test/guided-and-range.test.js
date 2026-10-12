@@ -1079,3 +1079,91 @@ test('only rotation missing: no Finish anyway at 15 s, a per-stick instruction, 
   assert.equal(A.counts.range, 2);
   assert.equal(h.peek().rangeWriteLock, null);
 });
+
+// ------------------------------------------------------------------ ricontrollo del centro dopo Range (H12)
+
+// Telemetria v2 (27/9–12/10): dopo un range completo il centro era fuori 12
+// volte su 13. Il modello non sposta il centro da solo: il test lo sposta a mano
+// (posizione a riposo in LSB) dopo il range, come farebbe il firmware se H12
+// fosse vero. Risultati model-verified, non verifiche hardware.
+async function completeRange(h, A) {
+  await h.run(h.click('btn-range')); await h.run(h.click('btn-range-start'));
+  await rotateBothWays(h, A);
+  await h.run(h.click('btn-range-done'));
+}
+const lockNow = h => h.eval('JSON.stringify(currentWriteLock())');
+
+test('Range moves the center: the recheck after the drift test says so, offers Quick before saving and guards Write, with no extra HID command', async () => {
+  const { h, A } = await setup({ drift: [[0.2, -0.3], [-0.1, 0.4]] });
+  assert.ok(h.peek().lastDriftResult, 'the connection drift test measured the center before Range');
+  await completeRange(h, A);
+  assert.ok(h.peek().rangeCheck);
+  // Prima del ricontrollo: Write chiede conferma, nessun invito a salvare.
+  assert.match(h.$('calib-outcome').innerHTML, /drift test measures the center again/);
+  assert.deepEqual(JSON.parse(lockNow(h)).reasons.map(r => r.code), ['range-center-unchecked']);
+  assert.equal(h.$('calib-outcome').dataset.save, 'off');
+  assert.equal(h.$('btn-flash').disabled, false, 'guarded, not disabled');
+  // Il range ha spostato il centro dello stick sinistro di circa 4,7%.
+  A.sticks[0].rest = [5.5, -2.5];
+  const sent = A.commandLog.length;
+  await h.click('btn-range-done'); // Skip check → test drift
+  assert.ok(h.peek().driftTest);
+  await h.advance(8000);
+  assert.equal(h.peek().driftTest, null);
+  assert.equal(A.commandLog.length, sent, 'the recheck sends nothing');
+  const html = h.$('calib-outcome').innerHTML;
+  assert.match(html, /Range applied, but the center moved/);
+  assert.match(html, /The left stick moved off-center after the Range calibration\. Run Quick calibration now, before saving/);
+  assert.match(html, /isn’t confirmed on hardware/);
+  assert.match(html, /data-outcome-action="quick">Quick calibration</);
+  assert.equal(h.$('calib-outcome').dataset.tone, 'warn');
+  assert.equal(h.$('calib-outcome').dataset.save, 'off');
+  const lock = JSON.parse(lockNow(h));
+  assert.equal(lock.mode, 'guarded');
+  assert.deepEqual(lock.reasons.map(r => r.code), ['range-center-off']);
+  assert.match(h.$('banner-lock').textContent, /off-center after the Range calibration/);
+  const ev = h.sessions().filter(s => s.kind === 'range-recheck').at(-1);
+  assert.deepEqual([ev.verdict, ev.moved], ['off', true]);
+  assert.ok(ev.before.off.every(v => v < 1.25) && ev.after.off[0] > 3, 'local history: before and after');
+  // Il bottone apre Quick (nessun comando finché non si preme Calibrate).
+  h.eval('runOutcomeAction("quick")');
+  await h.advance(300);
+  assert.equal(h.visible('modal-quick'), true);
+  assert.equal(A.commandLog.length, sent);
+  // Telemetria v2: nessun evento nuovo, nessun codice nuovo nel contratto.
+  assert.equal(h.eval('window.__senseTelemetryV2()').some(e => e.event?.type === 'range-recheck'), false);
+});
+
+test('Range leaves the center where it was: the recheck shows no warning and Write is free', async () => {
+  const { h, A } = await setup({ drift: [[0.2, -0.3], [-0.1, 0.4]] });
+  await completeRange(h, A);
+  const sent = A.commandLog.length;
+  await h.click('btn-range-done');
+  await h.advance(8000);
+  assert.equal(A.commandLog.length, sent);
+  const html = h.$('calib-outcome').innerHTML;
+  assert.match(html, /Center checked after the Range calibration: both sticks are within 1 step of center/);
+  assert.doesNotMatch(html, /off-center|moved|data-outcome-action="quick"/);
+  assert.equal(h.$('calib-outcome').dataset.tone, 'ok');
+  assert.equal(JSON.parse(lockNow(h)).mode, 'allowed');
+  assert.equal(h.$('calib-outcome').dataset.save, 'on', 'the save invitation comes back after the check');
+  assert.equal(h.sessions().filter(s => s.kind === 'range-recheck').at(-1).verdict, 'centered');
+});
+
+test('a moving drift test leaves the recheck pending; a later still one resolves it', async () => {
+  const { h, A } = await setup({ drift: [[0.2, -0.3], [-0.1, 0.4]] });
+  await completeRange(h, A);
+  // Una mano che muove lo stick per tutto il test (e i suoi tentativi).
+  touch(A, { stick: 0, t0: h.clock.now(), dur: 20_000, amp: [0, 0], at: t => 30 * Math.sin(t / 60) });
+  await h.click('btn-range-done');
+  await h.advance(20_000);
+  assert.equal(h.peek().lastDriftResult.unstable, true);
+  assert.deepEqual(JSON.parse(lockNow(h)).reasons.map(r => r.code), ['range-center-unchecked']);
+  assert.equal(h.sessions().some(s => s.kind === 'range-recheck'), false);
+  A.touches.length = 0;
+  A.sticks[1].rest = [-4, 7];
+  await h.run(h.click('btn-retest'));
+  await h.advance(8000);
+  assert.match(h.$('calib-outcome').innerHTML, /Range applied, but the center/);
+  assert.deepEqual(JSON.parse(lockNow(h)).reasons.map(r => r.code), ['range-center-off']);
+});

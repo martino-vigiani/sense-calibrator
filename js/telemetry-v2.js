@@ -18,15 +18,16 @@
 // è la data della release. Il giorno di ricezione lo aggiunge il server.
 
 import { EVENTS_V2_SCHEMA } from './telemetry-v2-schema.js';
+import { summarizeLandings } from './calib/landing.js';
 
 export const EVENTS_V2_ENDPOINT = 'https://subralabs.com/api/calib/v2/events';
 // Data della release che produce gli eventi (YYYYMMDD). Va aggiornata a ogni
 // rilascio che cambia cosa si misura, così il report separa le versioni.
-export const TELEMETRY_APP_BUILD = 20261012;
+export const TELEMETRY_APP_BUILD = 20261013;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una
 // più nuova, l'avviso ricompare prima che partano le categorie nuove.
-export const TELEMETRY_SCOPE = 4;
+export const TELEMETRY_SCOPE = 5;
 
 /* ------------------------------ validatore ------------------------------ */
 
@@ -112,6 +113,14 @@ function check(root, schema, value, path, errors) {
     }
   }
   return true;
+}
+
+// Lo stesso sottoinsieme per un altro contratto (il report diagnostico,
+// js/diag/recorder.js): null se `value` rispetta `schema`, altrimenti il primo
+// errore. Nessuna regola specifica degli eventi v2.
+export function validateSchema(value, schema) {
+  const errors = [];
+  return check(schema, schema, value, '$', errors) ? null : (errors[0] ?? '$: invalid');
 }
 
 // Ritorna null se l'evento rispetta il contratto, altrimenti il primo errore.
@@ -317,8 +326,22 @@ export function buildSaveEvent(ctx, { result, ref, sessions, lock, opens, remind
   };
 }
 
-// Riassunto di una finestra a riposo (js/calib/rest-noise.js).
-export function buildRestEvent(ctx, { summary, drift, state, discarded }) {
+// Tempo dall'ultima calibrazione (js/telemetry-timeline.js): arrotondato a
+// 10 s e fermato a un'ora, null senza calibrazione. È l'unico tempo che esce,
+// ed è relativo: mai un orario.
+export const sinceCalSFor = ms => (isNum(ms) ? clamp(Math.round(ms / 10_000) * 10, 0, 3600) : null);
+const OP_TYPES = ['quick', 'guided', 'range', 'flash', 'reconnect', 'power-cycle'];
+const opsSinceFor = ops => {
+  if (!Array.isArray(ops)) return null;
+  const out = [];
+  for (const op of ops) if (OP_TYPES.includes(op) && !out.includes(op)) out.push(op);
+  return out.slice(0, 8);
+};
+
+// Riassunto di una finestra a riposo (js/calib/rest-noise.js); `timing` è
+// timeline.rest(now), alla fine della finestra.
+export function buildRestEvent(ctx, { summary, drift, state, discarded, timing = null }) {
+  const sinceCalS = sinceCalSFor(timing?.sinceMs);
   return {
     ...envelope('rest', ctx),
     board: board(ctx.board),
@@ -330,6 +353,48 @@ export function buildRestEvent(ctx, { summary, drift, state, discarded }) {
     gaps: summary.gaps,
     discarded: count(discarded, 1000),
     sticks: summary.sticks,
+    sinceCalS,
+    opsSince: sinceCalS === null ? null : opsSinceFor(timing.ops),
+    landings: sinceCalS === null ? null : count(timing.landings, 10_000),
+  };
+}
+
+// Mezzi LSB con segno, come gli assi di Quick e Guided: un rilascio è la
+// media di una finestra ferma (0,1 LSB), qui al mezzo LSB.
+const halfLsb = value => clamp(Math.round(value * 2), -128, 128);
+const LANDING_RECENT = 20;
+
+function stickLandings(list, n, summary) {
+  if (!list.length) return { count: count(n, 10_000), median: null, spread: null, firstS: null, lastS: null, recent: [] };
+  const lsb = value => round(clamp(value, 0, 256), 2);
+  return {
+    count: count(n, 10_000),
+    median: summary.median.map(halfLsb),
+    spread: summary.spreadLsb.map(lsb),
+    firstS: sinceCalSFor(list[0].sinceMs),
+    lastS: sinceCalSFor(list.at(-1).sinceMs),
+    recent: list.slice(-LANDING_RECENT).map(l => ({ axes: l.landAxes.map(halfLsb), sinceCalS: sinceCalSFor(l.sinceMs) })),
+  };
+}
+
+// Dove si fermano gli stick dopo ogni rilascio, dall'ultima calibrazione
+// (timeline.pending). Mediana e dispersione da summarizeLandings sui rilasci
+// tenuti (i più recenti), `count` su tutti.
+export function buildLandingEvent(ctx, { trigger, ref, sinceMs, ops, counts, landings }) {
+  const list = (landings ?? []).filter(l => l && Array.isArray(l.landAxes) && l.landAxes.length === 2 && l.landAxes.every(isNum));
+  const summary = summarizeLandings(list);
+  const sinceCalS = sinceCalSFor(sinceMs);
+  return {
+    ...envelope('landing', ctx),
+    board: board(ctx.board),
+    trigger: trigger === 'count' ? 'count' : 'left',
+    ref: Number.isInteger(ref) && ref >= 0 && ref <= 255 ? ref : null,
+    sinceCalS,
+    opsSince: sinceCalS === null ? null : opsSinceFor(ops),
+    sticks: ['left', 'right'].map(stick => {
+      const mine = list.filter(l => l.stick === stick);
+      return stickLandings(mine, Math.max(counts?.[stick] ?? 0, mine.length), summary[stick]);
+    }),
   };
 }
 

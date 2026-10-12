@@ -30,6 +30,10 @@ import * as rangeDiagnosticsModule from '../../js/calib/range-diagnostics.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 import * as telemetryV2Module from '../../js/telemetry-v2.js';
 import * as restNoiseModule from '../../js/calib/rest-noise.js';
+import * as landingModule from '../../js/calib/landing.js';
+import * as timelineModule from '../../js/telemetry-timeline.js';
+import * as diagRecorderModule from '../../js/diag/recorder.js';
+import * as diagViewModule from '../../js/diag/view.js';
 
 const APP_SOURCE = fs.readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 const INDEX_HTML = fs.readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
@@ -259,7 +263,7 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
   hid.chooser.push(...chooser);
   // "Avviso letto" vuol dire l'avviso attuale: v1 (notice) e v2 (scope).
   const store = new Map(Object.entries({
-    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '4' } : {}),
+    ...(telemetryNoticeSeen ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': '5' } : {}),
     ...storage,
   }));
   const uploads = [];
@@ -329,6 +333,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
         },
       },
       './calib/rest-noise.js': restNoiseModule,
+      './calib/landing.js': landingModule,
+      './telemetry-timeline.js': timelineModule,
       './calib/measure.js': measureModule,
       './calib/sampling.js': samplingModule,
       './calib/quick.js': quickModule,
@@ -342,6 +348,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './calib/wizard-gate.js': wizardGateModule,
       './calib/range-coverage.js': rangeCoverageModule,
       './calib/range-diagnostics.js': rangeDiagnosticsModule,
+      './diag/recorder.js': diagRecorderModule,
+      './diag/view.js': diagViewModule,
       ...STUBS,
     },
   };
