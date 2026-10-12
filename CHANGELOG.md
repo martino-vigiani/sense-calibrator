@@ -2,6 +2,12 @@
 
 Notable changes to Sense Calibrator. Dates are ISO 8601.
 
+## Unreleased
+
+- **Guided calibration can be stopped without unplugging the controller.** In the v2 telemetry (27 Sep to 12 Oct), 81 of 320 Guided runs ended with the controller unplugged or the page closed mid-session, often after many failed waits. Before the change, Stop appeared only after two missed corners. It now also appears after any failed wait at the current step. Stop sends nothing: it leaves the session uncommitted, keeps the power-cycle lock and opens a result panel with **Restart the controller** and **I already turned it off**.
+- **A failed wait now says why.** If a stick stays beyond 50% of center when the session starts, the page says that pressing Continue again won't help. It no longer offers **My stick doesn't rest still**, because that option can't widen the 50% bound. If the stick was already that far out before Start, the page says it is probably stuck near the edge. At a corner, the message says which stick settled away from its rest point and how far. If that is still outside the looser check, the message points to Stop. The diagnosis only changes the wording. The sample rules, tolerances, escape radius and HID commands are unchanged. The v2 contract is also unchanged, so a stopped run is still reported as `error` with `needsPowerCycle`.
+- Verified with the virtual DualSense and app harness only, not with a physical controller.
+
 ## 2026-10-01
 
 - Range shows each stick's edge coverage, four sides, full turns and direction reversal separately. A full coverage bar no longer hides a missing reversal; short sectors are marked on the dials. Completion and Write safety requirements are unchanged.

@@ -780,3 +780,26 @@ test('a Quick result names the axis that stays off-center pass after pass', () =
     session: { before: null, after: null, passXY: ly } });
   assert.match(textOf(v), /the left stick’s Y axis stays about 6\.5 steps above center/);
 });
+
+// Stop del wizard a sessione aperta: non è un errore del controller e non è
+// un successo; Write resta bloccato, le uscite sono Restart e "already off".
+test('a stopped Guided run reads as stopped, offers the restart exits and never enables Write', () => {
+  for (const why of ['corner', 'stuck', 'far', 'rest']) {
+    for (const committed of [false, true]) {
+      const view = guidedOutcomeView({ before: summary([70, 0.555]), committed, leftOpen: true, stopped: { why, step: 0 } });
+      const text = textOf(view);
+      assert.equal(view.title, 'Guided calibration stopped');
+      assert.doesNotMatch(text, /The controller reported/);
+      assert.doesNotMatch(text, SUCCESS);
+      assert.match(text, /hold PS for 10 s/);
+      assert.match(text, committed ? /already changed the calibration/ : /Nothing from this run was committed/);
+      assert.deepEqual(view.actions.map(a => a.id), ['restart', 'powered-off']);
+      // il blocco vero è quello di spegnimento (la pagina lo passa sempre);
+      // anche da solo l'esito non lascia Write libero
+      assert.notEqual(writeLockFor({ center: view.center }).mode, 'allowed');
+      assert.equal(writeLockFor({ center: view.center, needsPowerCycle: true }).mode, 'disabled');
+    }
+  }
+  assert.match(textOf(guidedOutcomeView({ stopped: { why: 'stuck' }, leftOpen: true, committed: false })),
+    /stuck near the edge[\s\S]*haven’t confirmed/);
+});

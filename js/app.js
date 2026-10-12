@@ -28,7 +28,7 @@ import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hand
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 import { rangeProgress, rangeRequirementsHtml } from './ui/range-progress.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+  WIZARD_DEFAULTS, captureRestReferenceDetailed, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 import { rangeCompletion } from './calib/range-diagnostics.js';
@@ -959,6 +959,9 @@ function wizardHoldKnown(w) {
     if (Math.max(p.left, p.right) >= WIZARD_DEFAULTS.cornerDot) return true;
   }
   if (!w.gateTimedOut) return false;
+  // Uno stick bloccato al bordo (già oltre il 50% a mani ferme prima di
+  // calibBegin) non è "tenuto": "Stick held: let go" contraddirebbe il testo.
+  if (w.stuck) return false;
   if (!w.ref) return Math.hypot(sticks.lx, sticks.ly) > WIZARD_DEFAULTS.refRadius || Math.hypot(sticks.rx, sticks.ry) > WIZARD_DEFAULTS.refRadius;
   const tol = w.escaped ? Math.max(WIZARD_DEFAULTS.escapeLsb * STICK_LSB, w.tol ?? 0) : w.tol;
   return ['lx', 'ly', 'rx', 'ry'].some(a => Math.abs(sticks[a] - w.ref[a]) > tol);
@@ -2511,18 +2514,83 @@ function wizardHideLive() {
 const wizardCurrent = w => wizard === w && !w.interrupted && !!w.controller && ds5 === w.controller;
 const wizardGone = () => Object.assign(new Error('Controller disconnected'), { gone: true });
 
+// Uscita sicura a sessione aperta (fasi 'ref' e 'corner'): dopo un timeout
+// del gate nello stesso passo, o dopo 2 angoli mancati. Telemetria v2 (27
+// set–12 ott): 81 sessioni Guided su 320 finivano `disconnected`, tutte con la
+// sessione aperta, 33 al passo 0 e 39 al primo angolo, con fino a 15 timeout:
+// fuori dai due angoli mancati non c'era nessuna uscita, solo staccare il cavo
+// o chiudere la pagina. Stop fa la stessa cosa (nessun calibEnd, blocco di
+// spegnimento) ma lo dice e offre il riavvio. Mai durante un'attesa (`running`).
+function wizardStopOffered(w) {
+  return !!w && (w.phase === 'ref' || w.phase === 'corner')
+    && (w.timeoutsAtStep >= 1 || w.cornerMissesAtStep >= 2);
+}
+function syncWizardStop(w) {
+  const btn = $('btn-wizard-cancel');
+  const show = wizardStopOffered(w);
+  if (show) btn.textContent = 'Stop and turn off controller';
+  btn.classList.toggle('hidden', !show);
+}
+
+const WIZARD_SIDE_INDEX = { left: 0, right: 1 };
+function wizardSticksPhrase(sides, values) {
+  const what = sides.length === 2 ? 'Both sticks' : `The ${sides[0]} stick`;
+  const nums = sides.map(side => Math.round(values[WIZARD_SIDE_INDEX[side]] * 100));
+  const amount = nums.length === 2 && nums[0] !== nums[1] ? `${nums[0]}% and ${nums[1]}%` : `${Math.max(...nums)}%`;
+  return { what, amount, verb: sides.length === 2 ? 'stay' : 'stays', settle: sides.length === 2 ? 'settle' : 'settles' };
+}
+
 // Timeout del gate: nessun campione. Il riferimento non si allarga da solo;
-// dopo `escapeAfter` timeout compare l'uscita esplicita.
-function wizardTimeout(w, why) {
+// dopo `escapeAfter` timeout compare l'uscita esplicita, se può servire.
+// `diagnosis` (wizard-gate.js, diagnoseRestTimeout) decide solo il testo.
+function wizardTimeout(w, diagnosis = null) {
   w.timeouts += 1;
+  w.timeoutsAtStep += 1;
   w.gateTimedOut = true;
-  const offerEscape = !w.escaped && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
+  w.lastWhy = diagnosis?.why ?? 'moving';
+  const refPhase = w.phase === 'ref';
+  const far = diagnosis?.why === 'far' ? diagnosis.far : [];
+  // Passo 0, stick fermo oltre il raggio di plausibilità del riferimento: il
+  // limite non si allarga mai (nemmeno con l'uscita), quindi né Continue né
+  // l'uscita possono riuscire finché resta lì. Se lo stesso stick era già oltre
+  // il 50% nella misura di partenza (a mani ferme, prima di calibBegin), è
+  // quasi certamente bloccato al bordo, non tenuto da un pollice.
+  w.stuck = refPhase && far.length > 0
+    && far.every(side => (w.before?.off?.[WIZARD_SIDE_INDEX[side]] ?? 0) >= WIZARD_DEFAULTS.refRadius * 100);
+  const escapeUseless = refPhase && far.length > 0;
+  const offerEscape = !w.escaped && !escapeUseless && w.timeouts >= WIZARD_DEFAULTS.escapeAfter;
   $('btn-wizard-escape').classList.toggle('hidden', !offerEscape);
+  syncWizardStop(w);
   const escapeHint = offerEscape
     ? '<br>If your stick never settles at the same point, use <b>My stick doesn’t rest still</b>.'
     : '';
-  $('wizard-msg').innerHTML = `${why} No sample was taken. <b>Let go of both sticks</b>, wait until they settle, `
-    + `then press <b>Continue</b>.${escapeHint}`;
+  const stopHint = '<br>If this keeps failing, <b>Stop and turn off controller</b> ends the calibration without committing it.';
+  let msg;
+  if (diagnosis?.why === 'no-data') {
+    msg = 'The controller stopped sending stick readings. No sample was taken. Check the USB cable, then press <b>Continue</b>.'
+      + stopHint;
+  } else if (refPhase && far.length) {
+    const s = wizardSticksPhrase(far, diagnosis.radius);
+    msg = w.stuck
+      ? `<b>${s.what} ${s.verb} about ${s.amount} from center with nobody touching ${far.length === 2 ? 'them' : 'it'}.</b> `
+        + 'Guided calibration needs a resting point within 50% of center, so pressing Continue again won’t help. '
+        + 'The stick is probably stuck near the edge. Choose <b>Stop and turn off controller</b>.'
+      : `<b>${s.what} ${s.verb} about ${s.amount} from center.</b> Guided calibration needs a resting point within 50% of center. `
+        + '<b>Let go of both sticks</b>, then press <b>Continue</b>. If nobody is touching them, pressing Continue again won’t help: '
+        + 'choose <b>Stop and turn off controller</b>.';
+  } else if (far.length && diagnosis.dist) {
+    const s = wizardSticksPhrase(far, diagnosis.dist);
+    msg = `<b>${s.what} ${s.settle} about ${s.amount} away from where ${far.length === 2 ? 'they' : 'it'} rested at the start.</b> `
+      + 'No sample was taken. <b>Let go of both sticks</b>, wait until they settle, then press <b>Continue</b>.';
+    msg += offerEscape ? escapeHint
+      : w.escaped ? '<br>That is outside even the looser check. If nobody is touching the sticks, choose <b>Stop and turn off controller</b>.'
+        : stopHint;
+  } else {
+    msg = `${refPhase ? 'The sticks did not come to rest.' : 'The sticks are still moving or being touched.'} No sample was taken. `
+      + '<b>Let go of both sticks</b>, wait until they settle, then press <b>Continue</b>.'
+      + (offerEscape ? escapeHint : stopHint);
+  }
+  $('wizard-msg').innerHTML = msg;
 }
 
 // Punto di riposo di riferimento, preso a sessione aperta (stesso frame dei
@@ -2532,15 +2600,18 @@ async function wizardCaptureRef(w, ensure, isCancelled) {
   const btn = $('btn-wizard-next');
   btn.textContent = 'Waiting…';
   $('wizard-msg').innerHTML = 'Keep your hands off the sticks: measuring where they rest…';
-  const ref = await captureRestReference(stickSource, pageClock, { escaped: w.escaped, isCancelled });
+  const { center: ref, diagnosis } = await captureRestReferenceDetailed(stickSource, pageClock, { escaped: w.escaped, isCancelled });
   ensure();
   if (!ref) {
     btn.textContent = 'Continue';
-    wizardTimeout(w, 'The sticks did not come to rest.');
+    wizardTimeout(w, diagnosis);
     return;
   }
   w.ref = ref;
   w.gateTimedOut = false;
+  w.stuck = false;
+  w.timeoutsAtStep = 0;
+  w.cornerMissesAtStep = 0;
   w.phase = 'corner';
   w.corner = 0;
   w.step = 1;
@@ -2578,12 +2649,9 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
       const exit = w.cornerMissesAtStep >= 2
         ? ' If this corner cannot be reached, choose <b>Stop and turn off controller</b>. No partial sample will be committed.' : '';
       wizardShowCorner(i, `<b>${what}</b>${hint} No sample was taken.${exit}`);
-      if (w.cornerMissesAtStep >= 2) {
-        $('btn-wizard-cancel').textContent = 'Stop and turn off controller';
-        $('btn-wizard-cancel').classList.remove('hidden');
-      }
+      syncWizardStop(w);
     } else {
-      wizardTimeout(w, 'The sticks are not resting where they started.');
+      wizardTimeout(w, gate.diagnosis ?? null);
     }
     return;
   }
@@ -2591,6 +2659,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   ensure();
   w.samples += 1;
   w.cornerMissesAtStep = 0;
+  w.timeoutsAtStep = 0;
   $('btn-wizard-cancel').classList.add('hidden');
   w.gateTimedOut = false;
   $('btn-wizard-escape').classList.add('hidden');
@@ -2778,8 +2847,11 @@ async function wizardNext() {
       w.phase = 'ref';
       await wizardCaptureRef(w, ensure, isCancelled);
     } else if (w.phase === 'ref') {
+      // Stop non è cliccabile durante l'attesa: ricompare se fallisce di nuovo.
+      $('btn-wizard-cancel').classList.add('hidden');
       await wizardCaptureRef(w, ensure, isCancelled);
     } else if (w.phase === 'corner') {
+      $('btn-wizard-cancel').classList.add('hidden');
       await wizardSampleCorner(w, ensure, isCancelled);
     } else {
       closeModal('modal-wizard');
@@ -2865,17 +2937,23 @@ function wizardEscape() {
   else $('wizard-msg').innerHTML = note;
 }
 
-// Un angolo irraggiungibile non deve intrappolare l'utente. Non mandiamo
-// calibEnd con campioni mancanti: lasciamo la sessione aperta, blocchiamo
-// altri comandi e chiediamo uno spegnimento vero del controller.
-function stopWizardAtCorner() {
+// Un passo che non riesce (angolo irraggiungibile, stick che non torna al
+// riposo, riferimento fuori portata) non deve intrappolare l'utente. Non
+// mandiamo calibEnd con campioni mancanti: lasciamo la sessione aperta,
+// blocchiamo altri comandi e chiediamo uno spegnimento vero del controller,
+// con il riavvio a un click nel pannello dell'esito.
+function stopWizard() {
   const w = wizard;
-  if (!w || w.phase !== 'corner' || w.running || w.cornerMissesAtStep < 2) return;
-  if (!confirm('Stop this calibration and turn the controller off (hold PS for 10 s)? The partial session cannot be saved or continued after stopping. No incomplete calibration will be committed.')) return;
+  if (!w || w.running || !wizardStopOffered(w)) return;
+  if (!confirm('Stop this calibration? Nothing from it will be committed, but the controller stays mid-calibration until it is turned off: restart it (or hold PS for 10 s) before calibrating or saving again.')) return;
+  const why = w.cornerMissesAtStep >= 2 && w.timeoutsAtStep === 0 ? 'corner'
+    : w.stuck ? 'stuck' : w.lastWhy === 'far' ? 'far' : 'rest';
   w.interrupted = true;
   w.tracker = null;
   w.reported = true;
   markPowerCycle(w.controller, w.key);
+  // v2: stesso evento di prima (`error`, sessione aperta); il contratto non
+  // ha un esito "stopped" e cambiarlo richiede la copia nel servizio.
   emitCalibV2(ctx => buildGuidedEvent(ctx, {
     outcome: 'error', committed: !!w.committed, needsPowerCycle: true,
     step: w.step, before: w.before, after: null, timeouts: w.timeouts,
@@ -2883,12 +2961,12 @@ function stopWizardAtCorner() {
   }), { device: w.device, controller: w.controller, epoch: w.op?.epoch });
   recordEvent('wizard', { done: false, step: w.step, before: w.before ?? null,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses,
-    escaped: w.escaped, aborted: 'corner-unreachable' });
+    escaped: w.escaped, aborted: why === 'corner' ? 'corner-unreachable' : 'stopped', stopWhy: why });
   ops.endOp(w.op);
   wizard = null;
   closeModal('modal-wizard');
-  showOutcome(guidedOutcomeView({ before: w.before, error: new Error('The requested corner could not be reached'),
-    committed: !!w.committed, leftOpen: true }, { nvStatus: lastNvStatus }));
+  showOutcome(guidedOutcomeView({ before: w.before, committed: !!w.committed, leftOpen: true,
+    stopped: { why, step: w.step } }, { nvStatus: lastNvStatus }));
 }
 
 function openWizard() {
@@ -2897,7 +2975,8 @@ function openWizard() {
   wizard = {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
-    samples: 0, timeouts: 0, cornerMisses: 0, cornerMissesAtStep: 0, escaped: false, committed: false, sessionOpen: false, guard: null,
+    samples: 0, timeouts: 0, timeoutsAtStep: 0, cornerMisses: 0, cornerMissesAtStep: 0, lastWhy: null, stuck: false,
+    escaped: false, committed: false, sessionOpen: false, guard: null,
     running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
@@ -2906,7 +2985,7 @@ function openWizard() {
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
   $('btn-wizard-escape').classList.add('hidden');
-  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started, keep the page open and the controller connected. If the same corner cannot be reached twice, Stop will ask you to turn the controller off without committing a partial calibration.';
+  $('wizard-msg').innerHTML = 'This procedure re-centers the sticks by sampling their resting position after each movement. Once started, keep the page open and the controller connected. If a step keeps failing, <b>Stop</b> ends it without committing a partial calibration; the controller then needs a restart.';
   $('btn-wizard-next').textContent = 'Start';
   $('btn-wizard-cancel').classList.remove('hidden');
   $('btn-wizard-cancel').textContent = 'Cancel';
@@ -3744,7 +3823,7 @@ $('btn-quick-go').addEventListener('click', quickCalibrate);
 
 $('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
 $('btn-wizard-cancel').addEventListener('click', () => {
-  if (wizard?.phase === 'corner') stopWizardAtCorner();
+  if (wizard?.phase === 'corner' || wizard?.phase === 'ref') stopWizard();
   else closeModal('modal-wizard');
 });
 $('btn-wizard-next').addEventListener('click', wizardNext);

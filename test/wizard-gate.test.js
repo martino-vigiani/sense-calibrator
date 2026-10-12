@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DRIFT_MOVE_SPREAD, summarizeResult } from '../js/calib/measure.js';
 import { STICK_LSB, measureOffset } from '../js/calib/sampling.js';
 import {
-  WIZARD_DEFAULTS, captureRestReference, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
+  WIZARD_DEFAULTS, captureRestReference, captureRestReferenceDetailed, checkBefore, diagnoseRestTimeout, summarizeRestWindow, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
   sampleGateOptions, wizardComparison, axisWorsening,
 } from '../js/calib/wizard-gate.js';
 
@@ -34,6 +34,8 @@ async function drive(source, at, promise, maxMs = 20_000) {
   return promise;
 }
 const idleClock = { setTimeout: () => 1, clearTimeout: () => {} };
+// Esito del gate senza la diagnosi (che serve solo al testo della pagina).
+const verdict = r => ({ ok: r.ok, reason: r.reason });
 const REST = { lx: 0.2, ly: -0.1, rx: -0.05, ry: 0.03 }; // riposo lontano dal centro: il pubblico del wizard
 const TOP_LEFT = { tx: -0.7, ty: -0.7 };
 
@@ -129,11 +131,13 @@ test('WS7 regression: a touch during the start measurement no longer yields an 8
   assert.equal(tol, DRIFT_MOVE_SPREAD);
   source = scriptedSource(held);
   const now = await drive(source, held, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol }));
-  assert.deepEqual(now, { ok: false, reason: 'timeout' });
+  assert.deepEqual(verdict(now), { ok: false, reason: 'timeout' });
+  assert.equal(now.diagnosis.why, 'far');
   // Nemmeno con l'uscita: 57% è ben oltre 18.8%.
   source = scriptedSource(held);
   const esc = await drive(source, held, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol, escaped: true }));
-  assert.deepEqual(esc, { ok: false, reason: 'timeout' });
+  assert.deepEqual(verdict(esc), { ok: false, reason: 'timeout' });
+  assert.equal(esc.diagnosis.why, 'far');
 });
 
 test('a start measurement with normal noise is accepted, and its tolerance still samples a stick back at rest', async () => {
@@ -208,7 +212,8 @@ test('a thumb held still on the stick (spread 0) is never sampled: timeout after
     const at = () => held;
     const source = scriptedSource(at);
     const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB }));
-    assert.deepEqual(r, { ok: false, reason: 'timeout' });
+    assert.deepEqual(verdict(r), { ok: false, reason: 'timeout' });
+    assert.equal(r.diagnosis.why, 'far', 'a still thumb off the rest point reads as far, never as a sample');
     assert.ok(source.t >= WIZARD_DEFAULTS.timeoutMs && source.t < WIZARD_DEFAULTS.timeoutMs + 20);
   }
 });
@@ -256,7 +261,7 @@ test('the escape keeps a fixed position bound: a thumb held still at a corner or
     const at = () => pos;
     const source = scriptedSource(at);
     const r = await drive(source, at, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB, escaped: true }));
-    assert.deepEqual(r, { ok: false, reason: 'timeout' }, JSON.stringify(pos));
+    assert.deepEqual(verdict(r), { ok: false, reason: 'timeout' }, JSON.stringify(pos));
   }
   // lasciato lo stick, lo stesso passo campiona
   const at = () => ({ ...REST, lx: REST.lx + 12 * STICK_LSB });
@@ -356,4 +361,62 @@ test('B1/N6: floor medians do not trigger axis worsening, while a milder stick c
   assert.deepEqual(axisWorsening({ xy: [[0, 0], [0, 0]] }, { xy: [[0.555, 0], [0, 0]] }), []);
   assert.deepEqual(axisWorsening({ xy: [[0, 0], [0, 0]] }, { xy: [[0.555, 0], [0, 0]] }, { worseEps: 0 }), []);
   assert.deepEqual(axisWorsening(before, after), [{ stick: 'Right', axis: 'X', before: 0, after: 2 }]);
+});
+
+// Diagnosi dei timeout (solo testo della pagina): telemetria v2, 33 Guided su
+// 81 `disconnected` fermi al passo 0 con uno stick oltre il 37%.
+test('a stick resting beyond 50% in session gives no reference and a "far" diagnosis naming it', async () => {
+  const at = () => ({ lx: -0.71, ly: 0.02, rx: 0.01, ry: -0.01 });
+  for (const escaped of [false, true]) {
+    const source = scriptedSource(at);
+    const r = await drive(source, at, captureRestReferenceDetailed(source, idleClock, { escaped }));
+    assert.equal(r.center, null, 'the 50% plausibility bound never widens, not even with the escape');
+    assert.equal(r.diagnosis.why, 'far');
+    assert.deepEqual(r.diagnosis.far, ['left']);
+    assert.ok(Math.abs(r.diagnosis.radius[0] - 0.71) < 0.01);
+    assert.equal(source.listeners.size, 0, 'the probe unsubscribes');
+  }
+  // il wrapper storico resta null
+  const source = scriptedSource(at);
+  assert.equal(await drive(source, at, captureRestReference(source, idleClock)), null);
+});
+
+test('a reference that never settles is diagnosed as moving; a resting stick still gives its center', async () => {
+  let at = t => ({ ...REST, lx: REST.lx + 0.06 * Math.sin(2 * Math.PI * t / 200) });
+  let source = scriptedSource(at);
+  let r = await drive(source, at, captureRestReferenceDetailed(source, idleClock));
+  assert.equal(r.center, null);
+  assert.equal(r.diagnosis.why, 'moving');
+  at = () => REST;
+  source = scriptedSource(at);
+  r = await drive(source, at, captureRestReferenceDetailed(source, idleClock));
+  assert.ok(r.center && Math.abs(r.center.lx - REST.lx) < 1e-9);
+  assert.equal(r.diagnosis, undefined);
+});
+
+test('diagnoseRestTimeout: no data, moving, far by tolerance, radius or plausibility bound', () => {
+  assert.equal(diagnoseRestTimeout(null, { spread: 0.035 }).why, 'no-data');
+  assert.equal(summarizeRestWindow(Array.from({ length: 9 }, () => REST)), null, 'fewer than 10 reports is no data');
+  const win = (p, jitter = 0) => summarizeRestWindow(Array.from({ length: 20 }, (_, i) => ({ ...p, lx: p.lx + (i % 2 ? jitter : 0) })));
+  assert.equal(diagnoseRestTimeout(win(REST, 0.05), { spread: 0.035, ref: REST, tol: 0.03 }).why, 'moving');
+  const off = { ...REST, rx: REST.rx + 0.2 };
+  const byTol = diagnoseRestTimeout(win(off), { spread: 0.035, ref: REST, tol: 0.03 });
+  assert.deepEqual([byTol.why, byTol.far], ['far', ['right']]);
+  assert.ok(Math.abs(byTol.dist[1] - 0.2) < 1e-9);
+  const byRadius = diagnoseRestTimeout(win(off), { spread: 0.08, ref: REST, tol: 0.19, nearRadius: 0.19 });
+  assert.deepEqual(byRadius.far, ['right']);
+  assert.equal(diagnoseRestTimeout(win({ ...REST, rx: REST.rx + 0.1 }), { spread: 0.08, ref: REST, tol: 0.19, nearRadius: 0.19 }).why, 'moving',
+    'inside every bound and still: not "far" (the wait failed for another reason)');
+  assert.deepEqual(diagnoseRestTimeout(win({ lx: 0.6, ly: 0.6, rx: 0, ry: 0 }), { spread: 0.035, maxRadius: 0.5 }).far, ['left']);
+});
+
+test('a timed-out sample carries a diagnosis but never a center', async () => {
+  const held = () => ({ ...REST, lx: REST.lx + 0.15 });
+  const source = scriptedSource(held);
+  const r = await drive(source, held, gateWizardSample(source, idleClock, { tracker: reachedTracker(), ref: REST, tol: 4 * STICK_LSB }));
+  assert.equal(r.ok, false);
+  assert.equal(r.center, undefined);
+  assert.deepEqual(r.diagnosis.far, ['left']);
+  assert.ok(Math.abs(r.diagnosis.dist[0] - 0.15) < 1e-6);
+  assert.equal(source.listeners.size, 0);
 });
