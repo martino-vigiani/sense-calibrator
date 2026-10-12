@@ -54,7 +54,7 @@ test('first visit: nothing leaves the browser until Keep sharing, then v1 and v2
   await h.advance(50);
   assert.equal(v1Sent(h), 1, 'the complete Quick session on v1, unchanged');
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
-  assert.equal(h.store.get('sense-telemetry-scope'), '4');
+  assert.equal(h.store.get('sense-telemetry-scope'), '5');
   assert.equal(h.store.get('sense-telemetry-consent'), '1');
   // da qui gli eventi partono subito
   await h.click('btn-flash');
@@ -96,7 +96,7 @@ test('a v1 sharer sees the notice again, with what changed, and even v1 waits fo
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
 });
 
-for (const previousScope of ['2', '3']) test(`a scope ${previousScope} sharer sees the diagnostic description before anything leaves`, async () => {
+for (const previousScope of ['2', '3', '4']) test(`a scope ${previousScope} sharer sees the current description before anything leaves`, async () => {
   const { h } = await setup({
     telemetryNoticeSeen: false,
     storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': previousScope, 'sense-telemetry-consent': '1' },
@@ -107,7 +107,7 @@ for (const previousScope of ['2', '3']) test(`a scope ${previousScope} sharer se
   assert.equal(h.uploads.length + h.uploadsV2.length, 0);
   await h.click('btn-notice-ok');
   await h.advance(50);
-  assert.equal(h.store.get('sense-telemetry-scope'), '4');
+  assert.equal(h.store.get('sense-telemetry-scope'), '5');
   assert.equal(v1Sent(h), 1);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
 });
@@ -180,7 +180,7 @@ test('ticking the footer box later accepts the current description and sends fro
     storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-consent': '0' },
   });
   change(h, 'telemetry-consent-footer', true);
-  assert.equal(h.store.get('sense-telemetry-scope'), '4');
+  assert.equal(h.store.get('sense-telemetry-scope'), '5');
   await quick(h);
   await h.advance(50);
   assert.deepEqual(h.uploadsV2.map(e => e.type), ['quick']);
@@ -314,6 +314,94 @@ test('after a Quick the rest summaries say the calibration is not saved yet', as
   assert.ok(rest.every(e => e.state === 'unsaved'));
 });
 
+// ------------------------------------------------------------------ tempi e rilasci
+
+// Un flick dello stick `stick` (0 sinistro, 1 destro) e il ritorno a molla.
+// Il primo rilascio si riconosce solo dopo un punto fermo (300 ms).
+async function flicks(h, dev, n, { stick = 0, amp = [110, 0] } = {}) {
+  await h.advance(500);
+  for (let i = 0; i < n; i++) {
+    dev.touches.push({ stick: i % 2 ? 1 - stick : stick, t0: h.clock.now() + 50, dur: 200, tail: 40, amp: i % 2 ? [amp[1], amp[0]] : amp });
+    await h.advance(1500);
+  }
+}
+
+test('rest summaries count the time from the last calibration and name what happened since', async () => {
+  const { h, A } = await setup();
+  await h.advance(30_000);
+  const before = h.uploadsV2.filter(e => e.type === 'rest');
+  assert.ok(before.length >= 1);
+  assert.ok(before.every(e => e.sinceCalS === null && e.opsSince === null && e.landings === null), 'nothing to count from yet');
+  await quick(h);
+  await h.click('btn-flash');
+  await h.run(h.click('btn-flash-go'));
+  await h.advance(50);
+  await flicks(h, A, 2);
+  await h.advance(70_000);
+  const after = h.uploadsV2.filter(e => e.type === 'rest').slice(before.length);
+  assert.ok(after.length >= 1, `${after.length}`);
+  for (const e of after) {
+    assert.equal(validateEventV2(e), null);
+    assert.equal(e.sinceCalS % 10, 0);
+    assert.ok(e.sinceCalS >= 30 && e.sinceCalS <= 90, `${e.sinceCalS}`);
+    assert.deepEqual(e.opsSince, ['quick', 'flash']);
+    assert.equal(e.landings, 2);
+  }
+});
+
+test('releases after a Quick: one landing event at 20, one more on leaving the page, never a third', async () => {
+  const { h, A } = await setup();
+  await quick(h);
+  const q = h.uploadsV2.find(e => e.type === 'quick');
+  await flicks(h, A, 19);
+  assert.equal(h.uploadsV2.filter(e => e.type === 'landing').length, 0);
+  await flicks(h, A, 1);
+  let landings = h.uploadsV2.filter(e => e.type === 'landing');
+  assert.equal(landings.length, 1);
+  const [first] = landings;
+  assert.equal(validateEventV2(first), null);
+  assert.deepEqual([first.trigger, first.ref, first.opsSince], ['count', q.seq, ['quick']]);
+  assert.deepEqual(first.sticks.map(s => s.count), [11, 9]);
+  for (const s of first.sticks) {
+    assert.equal(s.recent.length, s.count);
+    assert.ok(s.firstS <= s.lastS && s.lastS <= first.sinceCalS);
+    assert.ok(s.spread[1] < 2, `springs back to the same point: ${s.spread}`);
+  }
+  assert.ok(first.sinceCalS >= 20 && first.sinceCalS <= 40, `${first.sinceCalS}`);
+  await flicks(h, A, 3);
+  pagehide(h);
+  await h.advance(0);
+  landings = h.uploadsV2.filter(e => e.type === 'landing');
+  assert.equal(landings.length, 2);
+  assert.equal(landings[1].trigger, 'left');
+  assert.equal(landings[1].sticks[0].count + landings[1].sticks[1].count, 23);
+  pagehide(h);
+  await h.advance(0);
+  assert.equal(h.uploadsV2.filter(e => e.type === 'landing').length, 2);
+  const diagnostics = h.window.__senseDiagnostics();
+  assert.equal(diagnostics, null, 'not recording: nothing in a diagnostic report either');
+  assert.doesNotMatch(JSON.stringify(landings), /"t":|peak|settle/);
+});
+
+test('no releases are kept with sharing off, and turning it off forgets the ones collected', async () => {
+  const off = await setup({ telemetryNoticeSeen: false, storage: { 'sense-telemetry-notice': '1', 'sense-telemetry-consent': '0' } });
+  await quick(off.h);
+  await flicks(off.h, off.A, 22);
+  pagehide(off.h);
+  await off.h.advance(0);
+  assert.equal(ofType(off.h, 'landing').length, 0);
+  assert.equal(off.h.eval('calTimeline.rest(performance.now()).landings'), 0, 'collected nothing');
+
+  const { h, A } = await setup();
+  await quick(h);
+  await flicks(h, A, 5);
+  change(h, 'telemetry-consent-footer', false);
+  change(h, 'telemetry-consent-footer', true);
+  pagehide(h);
+  await h.advance(0);
+  assert.equal(ofType(h, 'landing').length, 0, 'the releases from before Don\'t share never leave');
+});
+
 // ------------------------------------------------------------------ guided e range
 
 const CORNERS = [{ tx: -0.7, ty: -0.7 }, { tx: 0.7, ty: -0.7 }, { tx: -0.7, ty: 0.7 }, { tx: 0.7, ty: 0.7 }];
@@ -415,7 +503,7 @@ test('Range finished anyway: an incomplete range event, and the save period ends
 });
 
 // Il banner corto: meno di 50 parole, ogni categoria e il nuovo dato per
-// asse nominati (Keep sharing accetta lo scope 4), "Details" verso il README.
+// asse nominati (Keep sharing accetta lo scope 5), "Details" verso il README.
 test('the consent banner is short, names every v2 category and links the full description', async () => {
   const { readFileSync } = await import('node:fs');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -427,6 +515,8 @@ test('the consent banner is short, names every v2 category and links the full de
   assert.match(body, /signed axis positions/);
   assert.match(body, /Quick stability/);
   assert.match(body, /missing Range checks/);
+  assert.match(body, /where sticks stop after release/);
+  assert.match(body, /time since calibration/);
   assert.match(body, /No serial number or device ID/);
   assert.match(body, /nothing from this visit has been sent yet/);
   assert.match(notice, /href="https:\/\/github\.com\/martino-vigiani\/sense-calibrator#telemetry--privacy"[^>]*>Details</);

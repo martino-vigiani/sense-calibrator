@@ -74,7 +74,7 @@ Sensitivity Finder and Gameplay Lab are unfinished local experiments. They are a
 
 The tool keeps up to **200 calibration events** in your browser, even when sharing is off. Sharing is selected by default, but nothing is uploaded until you choose **Keep sharing**. **Don't share** discards queued data and turns uploads off. You can change this later with the sharing checkboxes.
 
-Shared data covers calibration results and signed stick positions, Quick verification stability, missing Range checks, memory-write attempts, saving outcomes and short resting-noise summaries. It includes hardware and firmware information; complete Quick uploads include a timestamp. A random code links events within one visit. Controller serial numbers, device identifiers, typed text and error messages are excluded.
+Shared data covers calibration results and signed stick positions, Quick verification stability, missing Range checks, memory-write attempts, saving outcomes, short resting-noise summaries and where the sticks stop after you let go. Times are only relative: seconds since the last calibration of the visit, rounded to 10 seconds. It includes hardware and firmware information; complete Quick uploads include a timestamp. A random code links events within one visit. Controller serial numbers, device identifiers, typed text and error messages are excluded.
 
 Uploads also carry network details. The telemetry service does not store your IP address in its records, but website access logs include IP addresses, request times, paths and browser information. Those logs are kept for **14 days**. Cloudflare also processes request data under its own policy.
 

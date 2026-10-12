@@ -213,3 +213,73 @@ test('the CLI writes the report atomically with mode 0600 and prints a summary',
   assert.match(formatEventsSummary(written), /^events \d+ \(invalid \d+\) · visits \d+ · quick saved 3\/10/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Dopo un centraggio: finestre rest per fascia di sinceCalS e per operazione,
+// e la dispersione dei rilasci per stick (ultimo evento landing per visita e
+// calibrazione).
+const landingEvent = (sid, seq, ref, sticks, extra = {}) => ({
+  ...structuredClone(FIXTURES.valid.find(f => f.name === 'landing after 20 releases').event),
+  sid, seq, ref, sticks, ...extra,
+});
+const stickL = (count, median, p95) => ({ count, median, spread: [p95 / 2, p95], firstS: 10, lastS: 300, recent: [] });
+const OFF = 4; // % su uno stick: fuori centro
+function timingPopulation() {
+  const centered = { after: [0.55, 0.55] };
+  const restAt = (sid, seq, off, timing) => {
+    const e = rest(sid, seq, 1, timing);
+    e.sticks = e.sticks.map((s, i) => ({ ...s, off: i === 0 ? off : 0.55 }));
+    return e;
+  };
+  const events = [
+    // V1: Quick centrata, rest presto e centrato, poi un Range e rest fuori centro
+    quick('a1a1a1a1', 0, centered),
+    restAt('a1a1a1a1', 1, 0.55, { sinceCalS: 40, opsSince: ['quick'], landings: 0 }),
+    { ...base('range'), sid: 'a1a1a1a1', seq: 2, committed: true },
+    restAt('a1a1a1a1', 3, OFF, { sinceCalS: 400, opsSince: ['quick', 'range'], landings: 3 }),
+    // V2: Guided centrata, Write, reconnect, rest fuori centro dopo un'ora
+    guided('b2b2b2b2', 0, { after: [0.55, 1.2] }), flash('b2b2b2b2', 1),
+    restAt('b2b2b2b2', 2, OFF, { sinceCalS: 3600, opsSince: ['guided', 'flash', 'reconnect'], landings: 0 }),
+    // V3: righe vecchie (senza campi) e una senza calibrazione: legacy e mismatch
+    quick('c3c3c3c3', 0, centered), restAt('c3c3c3c3', 1, OFF), restAt('c3c3c3c3', 2, 0.55, { sinceCalS: null, opsSince: null, landings: null }),
+    // V4: Quick non centrata: le sue finestre non contano
+    quick('d4d4d4d4', 0, { after: [3.1, 0.55] }), restAt('d4d4d4d4', 1, OFF, { sinceCalS: 30, opsSince: ['quick'], landings: 0 }),
+    // Rilasci: in V1 l'evento 'left' sostituisce il 'count' della stessa calibrazione
+    landingEvent('a1a1a1a1', 4, 0, [stickL(20, [0, 1], 0.9), stickL(4, [9, 9], 5)], { trigger: 'count' }),
+    landingEvent('a1a1a1a1', 5, 0, [stickL(30, [0, 1], 0.9), stickL(6, [1, 0], 3.2)], { trigger: 'left' }),
+    // V2: uno stick raccolto ma lontano dal centro (8 mezzi LSB = 3.1%)
+    landingEvent('b2b2b2b2', 3, 0, [stickL(12, [8, 0], 1.2), stickL(0, null, 0)], { trigger: 'left' }),
+  ];
+  events[events.length - 1].sticks[1] = { count: 0, median: null, spread: null, firstS: null, lastS: null, recent: [] };
+  return `${events.map(e => line(e)).join('\n')}\n`;
+}
+
+test('after a centering: rest windows by time since calibration and by operation, landings by stick', () => {
+  const r = buildEventsReport(timingPopulation(), { minimumCohortSize: 1 }).afterCalibration;
+  const rest = r.restAfterCentering;
+  assert.deepEqual(rest.all, { n: 5, offCenter: 3, rate: 0.6 }, 'the non-centered Quick of V4 is left out');
+  assert.deepEqual(rest.bySinceCal['<1m'], { n: 1, offCenter: 0, rate: 0 });
+  assert.deepEqual(rest.bySinceCal['5-15m'], { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(rest.bySinceCal['>=60m'], { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(rest.bySinceCal.legacy, { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(rest.bySinceCal.mismatch, { n: 1, offCenter: 0, rate: 0 });
+  assert.deepEqual(rest.byOpsSince.range, { with: { n: 1, offCenter: 1, rate: 1 }, without: { n: 2, offCenter: 1, rate: 0.5 } });
+  assert.deepEqual(rest.byOpsSince.reconnect.with, { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(rest.byOpsSince.calibrationOnly, { n: 1, offCenter: 0, rate: 0 });
+  assert.deepEqual(rest.bySequence.range.with, { n: 1, offCenter: 1, rate: 1 }, 'derived from the range event, legacy rows too');
+  assert.deepEqual(rest.bySequence.flash.with, { n: 1, offCenter: 1, rate: 1 });
+  const l = r.landings;
+  assert.equal(l.events, 2, 'one per visit and calibration');
+  assert.deepEqual([l.sticks, l.wideSpread, l.offCenterMedian, l.both], [3, 1, 1, 0],
+    'V1 left tight and centered, V1 right wide (3.2 LSB), V2 left tight but 3.1% off; under 5 releases or none are skipped');
+  assert.equal(l.p95SpreadLsb.max, 3.2);
+});
+
+test('after a centering: rates and the landing block are withheld below the cohort size', () => {
+  const r = buildEventsReport(timingPopulation(), { minimumCohortSize: 4 }).afterCalibration;
+  assert.equal(r.restAfterCentering.all.rate, 0.6);
+  assert.equal(r.restAfterCentering.bySinceCal['<1m'].rate, null);
+  assert.equal(r.restAfterCentering.bySinceCal['<1m'].n, 1, 'counts stay');
+  assert.deepEqual(r.landings, { definition: r.landings.definition, events: 2, sticks: 3, suppressed: true });
+  const text = JSON.stringify(r);
+  assert.doesNotMatch(text, /a1a1a1a1|b2b2b2b2|"seq"|"sid"|"ref"/);
+});
