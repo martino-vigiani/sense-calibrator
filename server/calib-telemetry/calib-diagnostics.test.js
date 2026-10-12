@@ -80,6 +80,9 @@ test.beforeEach(() => {
   for (const file of [DATA_PATH, DATA_V2_PATH]) {
     try { fs.unlinkSync(file); } catch { /* ENOENT atteso */ }
   }
+  // Il server tiene i totali della cartella in memoria: dopo averla svuotata
+  // da fuori li si ricalcola come fa la pulizia quotidiana.
+  cleanupDiagnostics();
 });
 
 function nextIp() {
@@ -296,6 +299,7 @@ test('tetto della cartella (200 MB) → 507, nessuna scrittura', async () => {
   const filler = path.join(DIAG_DIR, 'SC-AAAAAAAA.json');
   fs.writeFileSync(filler, '');
   fs.truncateSync(filler, 200 * 1024 * 1024);
+  cleanupDiagnostics(); // il server la vede all'avvio o alla pulizia quotidiana
   await assertProblem(await postReport(validReport()), 507, 'storage_capacity_reached');
   assert.deepEqual(reports(), ['SC-AAAAAAAA.json']);
 });
@@ -315,6 +319,41 @@ test('conservazione: i report oltre 180 giorni si cancellano, gli altri file res
   // Senza cartella non fallisce.
   fs.rmSync(DIAG_DIR, { recursive: true, force: true });
   assert.equal(cleanupDiagnostics(), 0);
+});
+
+test('privacy: il mtime del file è la mezzanotte UTC del giorno di ricezione, e la pulizia a 180 giorni lo usa', async () => {
+  const before = Date.now();
+  assert.equal((await postReport(validReport())).status, 201);
+  const [name] = reports();
+  const file = path.join(DIAG_DIR, name);
+  const midnight = Math.floor(before / 86_400_000) * 86_400_000;
+  const stat = fs.statSync(file);
+  assert.equal(stat.mtimeMs, midnight, 'no time of receipt in the mtime');
+  assert.equal(stat.atimeMs, midnight);
+  assert.equal(stat.mode & 0o777, 0o600);
+  const DAY = 86_400_000;
+  assert.equal(cleanupDiagnostics(midnight + 180 * DAY), 0, 'kept for 180 days');
+  assert.deepEqual(reports(), [name]);
+  assert.equal(cleanupDiagnostics(midnight + 180 * DAY + 1), 1, 'deleted after');
+  assert.deepEqual(reports(), []);
+});
+
+test('POST e /health non scandiscono la cartella: totali in memoria', async () => {
+  assert.equal((await postReport(validReport())).status, 201);
+  const originalReaddir = fs.readdirSync;
+  const originalStat = fs.statSync;
+  const calls = [];
+  fs.readdirSync = (...args) => { calls.push(['readdir', String(args[0])]); return originalReaddir(...args); };
+  fs.statSync = (...args) => { calls.push(['stat', String(args[0])]); return originalStat(...args); };
+  try {
+    assert.equal((await postReport(validReport(1))).status, 201);
+    const body = await (await testFetch(`${baseUrl}/health`)).json();
+    assert.equal(body.diagnosticReports, 2);
+  } finally {
+    fs.readdirSync = originalReaddir;
+    fs.statSync = originalStat;
+  }
+  assert.deepEqual(calls.filter(([, p]) => p.startsWith(DIAG_DIR)), []);
 });
 
 test('GET sulla rotta → problema 404, non HTML', async () => {

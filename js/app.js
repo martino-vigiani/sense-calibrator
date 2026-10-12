@@ -2172,7 +2172,7 @@ let consentEpoch = 0;
 // (window.__senseTelemetryV2) e per i controlli headless: stato 'queued',
 // 'sent', 'failed', 'discarded'. Mai persistito.
 const v2Outbox = [];
-let lastCalibV2 = null; // { seq, committed, claimed, at }
+let lastCalibV2 = null; // { seq, diagSeq, committed, claimed, at, owner, epoch }
 // Una calibrazione registrata poco prima che `unsaved` si alzi (lo stallo, il
 // range completo) apre lei il periodo. Oltre questa finestra l'evento è di
 // un'altra storia, per esempio l'esito 'disconnected' di un ciclo orfano
@@ -2204,8 +2204,11 @@ function sendV2(item, { now = false } = {}) {
 // seq e la scheda del controller; `device` sovrascrive board/fw quando
 // l'evento arriva dopo il teardown (esito 'disconnected'). Con la
 // condivisione spenta non costruisce nemmeno l'evento.
-function emitV2(build, { device = null, now = false, diag = true } = {}) {
-  if (diag) diagCalib(build, device);
+// `diagBuild` sostituisce `build` per il report diagnostico quando l'evento
+// rimanda ad altri per numero (il `ref` di `save`): lì vale la numerazione del
+// report, non quella della telemetria.
+function emitV2(build, { device = null, now = false, diag = true, diagBuild = build } = {}) {
+  if (diag) diagCalib(diagBuild, device);
   if (!telemetryEnabled() || v2Seq >= V2_MAX_PER_LOAD || v2Seq > 255) return null;
   const ctx = {
     sid: V2_SID,
@@ -2237,19 +2240,38 @@ function flushV2(keepSharing) {
 // Evento di una calibrazione (quick, guided, range): lo lega al periodo "non
 // salvato" in corso, o a quello che si apre subito dopo (lo stallo registra la
 // sessione prima di alzare `unsaved`).
+// Due numerazioni: `seq` è quella della telemetria (null con la condivisione
+// spenta), `diagSeq` quella del report diagnostico in corso (null senza
+// registrazione). Il periodo le tiene separate, così il `save` di ciascuno
+// rimanda a un evento che sta nello stesso flusso.
 function emitCalibV2(build, options) {
-  const event = emitV2(build, options);
+  const diagEvent = diagCalib(build, options?.device ?? null);
+  const event = emitV2(build, { ...options, diag: false });
   noteCalibTimeline(event, build, options);
-  if (!event) return;
+  const sample = event ?? diagEvent;
+  if (!sample) return;
   const owner = options?.controller ?? null;
   const epoch = options?.epoch;
-  lastCalibV2 = { seq: event.seq, committed: event.committed, claimed: false, at: performance.now(), owner, epoch };
+  lastCalibV2 = {
+    seq: event ? event.seq : null, diagSeq: diagEvent ? diagEvent.seq : null,
+    committed: sample.committed, claimed: false, at: performance.now(), owner, epoch,
+  };
   // L'evento di un ciclo orfano resta registrato, ma non si attribuisce al
   // periodo di salvataggio aperto dal controller arrivato dopo.
   if (saveChapter && saveChapter.owner === owner && saveChapter.epoch === epoch) {
-    saveChapter.ref = event.seq;
-    saveChapter.sessions += 1;
-    lastCalibV2.claimed = true;
+    claimCalib(saveChapter, lastCalibV2);
+  }
+}
+
+function claimCalib(chapter, calib) {
+  calib.claimed = true;
+  if (calib.seq !== null) {
+    chapter.ref = calib.seq;
+    chapter.sessions += 1;
+  }
+  if (calib.diagSeq !== null) {
+    chapter.diagRef = calib.diagSeq;
+    chapter.diagSessions += 1;
   }
 }
 
@@ -2284,17 +2306,16 @@ function openSaveChapter() {
   const seed = lastCalibV2 && !lastCalibV2.claimed && lastCalibV2.committed
     && lastCalibV2.owner === ds5 && lastCalibV2.epoch === ops.epoch
     && performance.now() - lastCalibV2.at <= CALIB_SEED_MS ? lastCalibV2 : null;
-  if (seed) seed.claimed = true;
   saveChapter = {
     owner: ds5,
     epoch: ops.epoch,
     startedAt: performance.now(),
-    ref: seed ? seed.seq : null,
-    sessions: seed ? 1 : 0,
+    ref: null, sessions: 0, diagRef: null, diagSessions: 0,
     opens: 0, reminderOpens: 0, cancels: 0, attempts: 0,
     lastFlash: null,
     seen: saveStepInView,
   };
+  if (seed) claimCalib(saveChapter, seed);
 }
 
 function closeSaveChapter(result, { now = false } = {}) {
@@ -2302,9 +2323,11 @@ function closeSaveChapter(result, { now = false } = {}) {
   if (!chapter) return;
   saveChapter = null;
   const lock = currentWriteLock();
-  emitV2(ctx => buildSaveEvent(ctx, {
-    ...chapter, result, lock, waitMs: performance.now() - chapter.startedAt,
-  }), { now });
+  const data = { ...chapter, result, lock, waitMs: performance.now() - chapter.startedAt };
+  emitV2(ctx => buildSaveEvent(ctx, data), {
+    now,
+    diagBuild: ctx => buildSaveEvent(ctx, { ...data, ref: chapter.diagRef, sessions: chapter.diagSessions }),
+  });
 }
 
 /* --------- rumore a riposo (js/calib/rest-noise.js) --------- */
@@ -4269,9 +4292,11 @@ function resolveNotice(keepSharing) {
   if (!noticeOpen) return;
   noticeOpen = false;
   storageWrite(TELEMETRY_NOTICE_KEY, '1');
-  // Anche con "Don't share": la persona ha visto la descrizione attuale, e se
-  // un giorno riaccende la condivisione dal footer non va richiesto di nuovo.
-  storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
+  // Lo scope si scrive solo con "Keep sharing": "Don't share" non accetta la
+  // descrizione. Se poi la persona rispunta la casella del modale Quick, le
+  // categorie v2 aspettano l'avviso al prossimo caricamento; il footer, che le
+  // nomina tutte, lo scrive da sé.
+  if (keepSharing) storageWrite(TELEMETRY_SCOPE_KEY, String(TELEMETRY_SCOPE));
   setConsent(keepSharing);
   const queued = pendingUploads;
   pendingUploads = [];
@@ -4340,9 +4365,12 @@ function diagNote(type, data) {
 // Gli eventi v2 di una calibrazione, di un Write o di un periodo non salvato:
 // stessi builder della telemetria, costruiti anche con la condivisione spenta
 // (dal report escono solo su conferma), con un sid fisso e un contatore
-// proprio, così non si collegano agli eventi della visita.
+// proprio. Questo non li rende scollegabili: i valori (beforeAxes, afterAxes,
+// passAxes, durate, board, fw) sono gli stessi degli eventi inviati, quindi
+// con la condivisione accesa un report si può abbinare alla telemetria della
+// stessa visita. Lo dicono docs/PRIVACY.md e il modale di invio.
 function diagCalib(build, device) {
-  if (!diag.active) return;
+  if (!diag.active) return null;
   let event;
   try {
     event = build({
@@ -4351,9 +4379,10 @@ function diagCalib(build, device) {
       board: device ? device.board : deviceInfo?.board ?? null,
       fw: device ? device.fw : deviceInfo?.fwversion ?? null,
     });
-  } catch { return; }
+  } catch { return null; }
   diagSeq += 1;
   diagNote('calib', { event });
+  return event;
 }
 
 // Dagli input report, come ogni altra misura: tempo del report HID.
@@ -4425,7 +4454,11 @@ function startDiag() {
   if (diag.started && !diagSentCode
     && !confirm('Start a new recording? The current one is discarded unless you downloaded it.')) return;
   diag.start(performance.now());
+  // Numerazione nuova: un rimando a un evento della registrazione precedente
+  // non vale più.
   diagSeq = 0;
+  if (saveChapter) { saveChapter.diagRef = null; saveChapter.diagSessions = 0; }
+  if (lastCalibV2) lastCalibV2.diagSeq = null;
   diagSentCode = null;
   $('diag-sent').classList.add('hidden');
   // Lo stato di partenza, se un controller è già collegato.
@@ -4666,10 +4699,10 @@ window.__senseExtractStable = extractStableSamples;
 window.__senseWaitForStable = waitForStable;
 // Storico locale delle calibrazioni (telemetria per futura calibrazione ML).
 window.__senseCalibSessions = () => JSON.parse(storageRead(CALIB_STORE_KEY, '[]'));
-// Eventi v2 di questa pagina con il loro stato (queued, sending, sent, failed,
-// discarded). Solo memoria: ricaricare la pagina li perde.
 // Il report diagnostico com'è ora (lo stesso che Download JSON salverebbe).
 window.__senseDiagnostics = () => (diag.started ? diag.report(performance.now()) : null);
+// Eventi v2 di questa pagina con il loro stato (queued, sending, sent, failed,
+// discarded). Solo memoria: ricaricare la pagina li perde.
 window.__senseTelemetryV2 = () => v2Outbox.map(item => ({ state: item.state, event: JSON.parse(JSON.stringify(item.event)) }));
 window.__senseDials = { dialL, dialR, dialWizL, dialWizR, dialRangeL, dialRangeR };
 // Apre il gioco bypassando il gate isAvailable: utile per testare senza controller

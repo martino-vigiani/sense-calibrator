@@ -174,6 +174,30 @@ test("ticking the Quick dialog's box turns sharing back on but leaves v2 waiting
   assert.ok(outbox(h).every(item => item.state === 'queued'));
 });
 
+for (const previousScope of [null, '4']) test(`Don't share does not accept the description: the Quick box afterwards leaves v2 waiting (scope ${previousScope ?? 'none'})`, async () => {
+  const { h } = await setup({
+    telemetryNoticeSeen: false,
+    storage: previousScope
+      ? { 'sense-telemetry-notice': '1', 'sense-telemetry-scope': previousScope, 'sense-telemetry-consent': '1' }
+      : {},
+  });
+  assert.equal(h.visible('telemetry-notice'), true);
+  await h.click('btn-notice-optout');
+  await h.advance(300);
+  assert.equal(h.store.get('sense-telemetry-scope') ?? null, previousScope, 'the scope is left as it was');
+  change(h, 'telemetry-consent', true);
+  assert.equal(h.store.get('sense-telemetry-consent'), '1');
+  await quick(h);
+  await h.click('btn-flash');
+  await h.run(h.click('btn-flash-go'));
+  await h.advance(60_000);
+  assert.equal(h.uploadsV2.length, 0, 'no v2 category before the notice is accepted');
+  assert.ok(outbox(h).length > 0 && outbox(h).every(item => item.state === 'queued'));
+  // Al caricamento dopo, l'avviso torna e decide lui.
+  const next = await loadApp({ clock: h.clock, authorized: [], telemetryNoticeSeen: false, storage: Object.fromEntries(h.store) });
+  assert.equal(next.visible('telemetry-notice'), true);
+});
+
 test('ticking the footer box later accepts the current description and sends from then on', async () => {
   const { h } = await setup({
     telemetryNoticeSeen: false,

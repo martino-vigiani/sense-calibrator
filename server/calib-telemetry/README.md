@@ -100,13 +100,30 @@ there is no clock time, serial number, device identifier or raw input report.
   applied before parsing, same headers and `429` as the other endpoints.
 - Stored as `${DIAG_DIR}/<code>.json` (mode 600; the folder is created 700 and
   tightened to 700 if it exists): the report unchanged plus `receivedDay` (UTC
-  date). `code` is `SC-` + 8 random base32 characters (40 bits, `crypto`), and a
+  date). The file's mtime (and atime) is set to midnight UTC of that day, so the
+  time of receipt is not kept anywhere. `code` is `SC-` + 8 random base32 characters (40 bits, `crypto`), and a
   file is never overwritten. Response: `201 {"code":"SC-ABCDEFGH"}`.
 - `DIAG_DIR` defaults to `diagnostics/` next to `DATA_V2_PATH`
   (`/var/lib/calib-telemetry/diagnostics`). Total cap 200 MB
-  (`DIAG_DIR_LIMIT` in bytes to override) → `507`.
-- Reports older than 180 days (file mtime) are deleted at startup and once a
-  day (an `unref` timer); only files named like a code are touched.
+  (`DIAG_DIR_LIMIT` in bytes to override) and 10,000 files (`DIAG_MAX_FILES`)
+  → `507` (no `Retry-After`: space comes back only through the cleanup). A
+  warning is logged once when either passes 80%, and again after it drops
+  below and climbs back.
+- Global daily quota (UTC day), on top of the per-IP limit: 50 reports
+  (`DIAG_DAILY_MAX_REPORTS`) and 10 MB (`DIAG_DAILY_MAX_BYTES`), → `507`
+  `storage_capacity_reached` with `Retry-After` until midnight UTC. A report
+  that would cross the byte quota is refused whole. It is checked before the
+  per-IP limit and the parse (so a full day costs no one their hourly quota)
+  and again with the record's real size. With the per-IP limit alone one
+  address could fill 200 MB in about 5.5 days, and then the endpoint stays
+  closed until reports expire; with 10 MB a day it takes at least 20 days.
+- The folder's byte and file totals live in memory: computed at startup and
+  by the daily cleanup (which also corrects for files removed by hand) and
+  updated on every save, so neither a POST nor `/health` reads the folder.
+  Today's count is rebuilt from the mtimes after a restart.
+- Reports older than 180 days (file mtime, i.e. midnight UTC of the day of
+  receipt) are deleted at startup and once a day (an `unref` timer); only
+  files named like a code are touched.
 
 To read a report quoted in an issue: `ssh` to the VPS and open
 `/var/lib/calib-telemetry/diagnostics/SC-XXXXXXXX.json`.

@@ -10,7 +10,9 @@
 //
 // Un report si salva in un file per codice (`SC-` + 8 caratteri base32), 600,
 // in una cartella 700. Il server aggiunge solo `receivedDay` (data UTC, niente
-// ora). Mai IP, user-agent, header o altri metadati della richiesta.
+// ora) e porta la data di modifica del file alla mezzanotte UTC dello stesso
+// giorno, così l'ora di ricezione non resta nemmeno nel filesystem. Mai IP,
+// user-agent, header o altri metadati della richiesta.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -53,73 +55,79 @@ function ensureDir(dir) {
   fs.chmodSync(dir, 0o700);
 }
 
-// Byte e numero dei report nella cartella (solo i file con il nome dei codici).
-function dirUsage(dir) {
-  let bytes = 0;
-  let count = 0;
-  let names;
-  try {
-    names = fs.readdirSync(dir);
-  } catch (e) {
-    if (e.code === 'ENOENT') return { bytes, count };
-    throw e;
-  }
-  for (const name of names) {
-    if (!FILE_RE.test(name)) continue;
-    try {
-      bytes += fs.statSync(path.join(dir, name)).size;
-      count += 1;
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-  }
-  return { bytes, count };
+const dayStartMs = ms => Math.floor(ms / DAY_MS) * DAY_MS;
+
+// Il file com'è salvato: il report più `receivedDay`. Il server ne usa la
+// lunghezza per le quote prima di scriverlo.
+function reportRecord(report, now = new Date()) {
+  const record = { ...JSON.parse(JSON.stringify(report)), receivedDay: now.toISOString().slice(0, 10) };
+  return `${JSON.stringify(record)}\n`;
 }
 
-// Scrive il report con un codice nuovo; `wx` non sovrascrive mai un report
-// esistente (una collisione su 40 bit è improbabile, ma si riprova).
-function saveReport(dir, report, now = new Date()) {
+// Scrive il record con un codice nuovo; `wx` non sovrascrive mai un report
+// esistente (una collisione su 40 bit è improbabile, ma si riprova). Se non si
+// riesce a togliere l'ora dal mtime il file non resta.
+function saveReport(dir, body, now = new Date()) {
   ensureDir(dir);
-  const record = { ...JSON.parse(JSON.stringify(report)), receivedDay: now.toISOString().slice(0, 10) };
-  const body = `${JSON.stringify(record)}\n`;
+  const midnight = dayStartMs(now.getTime()) / 1000;
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = newCode();
+    const file = path.join(dir, `${code}.json`);
     try {
-      fs.writeFileSync(path.join(dir, `${code}.json`), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      return code;
+      fs.writeFileSync(file, body, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
+      if (e.code === 'EEXIST') continue;
+      throw e;
     }
+    try {
+      fs.utimesSync(file, midnight, midnight);
+    } catch (e) {
+      try { fs.unlinkSync(file); } catch { /* già sparito */ }
+      throw e;
+    }
+    return code;
   }
   throw new Error('could not allocate a report code');
 }
 
-// Cancella i report più vecchi di `maxAgeDays` (data di modifica del file).
-// Tocca solo i file con il nome dei codici. Ritorna quanti ne ha tolti.
-function cleanupReports(dir, { maxAgeDays = 180, now = Date.now() } = {}) {
+// Una passata sulla cartella: cancella i report più vecchi di `maxAgeDays`
+// (mtime, cioè la mezzanotte UTC del giorno di ricezione) e conta quelli che
+// restano, in totale e ricevuti oggi (UTC). Tocca solo i file con il nome dei
+// codici. Il server la chiama all'avvio e una volta al giorno; in mezzo tiene i
+// totali in memoria.
+function scanReports(dir, { maxAgeDays = 180, now = Date.now() } = {}) {
+  const out = { removed: 0, bytes: 0, count: 0, dayCount: 0, dayBytes: 0 };
   let names;
   try {
     names = fs.readdirSync(dir);
   } catch (e) {
-    if (e.code === 'ENOENT') return 0;
+    if (e.code === 'ENOENT') return out;
     throw e;
   }
-  let removed = 0;
+  const today = dayStartMs(now);
   for (const name of names) {
     if (!FILE_RE.test(name)) continue;
     const file = path.join(dir, name);
     try {
-      if (now - fs.statSync(file).mtimeMs > maxAgeDays * DAY_MS) {
+      const stat = fs.statSync(file);
+      if (now - stat.mtimeMs > maxAgeDays * DAY_MS) {
         fs.unlinkSync(file);
-        removed += 1;
+        out.removed += 1;
+        continue;
+      }
+      out.bytes += stat.size;
+      out.count += 1;
+      if (stat.mtimeMs >= today) {
+        out.dayBytes += stat.size;
+        out.dayCount += 1;
       }
     } catch (e) {
       if (e.code !== 'ENOENT') throw e;
     }
   }
-  return removed;
+  return out;
 }
 
 module.exports = {
-  DIAGNOSTICS_SCHEMA, CODE_RE, validateDiagnostics, newCode, dirUsage, saveReport, cleanupReports,
+  DIAGNOSTICS_SCHEMA, CODE_RE, DAY_MS, dayStartMs, validateDiagnostics, newCode, reportRecord, saveReport, scanReports,
 };

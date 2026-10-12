@@ -29,15 +29,24 @@ const DATA_V2_SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 const V2_BODY_LIMIT = '4kb';
 // Report diagnostici: un file per report in una cartella propria, accanto ai
 // JSONL (default /var/lib/calib-telemetry/diagnostics). Corpo fino a 512 KB
-// (nginx davanti accetta fino a 1 MB), tetto totale della cartella 200 MB,
-// conservazione 180 giorni.
+// (nginx davanti accetta fino a 1 MB), tetto totale della cartella 200 MB e
+// 10.000 file, conservazione 180 giorni. Più una quota globale al giorno (UTC):
+// la quota per IP da sola lascia a un solo indirizzo riempire il tetto in meno
+// di una settimana, e poi l'endpoint resta chiuso per mesi. Con 10 MB al giorno
+// servono almeno 20 giorni, e il log avvisa all'80%.
 const DIAG_DIR = process.env.DIAG_DIR || path.join(path.dirname(DATA_V2_PATH), 'diagnostics');
 const DIAG_BODY_LIMIT = '512kb';
 const DIAG_DIR_LIMIT = Number(process.env.DIAG_DIR_LIMIT) || 200 * 1024 * 1024; // 200 MB
+const DIAG_MAX_FILES = Number(process.env.DIAG_MAX_FILES) || 10_000;
+const DIAG_DAILY_MAX_REPORTS = Number(process.env.DIAG_DAILY_MAX_REPORTS) || 50;
+const DIAG_DAILY_MAX_BYTES = Number(process.env.DIAG_DAILY_MAX_BYTES) || 10 * 1024 * 1024; // 10 MB
+const DIAG_WARN_RATIO = 0.8;
 const DIAG_MAX_AGE_DAYS = 180;
 
 const { validateEventV2 } = require('./events-v2');
-const { validateDiagnostics, dirUsage, saveReport, cleanupReports } = require('./diagnostics');
+const {
+  DAY_MS, dayStartMs, validateDiagnostics, reportRecord, saveReport, scanReports,
+} = require('./diagnostics');
 
 // CORS
 const ALLOWED_ORIGINS = new Set([
@@ -282,6 +291,67 @@ function setDiagRateLimitHeaders(res, state) {
   res.setHeader('RateLimit-Reset', String(state.resetSeconds));
 }
 
+// Totali della cartella in memoria: calcolati all'avvio e dalla pulizia
+// quotidiana (una passata sulla cartella), aggiornati a ogni salvataggio. Il
+// conteggio del giorno riparte a mezzanotte UTC e, dopo un riavvio, si
+// ricostruisce dai file: il loro mtime è la mezzanotte del giorno di ricezione.
+const diagStore = { bytes: 0, count: 0, day: 0, dayCount: 0, dayBytes: 0, warned: false };
+
+function rollDiagDay(now) {
+  const day = dayStartMs(now);
+  if (day !== diagStore.day) {
+    diagStore.day = day;
+    diagStore.dayCount = 0;
+    diagStore.dayBytes = 0;
+  }
+}
+
+function warnDiagUsage() {
+  const high = diagStore.bytes >= DIAG_DIR_LIMIT * DIAG_WARN_RATIO
+    || diagStore.count >= DIAG_MAX_FILES * DIAG_WARN_RATIO;
+  if (high && !diagStore.warned) {
+    const mb = n => (n / (1024 * 1024)).toFixed(1);
+    console.warn(`[calib-telemetry] diagnostics store above ${DIAG_WARN_RATIO * 100}% of its cap: `
+      + `${mb(diagStore.bytes)} of ${mb(DIAG_DIR_LIMIT)} MB, ${diagStore.count} of ${DIAG_MAX_FILES} files`);
+  }
+  diagStore.warned = high;
+}
+
+// 507 se la cartella è al tetto o la quota di oggi è finita (`bytes` = il
+// record da scrivere, 0 prima del parse); la quota del giorno porta
+// Retry-After fino a mezzanotte UTC, il tetto no (si libera solo con la
+// pulizia). Ritorna la risposta mandata, o null se c'è posto.
+function diagCapacityProblem(res, now, bytes = 0) {
+  rollDiagDay(now);
+  if (diagStore.bytes + bytes > DIAG_DIR_LIMIT || diagStore.count >= DIAG_MAX_FILES) {
+    return sendProblem(res, {
+      status: 507,
+      code: 'storage_capacity_reached',
+      title: 'Diagnostic storage capacity reached',
+      detail: 'The diagnostic report store is temporarily at its configured capacity.',
+      resolution: 'Do not retry automatically. Download the report and attach it to the issue instead.',
+    });
+  }
+  if (diagStore.dayCount >= DIAG_DAILY_MAX_REPORTS || diagStore.dayBytes + bytes > DIAG_DAILY_MAX_BYTES) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((diagStore.day + DAY_MS - now) / 1000))));
+    return sendProblem(res, {
+      status: 507,
+      code: 'storage_capacity_reached',
+      title: 'Diagnostic storage capacity reached',
+      detail: 'The diagnostic report store has reached its daily capacity.',
+      resolution: 'Do not retry automatically. Download the report and attach it to the issue instead, or send it after midnight UTC.',
+    });
+  }
+  return null;
+}
+
+// Prima della quota per IP e del parse: con la cartella o la giornata già
+// piene non si consuma la quota della persona né si leggono 512 KB.
+app.use('/api/calib/v2/diagnostics', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  return diagCapacityProblem(res, Date.now()) ?? next();
+});
+
 app.use('/api/calib/v2/diagnostics', (req, res, next) => {
   if (req.method !== 'POST') return next();
   const rateLimit = checkDiagRateLimit(getClientIp(req));
@@ -329,11 +399,19 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 // Conservazione dei report diagnostici: all'avvio e poi una volta al giorno.
+// La stessa passata ricalcola i totali in memoria (corregge anche file tolti a
+// mano). Ritorna quanti report ha cancellato.
 function cleanupDiagnostics(now = Date.now()) {
   try {
-    const removed = cleanupReports(DIAG_DIR, { maxAgeDays: DIAG_MAX_AGE_DAYS, now });
-    if (removed) console.log(`[calib-telemetry] removed ${removed} diagnostic report(s) older than ${DIAG_MAX_AGE_DAYS} days`);
-    return removed;
+    const scan = scanReports(DIAG_DIR, { maxAgeDays: DIAG_MAX_AGE_DAYS, now });
+    if (scan.removed) console.log(`[calib-telemetry] removed ${scan.removed} diagnostic report(s) older than ${DIAG_MAX_AGE_DAYS} days`);
+    diagStore.bytes = scan.bytes;
+    diagStore.count = scan.count;
+    diagStore.day = dayStartMs(now);
+    diagStore.dayCount = scan.dayCount;
+    diagStore.dayBytes = scan.dayBytes;
+    warnDiagUsage();
+    return scan.removed;
   } catch (e) {
     console.error('[calib-telemetry] diagnostics cleanup error:', e.code || e.name);
     return 0;
@@ -634,32 +712,14 @@ app.post('/api/calib/v2/diagnostics', (req, res) => {
     });
   }
 
-  let usage;
-  try {
-    usage = dirUsage(DIAG_DIR);
-  } catch (e) {
-    console.error('[calib-telemetry] diagnostics stat error:', e.code || e.name);
-    return sendProblem(res, {
-      status: 500,
-      code: 'internal_error',
-      title: 'Telemetry service error',
-      detail: 'The service could not inspect its storage.',
-      resolution: 'Do not retry immediately. Download the report and attach it to the issue instead.',
-    });
-  }
-  if (usage.bytes >= DIAG_DIR_LIMIT) {
-    return sendProblem(res, {
-      status: 507,
-      code: 'storage_capacity_reached',
-      title: 'Diagnostic storage capacity reached',
-      detail: 'The diagnostic report store is temporarily at its configured capacity.',
-      resolution: 'Do not retry automatically. Download the report and attach it to the issue instead.',
-    });
-  }
+  const now = new Date();
+  const body = reportRecord(req.body, now);
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (diagCapacityProblem(res, now.getTime(), bytes)) return;
 
   let code;
   try {
-    code = saveReport(DIAG_DIR, req.body);
+    code = saveReport(DIAG_DIR, body, now);
   } catch (e) {
     console.error('[calib-telemetry] diagnostics write error:', e.code || e.name);
     return sendProblem(res, {
@@ -670,6 +730,11 @@ app.post('/api/calib/v2/diagnostics', (req, res) => {
       resolution: 'Do not retry immediately. Download the report and attach it to the issue instead.',
     });
   }
+  diagStore.bytes += bytes;
+  diagStore.count += 1;
+  diagStore.dayBytes += bytes;
+  diagStore.dayCount += 1;
+  warnDiagUsage();
 
   return res.status(201).json({ code });
 });
@@ -692,22 +757,13 @@ function countLines(file) {
   }
 }
 
-function countReports() {
-  try {
-    return dirUsage(DIAG_DIR).count;
-  } catch (e) {
-    console.error('[calib-telemetry] health diagnostics error:', e.code || e.name);
-    return 0;
-  }
-}
-
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     uptime: process.uptime(),
     sessionLines: countLines(DATA_PATH),
     eventV2Lines: countLines(DATA_V2_PATH),
-    diagnosticReports: countReports(),
+    diagnosticReports: diagStore.count,
   });
 });
 

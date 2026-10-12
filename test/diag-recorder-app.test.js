@@ -5,6 +5,7 @@
 // l'invio solo dopo la conferma, e il pannello accessibile.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
 import { VClock } from '../ops/sim/vclock.mjs';
 import { validateDiagnostics, DIAGNOSTICS_ENDPOINT } from '../js/diag/recorder.js';
@@ -147,6 +148,67 @@ test('recording works with sharing off, sends nothing by itself and never touche
   assert.equal(calls.length, 0, 'nothing leaves without Send');
   assert.equal(h.store.get('sense-telemetry-consent'), '0');
   assert.equal(h.window.__senseTelemetryV2().length, 0, 'no telemetry event is built');
+});
+
+// Il `save` del report rimanda agli eventi del report: ref è il seq di un
+// evento `calib` che sta nel report, sessions quanti ce ne sono nel periodo.
+const calibOf = (r, type) => r.events.filter(e => e.type === 'calib' && e.event.type === type).map(e => e.event);
+
+test('the save event in the report counts and points to calibrations in the report, with sharing off', async () => {
+  const { h, A } = await setup({ storage: { 'sense-telemetry-consent': '0' } });
+  await openAndStart(h);
+  await quick(h);
+  A.unplug();
+  h.hid.fire('disconnect', A);
+  await h.advance(2000);
+  const r = report(h);
+  assert.equal(validateDiagnostics(r), null);
+  const [q] = calibOf(r, 'quick');
+  const [save] = calibOf(r, 'save');
+  assert.ok(q && q.committed, 'a committed Quick');
+  assert.equal(save.result, 'disconnected');
+  assert.equal(save.ref, q.seq);
+  assert.equal(save.sessions, 1);
+});
+
+test('with sharing on, the report keeps its own numbering, and its calibration values are the telemetry ones', async () => {
+  const { h, A } = await setup();
+  await quick(h); // prima della registrazione: telemetria seq 0
+  await openAndStart(h);
+  A.sticks[0].rest = [6, 2];
+  await quick(h);
+  A.unplug();
+  h.hid.fire('disconnect', A);
+  await h.advance(2000);
+  const r = report(h);
+  assert.equal(validateDiagnostics(r), null);
+  const quicks = calibOf(r, 'quick');
+  const [save] = calibOf(r, 'save');
+  assert.equal(quicks.length, 1);
+  assert.equal(save.ref, quicks[0].seq, 'ref is a seq in the report');
+  assert.equal(save.sessions, 1, 'only the calibration recorded in the report');
+  const sent = h.uploadsV2;
+  const telQuick = sent.filter(e => e.type === 'quick').at(-1);
+  const telSave = sent.find(e => e.type === 'save');
+  assert.equal(telSave.ref, telQuick.seq);
+  assert.equal(telSave.sessions, 2);
+  assert.notEqual(telQuick.seq, quicks[0].seq, 'the two numberings differ here');
+  // Stessi valori della telemetria, solo sid e seq cambiano: un report si può
+  // abbinare alla telemetria della stessa visita (docs/PRIVACY.md, modale).
+  const strip = ({ sid, seq, ...rest }) => rest;
+  assert.notEqual(quicks[0].sid, telQuick.sid);
+  assert.deepEqual(strip(quicks[0]), strip(JSON.parse(JSON.stringify(telQuick))));
+});
+
+test('the copy says what leaves and when: the panel intro and the send dialog', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const intro = html.match(/<p class="diag-intro">([^<]*)<\/p>/)?.[1] ?? '';
+  assert.match(intro, /Nothing is sent unless you press Send\.$/);
+  const dialog = html.slice(html.indexOf('id="modal-diag-send"'), html.indexOf('id="btn-diag-send-go"'));
+  assert.match(dialog, /the report can be matched to this visit&rsquo;s telemetry/);
+  const privacy = fs.readFileSync(new URL('../docs/PRIVACY.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(privacy, /can't be linked/);
+  assert.match(privacy, /a report can be matched to that visit's telemetry events/);
 });
 
 test('Send shows what will go, opens on Cancel, and posts only after the explicit confirmation', async () => {

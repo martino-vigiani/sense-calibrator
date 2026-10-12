@@ -405,7 +405,7 @@
       <h3 id="diag-title">Diagnostic recording</h3>
       <button id="btn-diag-close" class="btn btn-ghost btn-sm" type="button">Close</button>
     </div>
-    <p class="diag-intro">For a stick that drifts again soon after calibrating. While it records, the page notes connections, each calibration and Write, and where each stick stops every time you let go of it. Use the controller as usual, calibrate if you need to, and keep the page open. It stops by itself after 30 minutes and stays in this tab until you download or send it.</p>
+    <p class="diag-intro">For a stick that drifts again soon after calibrating. While it records, the page notes connections, each calibration and Write, and where each stick stops every time you let go of it. Use the controller as usual, calibrate if you need to, and keep the page open. It stops by itself after 30 minutes and stays in this tab until you download or send it. Nothing is sent unless you press Send.</p>
     <p id="diag-status" class="diag-status" role="status">Not recording.</p>
     <div class="diag-actions">
       <button id="btn-diag-start" class="btn btn-primary btn-sm" type="button">Start recording</button>
@@ -580,7 +580,7 @@
       <li>Where each stick stopped after each release, and its resting position once per second.</li>
       <li>No serial number, device ID, raw stick reports or typed text.</li>
     </ul>
-    <p class="hint">Only this report is sent, only now. Your telemetry setting doesn&rsquo;t change. Reports are kept for 180 days, then deleted.</p>
+    <p class="hint">Only this report is sent, only now. Your telemetry setting doesn&rsquo;t change. If you also share telemetry, the calibration results in it are the same values, so the report can be matched to this visit&rsquo;s telemetry. Reports are kept for 180 days, then deleted.</p>
     <p id="diag-send-msg" class="diag-send-msg" role="status"></p>
     <div class="modal-actions">
       <button id="btn-diag-send-cancel" class="btn btn-ghost" type="button" data-autofocus>Cancel</button>
