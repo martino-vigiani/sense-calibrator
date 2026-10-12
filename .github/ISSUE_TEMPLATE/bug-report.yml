@@ -65,6 +65,14 @@ body:
       label: What did you expect?
     validations:
       required: true
+  - type: input
+    id: diagnostic-code
+    attributes:
+      label: Diagnostic report code
+      description: If you sent a diagnostic recording from the tool, paste the code it showed.
+      placeholder: "For example: SC-ABCDEFGH"
+    validations:
+      required: false
   - type: textarea
     id: measurements
     attributes:

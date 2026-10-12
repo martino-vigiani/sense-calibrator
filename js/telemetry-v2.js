@@ -114,6 +114,14 @@ function check(root, schema, value, path, errors) {
   return true;
 }
 
+// Lo stesso sottoinsieme per un altro contratto (il report diagnostico,
+// js/diag/recorder.js): null se `value` rispetta `schema`, altrimenti il primo
+// errore. Nessuna regola specifica degli eventi v2.
+export function validateSchema(value, schema) {
+  const errors = [];
+  return check(schema, schema, value, '$', errors) ? null : (errors[0] ?? '$: invalid');
+}
+
 // Ritorna null se l'evento rispetta il contratto, altrimenti il primo errore.
 export function validateEventV2(event, schema = EVENTS_V2_SCHEMA) {
   const errors = [];

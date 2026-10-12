@@ -240,6 +240,28 @@ try {
 
     await modalCase(width, height, { name: 'wizard', modalId: 'modal-wizard', open: clickId('btn-wizard'), expectFocus: ['#btn-wizard-next'] });
 
+    // Registrazione diagnostica: pannello dal footer, poi la conferma d'invio
+    // (mai confermata qui: ogni richiesta fuori da localhost è comunque bloccata).
+    await modalCase(width, height, {
+      name: 'diag-send', modalId: 'modal-diag-send',
+      open: async page => {
+        await clickId('btn-diag-open')(page);
+        await clickId('btn-diag-start')(page);
+        await page.waitForTimeout(2500);
+        const panel = await page.evaluate(() => {
+          const el = document.getElementById('diag-panel');
+          return { visible: el.checkVisibility(), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            svg: !!document.querySelector('#diag-chart svg'), focus: document.activeElement?.id };
+        });
+        check(panel.visible && panel.svg, `${width}px diag: panel open with its chart`);
+        check(panel.focus === 'diag-panel', `${width}px diag: the panel takes the focus (got ${panel.focus})`);
+        check(panel.overflow <= 0, `${width}px diag: no horizontal page scroll (${panel.overflow}px)`);
+        await shot(page, `${width}-diag-panel.png`);
+        await clickId('btn-diag-send')(page);
+      },
+      expectFocus: ['#btn-diag-send-cancel'],
+    });
+
     // Passo introduttivo del range: nessun comando, fuoco su Start, Cancel presente.
     await modalCase(width, height, { name: 'range-intro', modalId: 'modal-range', open: clickId('btn-range'), expectFocus: ['#btn-range-start'] });
 

@@ -78,6 +78,8 @@ Shared data covers calibration results and signed stick positions, Quick verific
 
 Uploads also carry network details. The telemetry service does not store your IP address in its records, but website access logs include IP addresses, request times, paths and browser information. Those logs are kept for **14 days**. Cloudflare also processes request data under its own policy.
 
+**Diagnostic recording** is separate from telemetry and off until you start it from the footer. For up to 30 minutes it keeps, in that tab only, connections, each calibration and Write, where each stick stops after you let go, and its resting position once per second. Times count from the start of the recording, never the time of day; there is no serial number, device ID or raw stick report. It leaves the browser only when you press **Send to the developer** and confirm, whatever your telemetry setting. The server keeps it for **180 days** and gives you a code (`SC-…`) to quote in a GitHub issue. You can also download the JSON and attach it yourself.
+
 [Read the full privacy details](docs/PRIVACY.md) for every shared field, the data contracts, storage and consent.
 
 ## Contributions and license

@@ -30,6 +30,8 @@ import * as rangeDiagnosticsModule from '../../js/calib/range-diagnostics.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 import * as telemetryV2Module from '../../js/telemetry-v2.js';
 import * as restNoiseModule from '../../js/calib/rest-noise.js';
+import * as diagRecorderModule from '../../js/diag/recorder.js';
+import * as diagViewModule from '../../js/diag/view.js';
 
 const APP_SOURCE = fs.readFileSync(new URL('../../js/app.js', import.meta.url), 'utf8');
 const INDEX_HTML = fs.readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
@@ -342,6 +344,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
       './calib/wizard-gate.js': wizardGateModule,
       './calib/range-coverage.js': rangeCoverageModule,
       './calib/range-diagnostics.js': rangeDiagnosticsModule,
+      './diag/recorder.js': diagRecorderModule,
+      './diag/view.js': diagViewModule,
       ...STUBS,
     },
   };
