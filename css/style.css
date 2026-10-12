@@ -2179,6 +2179,20 @@ a.btn { text-decoration: none; }
 .outcome-repair summary { cursor: pointer; font-weight: 600; }
 .outcome-repair ol { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
 .outcome-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+/* Invito a salvare dopo un esito buono: c'è sempre nell'HTML di un esito
+   'ok', si vede solo quando la pagina mette data-save="on" (non salvato,
+   Write libero). Niente animazione: è testo del pannello. */
+.outcome-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--edge);
+}
+.outcome-save p { margin: 0; flex: 1 1 260px; color: var(--ink); }
+.outcome-card:not([data-save="on"]) .outcome-save { display: none; }
 @media (max-width: 480px) {
   .outcome-card { padding: 16px 16px 16px 22px; }
   .outcome-sticks { grid-template-columns: 1fr; }
