@@ -470,7 +470,7 @@ export function quickOutcomeView(run, { nvStatus = null } = {}) {
 // Esito della procedura guidata: prima e dopo misurati dal wizard, stessa
 // classificazione (e stessi margini) della rapida, con la partenza come unico
 // riferimento. `error` se la procedura è fallita dopo un commit.
-export function guidedOutcomeView({ before = null, after = null, error = null, committed = true, leftOpen = false } = {}, { nvStatus = null } = {}) {
+export function guidedOutcomeView({ before = null, after = null, error = null, committed = true, leftOpen = false, stopped = null } = {}, { nvStatus = null } = {}) {
   const beforeWorst = worstOfSummary(before);
   const worst = worstOfSummary(after);
   const pinned = pinnedFromSummary(after);
@@ -489,6 +489,24 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
   if (error && isPoisonError(error)) {
     return view('error', 'bad', POISONED_OUTCOME.title, [...POISONED_OUTCOME.lines], [],
       { center: { ...center, outcome: 'error', worst: null, committed: true }, poisoned: true });
+  }
+  if (stopped) {
+    // Stop scelto dall'utente a sessione aperta (nessun calibEnd): non è un
+    // errore del controller. Le uscite sono quelle del promemoria di
+    // spegnimento (riavvio, o conferma di averlo spento a mano), così non serve
+    // staccare il cavo. Il blocco di Write resta quello dell'errore.
+    const why = {
+      corner: 'The requested corner could not be reached.',
+      stuck: 'A stick stayed too far from center with nobody touching it, so Guided calibration could not use it as the center. It is probably stuck near the edge. Range calibration may help afterwards; we haven’t confirmed that it does for a stick like this.',
+      far: 'A stick kept settling too far from where it rested at the start.',
+      rest: 'The sticks didn’t settle where they rested at the start.',
+    }[stopped.why] ?? null;
+    return view('error', 'bad', 'Guided calibration stopped', [
+      why,
+      committed ? 'Closing a leftover calibration session at the start already changed the calibration, and it hasn’t been saved.'
+        : 'Nothing from this run was committed.',
+      'The controller is still mid-calibration. Restart it, or turn it off (hold PS for 10 s), before calibrating or saving again.',
+    ], [ACTION.restart, ACTION.poweredOff], { center: { ...center, outcome: 'error', worst: null, committed: true } });
   }
   if (error) {
     return view('error', committed || leftOpen ? 'bad' : 'warn', 'Guided calibration failed', [

@@ -218,23 +218,110 @@ export function sampleGateOptions({ ref, tol, escaped = false, params = {}, isCa
   };
 }
 
+// Diagnosi di un'attesa scaduta, SOLO per il testo mostrato all'utente: non
+// decide mai un campione e non allarga nulla. Telemetria v2 (27 set–12 ott):
+// il 25% delle sessioni Guided finiva `disconnected`, e 33 su 81 al passo 0
+// con uno stick oltre il 37% (31 con un asse a fondo scala): il riferimento in
+// sessione chiede entrambi gli stick entro refRadius, quindi Continue (e
+// l'uscita, che non tocca quel limite) non potevano mai riuscire, e l'unica
+// uscita era staccare il cavo. Dire PERCHÉ l'attesa è scaduta permette alla
+// pagina di non proporre un'uscita inutile e di indicare Stop.
+//
+// `watchRestWindow` osserva gli stessi input report dell'attesa e tiene gli
+// ultimi holdMs; `stop()` restituisce { center, spread, n } o null (meno di 10
+// report: nessun dato).
+export function watchRestWindow(source, holdMs = WIZARD_DEFAULTS.holdMs) {
+  const win = [];
+  const unsubscribe = source.subscribe(() => {
+    const t = Number.isFinite(source.reportTime) ? source.reportTime : source.now();
+    win.push({ ...source.sticks, t });
+    while (win.length && win[0].t < t - holdMs) win.shift();
+  });
+  return {
+    stop() {
+      unsubscribe();
+      return summarizeRestWindow(win);
+    },
+  };
+}
+
+export function summarizeRestWindow(win) {
+  if (!Array.isArray(win) || win.length < 10) return null;
+  const center = {};
+  let spread = 0;
+  for (const a of ['lx', 'ly', 'rx', 'ry']) {
+    let min = Infinity, max = -Infinity, sum = 0;
+    for (const s of win) {
+      if (s[a] < min) min = s[a];
+      if (s[a] > max) max = s[a];
+      sum += s[a];
+    }
+    spread = Math.max(spread, max - min);
+    center[a] = sum / win.length;
+  }
+  return { center, spread, n: win.length };
+}
+
+// → { why: 'no-data' | 'moving' | 'far', radius: [l, r], dist: [l, r] | null,
+//     far: ['left'|'right'] }
+//   radius: distanza (unità normalizzate) del centro della finestra dal
+//           centro del frame in sessione, per stick;
+//   dist:   distanza dal riferimento `ref`, per stick (null senza `ref`);
+//   far:    gli stick fuori dal limite che l'attesa applicava (maxRadius per
+//           il riferimento; la tolleranza o nearRadius per un campione).
+// 'moving' quando la finestra supera lo spread del gate: uno stick toccato o
+// che non si ferma. 'far' quando è ferma ma fuori dal limite: un pollice
+// fermo sullo stick e uno stick bloccato al bordo si vedono uguali, e il testo
+// della pagina lo dice.
+export function diagnoseRestTimeout(summary, { spread, ref = null, tol = null, nearRadius = null, maxRadius = null } = {}) {
+  if (!summary) return { why: 'no-data', radius: null, dist: null, far: [] };
+  const c = summary.center;
+  const radius = [Math.hypot(c.lx, c.ly), Math.hypot(c.rx, c.ry)];
+  const dist = ref ? [Math.hypot(c.lx - ref.lx, c.ly - ref.ly), Math.hypot(c.rx - ref.rx, c.ry - ref.ry)] : null;
+  const keys = [['lx', 'ly'], ['rx', 'ry']];
+  const far = ['left', 'right'].filter((side, i) => {
+    if (maxRadius !== null && radius[i] > maxRadius) return true;
+    if (!ref) return false;
+    if (nearRadius !== null) return dist[i] > nearRadius;
+    return tol !== null && keys[i].some(a => Math.abs(c[a] - ref[a]) > tol);
+  });
+  if (Number.isFinite(spread) && summary.spread > spread) return { why: 'moving', radius, dist, far };
+  return { why: far.length ? 'far' : 'moving', radius, dist, far };
+}
+
 // Attesa del riferimento in sessione (subito dopo calibBegin): finestra
 // stabile con entrambi gli stick entro refRadius. Ritorna il centro o null.
 // Con l'uscita esplicita il gate di spread è escapeSpread, ma il riferimento
 // serve comunque: è il centro del raggio dell'uscita.
-export async function captureRestReference(source, clock, { escaped = false, params = {}, isCancelled = null } = {}) {
+export async function captureRestReference(source, clock, opts = {}) {
+  return (await captureRestReferenceDetailed(source, clock, opts)).center;
+}
+
+// Come captureRestReference, con la diagnosi del timeout:
+// → { center } | { center: null, diagnosis }
+export async function captureRestReferenceDetailed(source, clock, { escaped = false, params = {}, isCancelled = null } = {}) {
   const p = wizardParams(params);
-  const stable = await waitForStable(source, clock, {
-    spread: escaped ? p.escapeSpread : p.spread, holdMs: p.holdMs, timeoutMs: p.timeoutMs, maxRadius: p.refRadius, isCancelled,
-  });
-  return stable && typeof stable === 'object' ? stable.center : null;
+  const spread = escaped ? p.escapeSpread : p.spread;
+  const probe = watchRestWindow(source, p.holdMs);
+  let stable, summary;
+  try {
+    stable = await waitForStable(source, clock, {
+      spread, holdMs: p.holdMs, timeoutMs: p.timeoutMs, maxRadius: p.refRadius, isCancelled,
+    });
+  } finally {
+    summary = probe.stop();
+  }
+  if (stable && typeof stable === 'object') return { center: stable.center };
+  return { center: null, diagnosis: diagnoseRestTimeout(summary, { spread, maxRadius: p.refRadius }) };
 }
 
 // Decide se il campione di questo passo può partire.
 //   → { ok: true, center }            campione ammesso
 //   → { ok: false, reason: 'corner', missing: ['left'|'right'] }
 //                                      l'angolo non è stato raggiunto: nessuna attesa
-//   → { ok: false, reason: 'timeout' } stick non fermi o lontani dal riposo
+//   → { ok: false, reason: 'timeout', diagnosis? } stick non fermi o lontani
+//                                      dal riposo (diagnosis: diagnoseRestTimeout,
+//                                      solo per il testo)
 //   → { ok: false, reason: 'cancelled' }
 // Senza riferimento non si campiona mai (nemmeno con l'uscita): il controllo
 // di posizione non ha un centro.
@@ -245,9 +332,19 @@ export async function gateWizardSample(source, clock, { tracker, ref, tol, escap
     const missing = tracker.missing();
     if (missing.length) return { ok: false, reason: 'corner', missing, axes: tracker.missingAxes?.() ?? [] };
   }
-  const stable = await waitForStable(source, clock, sampleGateOptions({ ref, tol, escaped, params, isCancelled }));
+  const opts = sampleGateOptions({ ref, tol, escaped, params, isCancelled });
+  const probe = watchRestWindow(source, opts.holdMs);
+  let stable, summary;
+  try {
+    stable = await waitForStable(source, clock, opts);
+  } finally {
+    summary = probe.stop();
+  }
   if (isCancelled?.()) return { ok: false, reason: 'cancelled' };
-  if (!stable) return { ok: false, reason: 'timeout' };
+  if (!stable) {
+    return { ok: false, reason: 'timeout',
+      diagnosis: diagnoseRestTimeout(summary, { spread: opts.spread, ref, tol: opts.tol, nearRadius: opts.nearRadius }) };
+  }
   return { ok: true, center: stable.center };
 }
 

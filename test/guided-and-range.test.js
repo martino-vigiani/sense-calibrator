@@ -173,6 +173,118 @@ test('N5: two misses at one Guided corner offer a safe stop without calibEnd', a
   assert.equal(h.eval('tabPowerCycleFlag()'), true);
 });
 
+// Telemetria v2 (27 set–12 ott): 81 Guided su 320 `disconnected`, 33 al passo
+// 0 con uno stick oltre il 37% (31 con un asse a fondo scala) e fino a 15
+// timeout. Il riferimento in sessione chiede entrambi gli stick entro il 50%:
+// Continue e l'uscita non potevano riuscire, e l'unica uscita era il cavo.
+const v2Guided = h => JSON.parse(JSON.stringify(h.window.__senseTelemetryV2()))
+  .map(item => item.event).filter(e => e.type === 'guided');
+
+test('a stick stuck near the edge at step 0: the page says why, never offers the useless escape, and Stop exits without calibEnd', async () => {
+  const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
+  await startWizard(h);
+  assert.equal(A.counts.begin, 1, 'the session was opened');
+  assert.equal(h.peek().wizard.phase, 'ref');
+  assert.match(h.$('wizard-msg').innerHTML, /The left stick stays about 7\d% from center with nobody touching it/);
+  assert.match(h.$('wizard-msg').innerHTML, /pressing Continue again won’t help/);
+  assert.equal(h.visible('btn-wizard-cancel'), true, 'Stop after the first failed wait');
+  assert.equal(h.$('btn-wizard-cancel').textContent, 'Stop and turn off controller');
+  assert.doesNotMatch(h.$('wizard-handsoff').textContent, /Stick held/, 'nobody is holding a stuck stick');
+  // altri tentativi: l'uscita non viene mai offerta (non tocca il limite del 50%)
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.peek().wizard.timeouts, 3);
+  assert.equal(h.visible('btn-wizard-escape'), false);
+  assert.equal(A.counts.sample, 0);
+  // Stop chiede conferma: annullata, il modale resta
+  h.confirmAnswer = false;
+  await h.click('btn-wizard-cancel');
+  assert.equal(h.visible('modal-wizard'), true, 'Stop needs a confirmation');
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-cancel');
+  await h.advance(400);
+  assert.equal(h.visible('modal-wizard'), false);
+  assert.deepEqual([A.counts.begin, A.counts.sample, A.counts.end], [1, 0, 0], 'never a calibEnd with missing samples');
+  assert.ok(A.cal, 'the session stays open in the firmware');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.peek().unsaved, false, 'nothing was committed');
+  assert.equal(h.eval('powerCycleApplies()'), true);
+  assert.equal(h.eval('tabPowerCycleFlag()'), true);
+  assert.equal(h.$('btn-flash').disabled, true);
+  const panel = h.$('calib-outcome').innerHTML;
+  assert.match(panel, /Guided calibration stopped/);
+  assert.match(panel, /stuck near the edge/);
+  assert.match(panel, /Nothing from this run was committed/);
+  assert.match(panel, /hold PS for 10 s/);
+  assert.match(panel, /data-outcome-action="restart"/);
+  assert.match(panel, /data-outcome-action="powered-off"/);
+  assert.doesNotMatch(panel, /The controller reported/, 'a user stop is not a controller error');
+  const ev = h.sessions().filter(s => s.kind === 'wizard').at(-1);
+  assert.deepEqual([ev.done, ev.aborted, ev.stopWhy, ev.step], [false, 'stopped', 'stuck', 0]);
+  const g = v2Guided(h).at(-1);
+  assert.deepEqual([g.outcome, g.needsPowerCycle, g.committed, g.step, g.timeouts], ['error', true, false, 0, 3]);
+  assert.equal(v2Guided(h).length, 1, 'one v2 event, no later `disconnected`');
+  // il riavvio a un click toglie il blocco, senza staccare il cavo prima
+  await h.run(h.eval("runOutcomeAction('restart')"));
+  A.powerCycle();
+  A.unplug(); h.hid.fire('disconnect', A);
+  await h.advance(1000);
+  assert.equal(v2Guided(h).length, 1, 'the restart does not report the stopped run again');
+  A.unplugged = false; A.open(); A.stopped = false; A.schedule();
+  h.hid.fire('connect', A);
+  await h.advance(5000);
+  assert.equal(h.eval('powerCycleApplies()'), false);
+});
+
+test('Stop is offered after one rest timeout at a corner, hidden during the next wait, and gone once the step succeeds', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  assert.equal(h.visible('btn-wizard-cancel'), false, 'no Stop on the happy path');
+  await moveToCorner(h, A, CORNERS[0]);
+  const thumb = touch(A, { stick: 1, t0: h.clock.now(), dur: 60_000, amp: [30, 0] });
+  await h.advance(100);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 0);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  assert.match(h.$('wizard-msg').innerHTML, /The right stick settles about 2\d% away from where it rested at the start/);
+  assert.match(h.$('wizard-msg').innerHTML, /Stop and turn off controller/);
+  // durante l'attesa Stop non c'è (un click verrebbe ignorato)
+  const wait = h.click('btn-wizard-next');
+  await h.advance(1000);
+  assert.equal(h.visible('btn-wizard-cancel'), false);
+  await h.run(wait);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  release(h, thumb);
+  await h.advance(200);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 1);
+  assert.equal(h.visible('btn-wizard-cancel'), false);
+  assert.equal(h.peek().wizard.timeoutsAtStep, 0);
+});
+
+test('after the escape, a stick still settling outside the looser check is told to Stop', async () => {
+  const { h, A } = await setup();
+  await startWizard(h);
+  await moveToCorner(h, A, CORNERS[0]);
+  // pollice (o stick che non torna) fermo a ~31% dal riposo: oltre i 24 LSB dell'uscita
+  touch(A, { stick: 0, t0: h.clock.now(), dur: 600_000, amp: [40, 0] });
+  await h.advance(100);
+  await h.run(h.click('btn-wizard-next'));
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(h.visible('btn-wizard-escape'), true);
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-escape');
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.sample, 0, 'never sampled, escape or not');
+  assert.match(h.$('wizard-msg').innerHTML, /outside even the looser check/);
+  assert.equal(h.visible('btn-wizard-cancel'), true);
+  await h.click('btn-wizard-cancel');
+  assert.deepEqual([A.counts.sample, A.counts.end], [0, 0]);
+  assert.equal(h.eval('powerCycleApplies()'), true);
+  assert.equal(h.sessions().filter(s => s.kind === 'wizard').at(-1).stopWhy, 'far');
+});
+
 test('N2: an unstable final Guided measurement above 15% still disables Write', async () => {
   const { h, A } = await setup({ drift: [[14, -9], [-2, 3]] });
   const command = A.command.bind(A);
