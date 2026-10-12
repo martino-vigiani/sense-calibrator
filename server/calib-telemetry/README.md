@@ -96,7 +96,7 @@ there is no clock time, serial number, device identifier or raw input report.
   v2 events at 4 KB; nginx in front accepts up to 1 MB by default). The largest
   report the page can build is tested below it; a typical 30-minute recording
   is about 100 KB.
-- Rate limit **3 reports per IP per hour**, own bucket (`calibration-diagnostics`),
+- Rate limit **3 reports per IP per hour and 6 per IP per day** (`DIAG_IP_DAY_MAX`), own bucket (`calibration-diagnostics`),
   applied before parsing, same headers and `429` as the other endpoints.
 - Stored as `${DIAG_DIR}/<code>.json` (mode 600; the folder is created 700 and
   tightened to 700 if it exists): the report unchanged plus `receivedDay` (UTC
@@ -132,7 +132,7 @@ To read a report quoted in an issue: `ssh` to the VPS and open
 
 v1: 10 POST requests per IP per minute (in-memory). v2: 30 events per IP per
 minute, in a separate bucket with its own policy name (`calibration-events`),
-so events never use up the v1 quota. Diagnostic reports: 3 per IP per hour
+so events never use up the v1 quota. Diagnostic reports: 3 per IP per hour and 6 per IP per day
 (`calibration-diagnostics`). Both are applied before the JSON body is
 parsed. Submission responses expose
 `RateLimit-Policy` and `RateLimit` in the current IETF HTTPAPI draft format,

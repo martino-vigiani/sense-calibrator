@@ -263,21 +263,33 @@ app.use('/api/calib/v2/events', express.json({ limit: V2_BODY_LIMIT }));
 const diagRateLimit = new Map();
 const DIAG_RATE_WINDOW_MS = 60 * 60 * 1000;
 const DIAG_RATE_MAX = 3;
+// Tetto per IP sulle 24 ore: senza, un solo indirizzo a 3 l'ora esaurisce in
+// meno di un giorno la quota globale (DIAG_DAILY_MAX_REPORTS) e blocca gli
+// invii di tutti fino a mezzanotte UTC.
+const DIAG_IP_DAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const DIAG_IP_DAY_MAX = Number(process.env.DIAG_IP_DAY_MAX) || 6;
 const DIAG_RATE_LIMIT_POLICY = 'calibration-diagnostics';
 
 function checkDiagRateLimit(ip) {
   capMap(diagRateLimit);
   const now = Date.now();
-  const hits = (diagRateLimit.get(ip) || []).filter(ts => now - ts < DIAG_RATE_WINDOW_MS);
+  const day = (diagRateLimit.get(ip) || []).filter(ts => now - ts < DIAG_IP_DAY_WINDOW_MS);
+  const hits = day.filter(ts => now - ts < DIAG_RATE_WINDOW_MS);
   const resetSeconds = hits.length === 0
     ? Math.ceil(DIAG_RATE_WINDOW_MS / 1000)
     : Math.max(1, Math.ceil((hits[0] + DIAG_RATE_WINDOW_MS - now) / 1000));
+  if (day.length >= DIAG_IP_DAY_MAX) {
+    diagRateLimit.set(ip, day);
+    return { allowed: false, remaining: 0, resetSeconds: Math.max(1, Math.ceil((day[0] + DIAG_IP_DAY_WINDOW_MS - now) / 1000)) };
+  }
   if (hits.length >= DIAG_RATE_MAX) {
+    diagRateLimit.set(ip, day);
     return { allowed: false, remaining: 0, resetSeconds };
   }
-  hits.push(now);
-  diagRateLimit.set(ip, hits);
-  return { allowed: true, remaining: DIAG_RATE_MAX - hits.length, resetSeconds };
+  day.push(now);
+  const hitsAfter = day.filter(ts => now - ts < DIAG_RATE_WINDOW_MS);
+  diagRateLimit.set(ip, day);
+  return { allowed: true, remaining: Math.min(DIAG_RATE_MAX - hitsAfter.length, DIAG_IP_DAY_MAX - day.length), resetSeconds };
 }
 
 function setDiagRateLimitHeaders(res, state) {
@@ -362,7 +374,7 @@ app.use('/api/calib/v2/diagnostics', (req, res, next) => {
     status: 429,
     code: 'rate_limit_exceeded',
     title: 'Submission rate limit exceeded',
-    detail: `No more than ${DIAG_RATE_MAX} diagnostic reports can be submitted per IP address each hour.`,
+    detail: `No more than ${DIAG_RATE_MAX} diagnostic reports can be submitted per IP address each hour, and ${DIAG_IP_DAY_MAX} each day.`,
     resolution: `Wait ${rateLimit.resetSeconds} seconds before retrying, or download the report and attach it to the issue.`,
   });
 });

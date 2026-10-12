@@ -22,6 +22,7 @@ process.env.DIAG_DIR = DIAG_DIR;
 process.env.DIAG_DAILY_MAX_REPORTS = '3';
 process.env.DIAG_DAILY_MAX_BYTES = '2400';
 process.env.DIAG_MAX_FILES = '5';
+process.env.DIAG_IP_DAY_MAX = '2';
 process.env.DIAG_DIR_LIMIT = String(1024 * 1024);
 process.env.PORT = '0';
 process.env.NODE_ENV = 'test';
@@ -153,4 +154,22 @@ test('log all\'80% del tetto (file o byte), una volta finché non scende', async
   } finally {
     console.warn = original;
   }
+});
+
+test('tetto per IP sulle 24 ore: un indirizzo non esaurisce da solo la quota globale', async () => {
+  const post = () => testFetch(`${baseUrl}/api/calib/v2/diagnostics`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.41.0.1' },
+    body: JSON.stringify(SMALL),
+  });
+  assert.equal((await post()).status, 201);
+  assert.equal((await post()).status, 201);
+  // Terzo invio entro l'ora: la quota oraria (3) lo permetterebbe, quella del giorno per IP (2) no.
+  const res = await post();
+  assert.equal(res.status, 429);
+  assert.match((await res.json()).detail, /2 each day/);
+  assert.ok(Number(res.headers.get('retry-after')) > 3600);
+  assert.equal(reports().length, 2);
+  // Un altro indirizzo usa ancora la quota globale.
+  assert.equal((await postReport()).status, 201);
 });
