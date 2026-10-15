@@ -30,6 +30,8 @@ import * as rangeDiagnosticsModule from '../../js/calib/range-diagnostics.js';
 import * as guardModule from '../../js/quick-center-guard.js';
 import * as telemetryV2Module from '../../js/telemetry-v2.js';
 import * as restNoiseModule from '../../js/calib/rest-noise.js';
+import * as contactFaultModule from '../../js/calib/contact-fault.js';
+import * as contactFaultViewModule from '../../js/ui/contact-fault-view.js';
 import * as landingModule from '../../js/calib/landing.js';
 import * as timelineModule from '../../js/telemetry-timeline.js';
 import * as diagRecorderModule from '../../js/diag/recorder.js';
@@ -333,6 +335,8 @@ export async function loadApp({ authorized = [], chooser = [], hidAvailable = tr
         },
       },
       './calib/rest-noise.js': restNoiseModule,
+      './calib/contact-fault.js': contactFaultModule,
+      './ui/contact-fault-view.js': contactFaultViewModule,
       './calib/landing.js': landingModule,
       './telemetry-timeline.js': timelineModule,
       './calib/measure.js': measureModule,

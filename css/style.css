@@ -283,6 +283,28 @@ main {
   text-align: left;
 }
 
+/* Contatto instabile (dentro la card del test drift): largo come la card,
+   non centrato come gli avvisi della landing. */
+.contact-fault {
+  max-width: none;
+  margin: 16px 0 0;
+}
+.contact-fault-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.contact-fault p,
+.contact-fault-steps {
+  margin: 6px 0 0;
+}
+.contact-fault-steps {
+  padding-left: 20px;
+}
+.contact-fault-note {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
 /* ---------------- browser non supportato / mobile ---------------- */
 
 /* Sostituisce la CTA quando WebHID non esiste. Non è un errore: è
