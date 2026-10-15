@@ -7,7 +7,9 @@ import { dirname, resolve } from 'node:path';
 const rootUrl = new URL('..', import.meta.url);
 const rootPath = fileURLToPath(rootUrl);
 
-const HOMEPAGE_TITLE = 'Fix PS5 Stick Drift from Your Browser | Sense Calibrator';
+// Audit SEO 15/10: titolo col brand davanti (quasi tutti i click sono brand) e
+// niente promessa di un fix nel titolo né nell'H1.
+const HOMEPAGE_TITLE = 'Sense Calibrator: PS5 Stick Drift Test &amp; DualSense Calibration';
 
 const GUIDES = [
   {
@@ -35,20 +37,20 @@ const GUIDES = [
     url: 'https://martino-vigiani.github.io/sense-calibrator/guides/ps5-stick-drift-fix/',
     title: 'PS5 Stick Drift Fix: Calibration or Repair? | Sense Calibrator',
     description:
-      'Find out when PS5 stick drift can be fixed with DualSense calibration. Test first, compare the result, and know when the controller needs repair.',
+      'Match your PS5 stick drift symptom to the right fix: when DualSense calibration helps, when a game deadzone is only a stopgap, and when the stick needs repair.',
     h1: 'PS5 stick drift fix:<br>calibration or repair?',
     card: 'PS5 stick drift fix: calibration or repair?',
-    faq: false,
+    faq: true,
   },
   {
     path: 'guides/sense-calibrator-vs-dualshock-tools/index.html',
     url: 'https://martino-vigiani.github.io/sense-calibrator/guides/sense-calibrator-vs-dualshock-tools/',
-    title: 'Sense Calibrator vs dualshock-tools: Which to Use? | Sense Calibrator',
+    title: 'Sense Calibrator vs dualshock-tools.github.io for PS5 DualSense',
     description:
-      'An honest comparison of two free browser tools for PS5 controller calibration: what dualshock-tools and Sense Calibrator support, and when to use each.',
+      'An honest comparison with dualshock-tools (dualshock-tools.github.io), the established browser tool for PS5 controller calibration: what each supports and when to use which.',
     h1: 'Sense Calibrator vs dualshock-tools',
     card: 'Sense Calibrator vs dualshock-tools',
-    faq: false,
+    faq: true,
   },
 ];
 
@@ -145,7 +147,7 @@ test('every canonical guide URL is published in the sitemap with a lastmod', asy
   }
 });
 
-test('the homepage title and core positioning stay unchanged', async () => {
+test('the homepage title and core positioning stay as decided', async () => {
   const html = await readFile(new URL('index.html', rootUrl), 'utf8');
 
   assert.equal(matchAll(html, /<title>([^<]+)<\/title>/g)[0], HOMEPAGE_TITLE);
@@ -153,7 +155,13 @@ test('the homepage title and core positioning stay unchanged', async () => {
     matchAll(html, /<link rel="canonical" href="([^"]+)">/g)[0],
     'https://martino-vigiani.github.io/sense-calibrator/',
   );
-  assert.match(html, /<h1>Fix PS5 stick drift\.<br>From your browser\.<\/h1>/);
+  assert.match(html, /<h1>Test PS5 stick drift\.<br>Then recalibrate\.<\/h1>/);
+  for (const tag of ['og:title', 'twitter:title']) {
+    const attr = tag.startsWith('og:') ? 'property' : 'name';
+    assert.match(html, new RegExp(`<meta ${attr}="${tag}" content="${HOMEPAGE_TITLE}">`), tag);
+  }
+  assert.match(html, /<link rel="modulepreload" href="js\/app\.js">/);
+  assert.match(html, /<script type="module" src="js\/app\.js"><\/script>/);
   assert.match(html, /<meta name="description" content="Test and recalibrate a standard PS5 DualSense for stick drift from desktop Chrome or Edge over USB\. Free, open source and no install\.">/);
 });
 
@@ -286,4 +294,37 @@ test('the dualshock-tools comparison quotes its drift warning and dates its GitH
   assert.doesNotMatch(html, /drift caused by worn parts/);
   assert.doesNotMatch(html, /far more GitHub stars/);
   assert.match(html, /on 12 October 2026 its GitHub repository had \d+ stars and \d+ forks, against \d+ and \d+ for Sense Calibrator/);
+});
+
+// Audit SEO 15/10: l'unica query non-brand reale cerca dualshock-tools.github.io.
+test('the homepage links to the dualshock-tools comparison with descriptive text', async () => {
+  const html = await readFile(new URL('index.html', rootUrl), 'utf8');
+  assert.match(html, /<a [^>]*href="guides\/sense-calibrator-vs-dualshock-tools\/"[^>]*>Coming from dualshock-tools\? See how they compare<\/a>/);
+});
+
+test('the drift fix guide has a symptom table, a deadzone section and a repair section', async () => {
+  const html = await readFile(new URL('guides/ps5-stick-drift-fix/index.html', rootUrl), 'utf8');
+  for (const id of ['symptoms', 'deadzone', 'repair', 'faq']) {
+    assert.match(html, new RegExp(`<h2 id="${id}">`), `section #${id}`);
+  }
+  assert.match(html, /<table>[\s\S]*Pinned[\s\S]*<\/table>/);
+});
+
+// GitHub Pages serve 404.html a ogni profondità: link assoluti, mai indicizzata.
+test('the 404 page is noindex, styled, links home and to every guide, and stays out of the sitemap', async () => {
+  const html = await readFile(new URL('404.html', rootUrl), 'utf8');
+  const sitemap = await readFile(new URL('sitemap.xml', rootUrl), 'utf8');
+  assert.match(html, /<meta name="robots" content="noindex">/);
+  assert.match(html, /<link rel="stylesheet" href="\/sense-calibrator\/css\/style\.css">/);
+  assert.match(html, /<a class="btn btn-primary" href="\/sense-calibrator\/">Run the drift test<\/a>/);
+  for (const guide of GUIDES) {
+    assert.match(html, new RegExp(`href="/sense-calibrator/guides/${guideDir(guide)}/"`), guideDir(guide));
+  }
+  const refs = matchAll(html, /(?:href|src)="([^"]+)"/g).filter((ref) => !/^(?:https?:|mailto:|data:|#)/.test(ref));
+  for (const ref of refs) {
+    assert.ok(ref.startsWith('/sense-calibrator/'), `${ref} must be absolute`);
+    const info = await stat(resolve(rootPath, ref.replace('/sense-calibrator/', '')));
+    assert.ok(info.isFile() || info.isDirectory(), `${ref} should resolve`);
+  }
+  assert.doesNotMatch(sitemap, /404/);
 });
