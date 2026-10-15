@@ -75,7 +75,7 @@
             "name": "Can PS5 stick drift be fixed without opening the controller?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Sometimes. If the drift test shows a stable resting offset with low noise, recalibrating the stick center can correct it, and Write to memory keeps the correction. A noisy signal, a stick that rests somewhere different after each release, or drift that comes back after a saved calibration all point to wear, which calibration cannot repair."
+              "text": "Sometimes. If the drift test shows a stable resting offset with low noise, recalibrating the stick center can correct it, and a confirmed Write to memory keeps the correction. A noisy signal, a stick that rests somewhere different after each release, or drift that comes back after a saved calibration all point to wear, which calibration cannot repair."
             }
           },
           {
@@ -151,6 +151,7 @@
       <h2 id="symptoms">Match the symptom to the fix</h2>
       <p>Connect the controller to <a href="../../">Sense Calibrator</a> and leave both sticks untouched: the automatic drift test reads each stick's resting offset and noise without changing anything. Run it twice, and between runs flick the drifting stick and let it go, so you can see whether it comes back to the same point. The <a href="../ps5-controller-stick-drift-test/">drift test guide</a> explains the numbers and labels.</p>
       <table>
+        <caption class="sr-only">Stick drift symptoms, test results and actions</caption>
         <thead>
           <tr>
             <th scope="col">What you notice</th>
@@ -171,13 +172,13 @@
           </tr>
           <tr>
             <th scope="row">Drift came back after a calibration you saved</th>
-            <td>The resting offset has grown again since the saved result</td>
+            <td>A resting offset again, after a saved result that read Centered or within 1 step</td>
             <td>Probably wear. Another calibration may help for a while; repeating it will not stop the cause.</td>
           </tr>
           <tr>
             <th scope="row">The stick acts as if pushed all the way</th>
             <td>An axis <b>Pinned</b> at the edge</td>
-            <td>Run Range, then let the tool check the center again. If the stick cannot leave the edge, Range may never complete and the stick needs a repair.</td>
+            <td>Run Range, then let the tool check the center again. If the stick cannot leave the edge, Range may never complete and the stick most likely needs a repair.</td>
           </tr>
           <tr>
             <th scope="row">A game drifts, but the test reads Centered and quiet</th>
@@ -189,7 +190,7 @@
       <p>These are likely explanations, not a diagnosis. A resting test does not open the controller, and a quiet reading does not prove the stick is healthy.</p>
 
       <h2 id="calibrate">Try calibration first when the offset is stable</h2>
-      <p>Calibration changes the center and range values the controller uses to read its sticks. When the offset is stable, that is often enough, and it costs nothing to try. Quick calibration is automatic; Guided handles a stick that rests too far from center for Quick to start. The <a href="../calibrate-dualsense-controller/">DualSense calibration guide</a> walks through both, along with Range and the separate save step.</p>
+      <p>Calibration changes the center and range values the controller uses to read its sticks. When the offset is stable, that is often enough. The tool is free, but an applied calibration can't be undone from the page, so compare before and after before you save. Quick calibration is automatic; Guided handles a stick that rests too far from center for Quick to start. The <a href="../calibrate-dualsense-controller/">DualSense calibration guide</a> walks through both, along with Range and the separate save step.</p>
       <p>Judge the result on the numbers the tool shows, not on a perfect zero: the controller reports positions on an 8-bit grid, so the closest center it can show is 0.6%.</p>
       <p class="guide-note"><b>Do not save a result that got worse.</b> Choose Write to memory only after comparing before and after. Whether turning the controller off brings back the last saved calibration has not yet been confirmed on hardware, so follow any instruction the tool gives before trying again.</p>
 
@@ -212,7 +213,7 @@
 
       <h2 id="faq">PS5 stick drift fix FAQ</h2>
       <h3>Can PS5 stick drift be fixed without opening the controller?</h3>
-      <p>Sometimes. If the drift test shows a stable resting offset with low noise, recalibrating the stick center can correct it, and Write to memory keeps the correction. A noisy signal, a stick that rests somewhere different after each release, or drift that comes back after a saved calibration all point to wear, which calibration cannot repair.</p>
+      <p>Sometimes. If the drift test shows a stable resting offset with low noise, recalibrating the stick center can correct it, and a confirmed Write to memory keeps the correction. A noisy signal, a stick that rests somewhere different after each release, or drift that comes back after a saved calibration all point to wear, which calibration cannot repair.</p>
       <h3>Does a larger deadzone fix stick drift?</h3>
       <p>No, it hides it. A larger in-game deadzone makes the game ignore small inputs near center, so it can stop resting drift in that game, at the cost of some fine control. It does not change the controller, and it only works in games that offer the setting.</p>
       <h3>Why does stick drift come back after calibrating?</h3>
