@@ -877,7 +877,7 @@ export function driftMessage(result, { previous = null, unsaved = false, writeLo
     else text = `${where} This calibration is still temporary: write it to memory to keep it.`;
   }
   if (noisy && worstTier?.id !== 'moving') {
-    text += ' The signal is also noisy. Retest with both sticks untouched; this reading does not determine the cause.';
+    text += ' The signal is also noisy. Retest with both sticks untouched; this reading does not determine the cause. Left connected and untouched, the page also watches for a stick contact that jumps on its own.';
   }
   if (previous && unsaved) {
     const before = Math.max(previous.left.offset, previous.right.offset);

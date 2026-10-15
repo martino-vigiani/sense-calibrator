@@ -12,6 +12,8 @@ import {
 import { createCalTimeline } from './telemetry-timeline.js';
 import { createRestNoiseCollector } from './calib/rest-noise.js';
 import { createLandingDetector } from './calib/landing.js';
+import { createContactFaultDetector } from './calib/contact-fault.js';
+import { contactFaultView } from './ui/contact-fault-view.js';
 import {
   DRIFT_MAX_RETRIES, DRIFT_MIN_STABLE, DRIFT_SETTLE_SAMPLES, DRIFT_TEST_MS, DRIFT_WINDOW,
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
@@ -833,6 +835,7 @@ function teardown(message = null) {
   closeSaveChapter('disconnected');
   restNoise.reset();
   landingDetector.reset();
+  clearContactFault();
   calTimeline.disconnected();
   if (diag.active) {
     diagNote('disconnect');
@@ -968,6 +971,7 @@ function onInputReport(event) {
   feedHandsOff(now);
   feedRestNoise(now);
   feedLandings(now);
+  feedContactFault(now);
   if (now - lastBattery > 2000 && ds5) {
     lastBattery = now;
     battery = ds5.parseBattery(d);
@@ -2397,6 +2401,47 @@ function emitLandings(trigger, { now = false } = {}) {
   if (!pending) return;
   // Non nel report diagnostico: lì i rilasci ci sono già, uno per uno.
   if (emitV2(ctx => buildLandingEvent(ctx, pending), { now, diag: false })) calTimeline.sent(trigger);
+}
+
+/* --------- contatto instabile (js/calib/contact-fault.js) --------- */
+// Un asse che a riposo salta fra due livelli: spazzola del potenziometro
+// sporca o consumata, che la calibrazione non può correggere. Osservato dagli
+// stessi input report finché il controller è collegato e nessuna
+// calibrazione, flash, wizard o range è in corso (lì gli stick si muovono o il
+// riferimento cambia). Non dipende dal consenso: resta nella pagina, nessun
+// dato esce (solo un evento locale). Il difetto va e viene, quindi le prove
+// restano per tutta la connessione e si azzerano solo allo stacco.
+const contactFault = createContactFaultDetector();
+let contactFaultShown = '';
+function contactFaultAllowed() {
+  return !!ds5 && !ops.busy && !flashing && !wizard && !rangeSession && !rangeCheck;
+}
+function feedContactFault(now) {
+  if (!contactFaultAllowed()) {
+    contactFault.reset();
+    return;
+  }
+  const changed = contactFault.push(sticks, lastStickReportAt ?? now);
+  if (!changed.length) return;
+  for (const f of changed) {
+    recordEvent('contact-fault', { stick: f.stick, axis: f.axis, windows: f.windows, jumps: f.jumps, jumpLsb: f.jumpLsb, spanLsb: f.spanLsb });
+  }
+  renderContactFault();
+}
+function renderContactFault() {
+  const el = $('contact-fault');
+  const view = contactFaultView(contactFault.findings());
+  // Si riscrive solo quando il testo cambia (conferma o ampiezza cresciuta):
+  // è una regione live e ripetere lo stesso testo verrebbe riletto.
+  const html = view?.html ?? '';
+  if (html === contactFaultShown) return;
+  contactFaultShown = html;
+  el.innerHTML = html;
+  el.classList.toggle('hidden', !view);
+}
+function clearContactFault() {
+  contactFault.clear();
+  renderContactFault();
 }
 
 // Messaggi del modale Quick per ogni fase di runQuick (js/calib/quick.js).

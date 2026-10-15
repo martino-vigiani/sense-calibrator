@@ -281,6 +281,9 @@
       </div>
       <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden" aria-hidden="true"><i></i></div>
+      <!-- Contatto instabile di un asse (js/calib/contact-fault.js): compare solo
+           quando gli input report a riposo mostrano salti fra due livelli. -->
+      <div id="contact-fault" class="callout contact-fault hidden" role="status" aria-live="polite"></div>
     </div>
 
     <nav class="result-help" aria-label="Help with your controller results">
