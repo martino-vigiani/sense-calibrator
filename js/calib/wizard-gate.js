@@ -125,6 +125,22 @@ export function checkBefore(result, params = {}) {
   return { ok: true };
 }
 
+// Partenza lontana: stick della misura di partenza (summarizeResult, prima di
+// calibBegin) con offset ≥ refRadius (in punti %, la stessa soglia di
+// plausibilità del riferimento in sessione, nessuna soglia nuova). Il frame è
+// diverso da quello della sessione (H0), quindi questo NON decide nulla da
+// solo: la pagina chiede una conferma prima di calibBegin. Telemetria v2
+// (build 20261013): Guided con partenza ≥50% → 0/20 completati, 16 fermi al
+// passo 0 con la sessione aperta. → [{ side: 'left'|'right', offset }]
+export const farStartPct = (params = {}) => wizardParams(params).refRadius * 100;
+export function farStart(before, params = {}) {
+  const min = farStartPct(params);
+  const off = Array.isArray(before?.off) ? before.off : [before?.left?.offset, before?.right?.offset];
+  return ['left', 'right']
+    .map((side, i) => ({ side, offset: off[i] }))
+    .filter(st => Number.isFinite(st.offset) && st.offset >= min);
+}
+
 // Proiezione di ciascuno stick sulla direzione dell'angolo (tx, ty qualsiasi,
 // normalizzati qui). 1 = corsa piena verso l'angolo.
 export function cornerProjection(sticks, corner) {

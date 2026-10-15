@@ -22,7 +22,7 @@ import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
-  driftMessage, flashSummary, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
+  driftMessage, flashSummary, guidedFarStartCopy, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
   revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
@@ -30,7 +30,8 @@ import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hand
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
 import { rangeProgress, rangeRequirementsHtml } from './ui/range-progress.js';
 import {
-  WIZARD_DEFAULTS, captureRestReferenceDetailed, checkBefore, cornerProjection, createCornerTracker, gateWizardSample, restTolerance, wizardComparison,
+  WIZARD_DEFAULTS, captureRestReferenceDetailed, checkBefore, cornerProjection, createCornerTracker, farStart, gateWizardSample, restTolerance,
+  wizardComparison,
 } from './calib/wizard-gate.js';
 import { CIRCULARITY_NORMAL, RANGE_DEFAULTS, circularityRms, createRangeTracker, rangeStatus } from './calib/range-coverage.js';
 import { rangeCompletion } from './calib/range-diagnostics.js';
@@ -812,6 +813,7 @@ function finalizeInterruptedWizard(w, { now = false } = {}) {
   }), { device: w.device ?? null, controller: w.controller, epoch: w.op?.epoch, now });
   recordEvent('wizard', { done: false, step: w.step ?? null, before: w.before ?? null,
     samples: w.samples, timeouts: w.timeouts, escaped: w.escaped, aborted: 'disconnected' });
+  noteWizardFarFailure(w);
 }
 
 function teardown(message = null) {
@@ -1754,6 +1756,18 @@ let quickPreflightBlocked = false;
 let quickForceNext = false;
 // Stesso principio per Guided: "Calibrate anyway" su stick già centrati.
 let wizardForceNext = false;
+// Guided da uno stick oltre refRadius (farStart): "Try anyway" prosegue.
+let wizardFarForceNext = false;
+// Controller (chiave salata, null se illeggibile) su cui Guided è già fallito
+// in questa pagina partendo lontano (o fermato con uno stick bloccato vicino
+// al bordo). Solo in memoria, mai persistito: decide solo il testo di F1.
+const wizardFarFailures = new Map();
+function noteWizardFarFailure(w, { stuck = false, after = null } = {}) {
+  if (!w) return;
+  if (stuck || farStart(w.before).length || (after && farStart(after).length)) {
+    wizardFarFailures.set(w.key ?? null, (wizardFarFailures.get(w.key ?? null) ?? 0) + 1);
+  }
+}
 // Recupero opt-in dopo un esito catastrofico (C0-10): una sola passata, con
 // force, e comunque dietro la tenuta entro il 15% di runQuick.
 let quickRecoveryNext = false;
@@ -2933,6 +2947,8 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
     done: true, before: w.before ?? null, after,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses, escaped: w.escaped,
   });
+  // Completata ma ancora oltre refRadius: per F1 conta come un fallimento.
+  if (after && farStart(after).length) noteWizardFarFailure(w, { after });
   emitCalibV2(ctx => buildGuidedEvent(ctx, {
     outcome: 'done', committed: true, needsPowerCycle: false, step: 5, before: w.before, after,
     timeouts: w.timeouts, escaped: w.escaped, durMs: performance.now() - w.startedAt,
@@ -3059,6 +3075,39 @@ async function wizardNext() {
         return;
       }
       wizardForceNext = false;
+      // Partenza lontana (≥ refRadius): Guided da qui riesce di rado e, se
+      // fallisce al passo 0, lascia la sessione aperta e obbliga a riavviare.
+      // Un blocco netto non è lecito (la misura è nel frame calibrato, la
+      // sessione in un altro, H0): nessun comando, conferma esplicita.
+      // openSessionGuard non è ancora stato chiamato: nessun segno di sessione.
+      const far = farStart(w.before);
+      if (far.length && !wizardFarForceNext) {
+        ops.endOp(w.op);
+        w.op = null;
+        w.controller = null;
+        wizardFarForceNext = true;
+        const repeat = wizardFarFailures.has(w.key ?? null);
+        const cancel = $('btn-wizard-cancel');
+        cancel.classList.remove('hidden');
+        cancel.textContent = 'Close';
+        cancel.className = 'btn btn-primary';
+        cancel.setAttribute('data-autofocus', '');
+        btn.removeAttribute('data-autofocus');
+        btn.className = 'btn btn-secondary';
+        btn.textContent = 'Try anyway';
+        w.farPending = true;
+        const copy = guidedFarStartCopy({ far, repeat });
+        log(`Guided calibration: start ${far.map(st => `${st.side} ${st.offset.toFixed(1)}%`).join(', ')} beyond the reference radius; nothing sent.`);
+        $('wizard-msg').innerHTML = `<b>${esc(copy.lead)}</b> ${copy.lines.map(esc).join(' ')}`;
+        recordEvent('wizard', { done: false, step: 0, before: w.before, aborted: 'far-start',
+          far: far.map(st => st.side), repeat });
+        return;
+      }
+      if (wizardFarForceNext) {
+        wizardFarForceNext = false;
+        w.farPending = false;
+        wizardResetButtons();
+      }
       w.tol = restTolerance(w.before);
       // Il segno di sessione in volo va scritto PRIMA del comando (vedi
       // openSessionGuard): un reload fra due angoli torna bloccato.
@@ -3117,6 +3166,7 @@ async function wizardNext() {
         samples: w.samples, timeouts: w.timeouts, escaped: w.escaped,
         ...(gone ? { aborted: 'disconnected' } : { err: String(error.message || error).slice(0, 120) }),
       });
+      if (w.beginSent) noteWizardFarFailure(w);
     }
     // Errore (o scollegamento) dopo un calibBegin riuscito e prima del
     // calibEnd: la sessione resta aperta nel firmware con 1–3 angoli. Come per
@@ -3144,7 +3194,23 @@ async function wizardNext() {
     w.running = false;
     btn.disabled = false;
     syncBusyTitle();
+    // Partenza lontana: il fuoco va su Close (che ora porta data-autofocus),
+    // come per "Calibrate anyway" della rapida: il bottone premuto era stato
+    // disabilitato e il fuoco era passato al pannello.
+    if (w.farPending && wizard === w && !$('modal-wizard').classList.contains('hidden')) {
+      $('btn-wizard-cancel').focus({ preventScroll: true });
+    }
   }
+}
+
+// Bottoni del wizard come all'apertura (dopo "Try anyway" o un nuovo avvio).
+function wizardResetButtons() {
+  const btn = $('btn-wizard-next');
+  btn.className = 'btn btn-primary';
+  btn.setAttribute('data-autofocus', '');
+  const cancel = $('btn-wizard-cancel');
+  cancel.className = 'btn btn-ghost';
+  cancel.removeAttribute('data-autofocus');
 }
 
 // Uscita esplicita per uno stick che non torna mai allo stesso punto: dopo
@@ -3192,6 +3258,7 @@ function stopWizard() {
   recordEvent('wizard', { done: false, step: w.step, before: w.before ?? null,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses,
     escaped: w.escaped, aborted: why === 'corner' ? 'corner-unreachable' : 'stopped', stopWhy: why });
+  noteWizardFarFailure(w, { stuck: why === 'stuck' });
   ops.endOp(w.op);
   wizard = null;
   closeModal('modal-wizard');
@@ -3206,11 +3273,13 @@ function openWizard() {
     phase: 'intro', step: 0, corner: 0,
     op: null, controller: null, before: null, ref: null, tol: null, tracker: null,
     samples: 0, timeouts: 0, timeoutsAtStep: 0, cornerMisses: 0, cornerMissesAtStep: 0, lastWhy: null, stuck: false,
-    escaped: false, committed: false, sessionOpen: false, guard: null,
+    escaped: false, committed: false, sessionOpen: false, guard: null, farPending: false,
     running: false, reported: false, beginSent: false, startedAt: null, device: null,
   };
   lastWizardComparison = null;
   wizardForceNext = false;
+  wizardFarForceNext = false;
+  wizardResetButtons();
   wizardSetDots(0);
   wizardHideLive();
   $('wizard-diagram').classList.add('hidden');
