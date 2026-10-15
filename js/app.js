@@ -23,7 +23,7 @@ import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedFarStartCopy, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
-  driftRestedInside, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
+  driftRestedInside, quickEntryRoute, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
   revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
@@ -1166,6 +1166,16 @@ let lastDriftResult = null;
 // calibrazione è arrivata dopo il test.
 let lastDriftCommit = -1;
 let commitSeq = 0;
+// Controller su cui è stato misurato lastDriftResult (teardown lo azzera già;
+// qui lo si dice esplicitamente per freshDriftResult).
+let lastDriftController = null;
+// Il test drift vale per Quick (raggio, rotta) solo se misurato DOPO l'ultimo
+// commit e sullo stesso controller: dopo una calibrazione il centro è cambiato
+// e un "fermo dentro il raggio" di prima non dice più nulla.
+function freshDriftResult(controller = ds5) {
+  return lastDriftResult && lastDriftCommit === commitSeq && lastDriftController === controller && controller
+    ? lastDriftResult : null;
+}
 
 // Ricontrollo del centro dopo un range completo (H12, non verificato su
 // hardware; telemetria v2: centro fuori 12 volte su 13 dopo un range
@@ -1204,6 +1214,7 @@ function finishDriftTest(result) {
   const prev = lastDriftResult;
   lastDriftResult = result;
   lastDriftCommit = commitSeq;
+  lastDriftController = ds5;
 
   for (const [side, el] of [['left', 'verdict-l'], ['right', 'verdict-r']]) {
     const r = result[side];
@@ -1971,9 +1982,26 @@ const QUICK_INTRO = 'Rest the controller on a stable surface and <b>don’t touc
 // Dopo una preflight fallita con uno stick che riposa oltre il raggio di Quick
 // o al bordo (ultimo test drift): il bottone principale apre Guided o Range.
 let quickRouteNext = null;
+// Preflight Quick fallite (moving/settled/off-center) per controller (chiave
+// salata, null se illeggibile) in questa pagina, mai persistite: dalla seconda
+// Guided diventa l'azione primaria. Telemetria v2 build 20261013: 33 dei 58
+// preflight erano ripetizioni nella stessa visita, e l'attesa di 8 s non ne ha
+// recuperato nessuno.
+const quickPreflightFailures = new Map();
+// Rotta come azione primaria (Guided o Range) e Quick come secondaria. Nessun
+// comando: il bottone primario apre l'altra procedura, "Try Quick anyway"
+// lancia runQuick esattamente come "Calibrate now".
+function offerQuickRoute(action) {
+  quickRouteNext = action.id;
+  $('btn-quick-go').textContent = action.label;
+  $('btn-quick-alt').textContent = 'Try Quick anyway';
+  $('btn-quick-alt').classList.remove('hidden');
+}
 function resetQuickModal() {
   quickForceNext = false;
   quickRouteNext = null;
+  $('btn-quick-alt').classList.add('hidden');
+  $('btn-quick-alt').disabled = false;
   quickRecoveryNext = false;
   $('btn-quick-go').textContent = 'Calibrate now';
   $('btn-quick-go').className = 'btn btn-primary';
@@ -2439,9 +2467,9 @@ function quickProgressHtml({ phase, pass, worst, side, offset }) {
 
 // UI della calibrazione rapida: l'algoritmo è runQuick (js/calib/quick.js),
 // qui restano `busy`, modale, messaggi, toast, telemetria e stato non salvato.
-async function quickCalibrate() {
+async function quickCalibrate({ anyway = false } = {}) {
   if (!ds5 || ops.busy || blockedForPowerCycle()) return;
-  if (quickRouteNext) {
+  if (quickRouteNext && !anyway) {
     const route = quickRouteNext;
     resetQuickModal();
     closeModal('modal-quick');
@@ -2457,6 +2485,8 @@ async function quickCalibrate() {
   const controllerKey = deviceKey;
   const recovery = quickRecoveryNext;
   const force = quickForceNext || recovery;
+  // Test drift solo se fresco (dopo l'ultimo commit, stesso controller).
+  const drift = freshDriftResult(controller);
   cancelDriftTest();
   const op = ops.beginOp();
   diagNote('start', { op: 'quick' });
@@ -2470,6 +2500,7 @@ async function quickCalibrate() {
   const msg = $('quick-msg');
   $('btn-quick-go').disabled = true;
   $('btn-quick-cancel').disabled = true;
+  $('btn-quick-alt').disabled = true;
   let blockedMessage = null;
   let run = null;
   const startedAt = performance.now();
@@ -2527,7 +2558,7 @@ async function quickCalibrate() {
         // Il test drift ha visto entrambi gli stick fermi dentro il raggio: uno
         // stick fermo fuori raggio adesso è un pollice, e conviene aspettare
         // che si stacchi invece di fermarsi dopo 3 s (solo l'attesa cambia).
-        ...(['left', 'right'].every(side => driftRestedInside(lastDriftResult, side)) ? { preflightOffCenterMs: Infinity } : {}),
+        ...(['left', 'right'].every(side => driftRestedInside(drift, side)) ? { preflightOffCenterMs: Infinity } : {}),
       },
       repairStaleSession: repairAllowed,
       onSession: state => {
@@ -2566,6 +2597,8 @@ async function quickCalibrate() {
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
     });
     const { session, outcome } = run;
+    // Una preflight passata (o un arresto prima dell'attesa) azzera il conto.
+    if (outcome !== 'preflight') quickPreflightFailures.delete(controllerKey ?? null);
     // Tutti gli esiti tranne 'error', che passa da fail() con i suoi flag.
     if (outcome !== 'error') recordQuickV2(session, outcome, run.committed === true, run.needsPowerCycle === true);
     if (outcome === 'disconnected') {
@@ -2617,12 +2650,27 @@ async function quickCalibrate() {
       // createQuickPreflightProbe): fermo fuori raggio → Guided (Pinned: Range),
       // nessun report → cavo, movimento → "Release both sticks".
       const diag = run.preflight ?? {};
-      const route = quickPreflightRoute(lastDriftResult) ?? quickPreflightCheckRoute(diag, lastDriftResult);
+      const failures = ['moving', 'settled', 'off-center'].includes(diag.reason)
+        ? (quickPreflightFailures.get(controllerKey ?? null) ?? 0) + 1 : 0;
+      if (failures) quickPreflightFailures.set(controllerKey ?? null, failures);
+      const route = quickPreflightRoute(drift) ?? quickPreflightCheckRoute(diag, drift);
       if (route) {
-        quickRouteNext = route.action.id;
-        $('btn-quick-go').textContent = route.action.label;
+        if (ops.isCurrent(op)) offerQuickRoute(route.action);
         blockedMessage = `Calibration has not started. <b>${esc(route.text)}</b> If someone was touching the sticks, release them and run the drift test again.`;
         log(`Quick calibration not started: ${route.text}`);
+        return;
+      }
+      // Seconda preflight fallita sullo stesso controller: riprovare Quick
+      // tale e quale non ha mai funzionato. Guided parte da dove riposa lo
+      // stick; Quick resta come seconda scelta.
+      if (failures >= 2) {
+        if (ops.isCurrent(op)) {
+          offerQuickRoute({ id: 'guided', label: 'Guided calibration' });
+          quickHoldKnown = false;
+        }
+        blockedMessage = 'Calibration has not started. <b>Quick couldn’t start twice; Guided works wherever the stick rests.</b> '
+          + 'If someone was touching the sticks, release them and try Quick again.';
+        log('Quick calibration not started twice on this controller: Guided offered first.');
         return;
       }
       if (diag.reason === 'no-input') {
@@ -2647,7 +2695,7 @@ async function quickCalibrate() {
       if (ops.isCurrent(op)) quickHoldKnown = diag.reason !== 'settled';
       // Fermo fuori raggio su uno stick che il test drift ha visto centrato:
       // quasi certamente un pollice, e lo si dice con il dato.
-      const heldStill = diag.reason === 'off-center' && driftRestedInside(lastDriftResult, diag.side);
+      const heldStill = diag.reason === 'off-center' && driftRestedInside(drift, diag.side);
       blockedMessage = heldStill
         ? `Calibration has not started: the ${diag.side === 'right' ? 'right' : 'left'} stick was held still at ${esc(formatOffset(diag.offset))} from center, but the last drift test found it centered. <b>Release both sticks</b>, then try again.`
         : diag.reason === 'moving'
@@ -2692,6 +2740,7 @@ async function quickCalibrate() {
       ops.endOp(op);
       $('btn-quick-go').disabled = false;
       $('btn-quick-cancel').disabled = false;
+      $('btn-quick-alt').disabled = false;
       bar.style.width = '0%';
       msg.innerHTML = blockedMessage || QUICK_INTRO;
       if (quickForceNext && !$('modal-quick').classList.contains('hidden')) $('btn-quick-cancel').focus();
@@ -4154,10 +4203,18 @@ $('btn-quick').addEventListener('click', () => {
   if (!calibrationAllowed() || blockedForPowerCycle()) return;
   resetQuickModal();
   $('quick-msg').innerHTML = QUICK_INTRO;
+  // Test drift fresco che mette già uno stick oltre il raggio di Quick o al
+  // bordo: la rotta è l'azione primaria, Quick la secondaria. Nessun comando.
+  const entry = quickEntryRoute(lastDriftResult, !!freshDriftResult());
+  if (entry) {
+    offerQuickRoute(entry.action);
+    $('quick-msg').innerHTML = `<b>${esc(entry.text)}</b> If someone was touching the sticks during the drift test, use Try Quick anyway.`;
+  }
   openQuickModal();
 });
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
-$('btn-quick-go').addEventListener('click', quickCalibrate);
+$('btn-quick-go').addEventListener('click', () => quickCalibrate());
+$('btn-quick-alt').addEventListener('click', () => quickCalibrate({ anyway: true }));
 
 $('btn-wizard').addEventListener('click', () => (calibrationAllowed() ? openWizard() : undefined));
 $('btn-wizard-cancel').addEventListener('click', () => {

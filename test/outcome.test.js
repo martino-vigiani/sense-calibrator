@@ -4,7 +4,7 @@ import { GRID_TABLE, TIER_OVERRIDES, tierForOffset } from '../js/calib/lattice.j
 import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../js/calib/quick-policy.js';
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
-  FAR_RESTART_FIRST, FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, guidedFarStartCopy, quickPreflightCheckRoute, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
+  FAR_RESTART_FIRST, FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, QUICK_NEAR_LIMIT_PCT, guidedFarStartCopy, quickEntryRoute, quickPreflightCheckRoute, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
   guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView, render,
   RANGE_MOVES_CENTER, RANGE_THEN_CENTER, rangeRecheckView, revertAdvice, saveCtaFor, stickRows, stuckAxes, writeLockFor,
 } from '../js/ui/outcome.js';
@@ -925,4 +925,29 @@ test('the far-start confirmation names the offset, the restart and says when it 
   const both = guidedFarStartCopy({ far: [{ side: 'left', offset: 60 }, { side: 'right', offset: 55 }], repeat: true });
   assert.match(both.lead, /Both sticks rest far from center \(60\.0% and 55\.0%\)/);
   assert.equal(both.lines[0], 'This already failed once on this controller.');
+});
+
+test('A: quickEntryRoute only routes from a fresh, still drift test past the Quick radius or at the edge', () => {
+  const rest = { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 };
+  const far = { left: { offset: 20, noise: 0.3, x: 0.2, y: 0 }, right: rest };
+  assert.equal(quickEntryRoute(far, false), null, 'stale');
+  assert.equal(quickEntryRoute(null, true), null);
+  assert.equal(quickEntryRoute({ ...far, unstable: true }, true), null, 'moving');
+  assert.equal(quickEntryRoute({ left: { offset: 3, noise: 0.3, x: 0.03, y: 0 }, right: rest }, true), null);
+  assert.equal(quickEntryRoute(far, true).action.id, 'guided');
+  assert.equal(quickEntryRoute({ left: { offset: 100.2, noise: 0.1, x: 1, y: 0.05 }, right: rest }, true).action.id, 'range');
+  const veryFar = quickEntryRoute({ left: { offset: 70, noise: 0.3, x: 0.7, y: 0 }, right: rest }, true);
+  assert.ok(veryFar.text.indexOf('restart the controller') < veryFar.text.indexOf('Guided'));
+});
+
+test('E: the off-center check speaks up when the drift test had the stick resting at 12% or more', () => {
+  const rest = { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 };
+  const diag = { reason: 'off-center', side: 'left', result: { left: { offset: 18, noise: 0.3, x: 0.18, y: 0 }, right: rest } };
+  const drift = off => ({ left: { offset: off, noise: 0.3, x: off / 100, y: 0 }, right: rest });
+  assert.equal(quickPreflightCheckRoute(diag, drift(5)), null, 'a thumb, as before');
+  assert.equal(quickPreflightCheckRoute(diag, drift(11.9)), null);
+  const near = quickPreflightCheckRoute(diag, drift(QUICK_NEAR_LIMIT_PCT));
+  assert.equal(near.action.id, 'guided');
+  assert.match(near.text, /a thumb on the stick, or a stick that sometimes stops just past 15%/);
+  assert.match(near.text, /18\.0%[\s\S]*12\.0%/);
 });

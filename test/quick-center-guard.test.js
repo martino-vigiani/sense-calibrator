@@ -77,7 +77,6 @@ test('center boundary is inclusive and respects neighboring normalized HID value
 test('missing, invalid, stale or nonmonotonic reports invalidate a completed hold', () => {
   const interruptions = [
     { sticks: resting, time: HOLD_MS + GAP_MS + 1 },
-    { sticks: resting, time: HOLD_MS },
     { sticks: resting, time: HOLD_MS - 1 },
     { sticks: resting, time: NaN },
     { sticks: { ...resting, lx: NaN }, time: HOLD_MS + 1 },
@@ -93,6 +92,45 @@ test('missing, invalid, stale or nonmonotonic reports invalidate a completed hol
     assert.equal(feed(hold, restart, restart + HOLD_MS - 10), false);
     assert.equal(hold(resting, restart + HOLD_MS), true);
   }
+});
+
+// Raffiche HID reali con event.timeStamp arrotondato: due report con lo stesso
+// tempo. Prima azzeravano la tenuta e un doppio ogni ≤250 ms bloccava Quick.
+test('a duplicate timestamp neither resets nor counts: a double every 40 ms still passes at ~300 ms', () => {
+  const hold = createQuickCenterHold();
+  let passedAt = null;
+  for (let now = 0; now <= 1000 && passedAt === null; now += 10) {
+    if (hold(resting, now)) passedAt = now;
+    if (now % 40 === 0 && passedAt === null && hold(resting, now)) passedAt = now;
+  }
+  assert.equal(passedAt, HOLD_MS);
+});
+
+test('only duplicates never pass, and a duplicate never extends the hold', () => {
+  const hold = createQuickCenterHold();
+  for (let i = 0; i < 100; i++) assert.equal(hold(resting, 50), false, 'one distinct time');
+  const few = createQuickCenterHold();
+  // 9 tempi distinti lungo 400 ms, ciascuno ripetuto: mai ≥10 report distinti
+  for (let k = 0; k < 9; k++) for (let r = 0; r < 5; r++) assert.equal(few(resting, k * 50), false);
+});
+
+test('a duplicate outside the radius still resets, and time going backwards still resets', () => {
+  const hold = createQuickCenterHold();
+  assert.equal(feed(hold, 0, HOLD_MS), true);
+  assert.equal(hold({ ...resting, lx: outside }, HOLD_MS), false);
+  assert.equal(hold(resting, HOLD_MS), false);
+  const back = createQuickCenterHold();
+  assert.equal(feed(back, 0, HOLD_MS), true);
+  assert.equal(back(resting, HOLD_MS - 5), false, 'time went backwards');
+});
+
+test('preflight probe: duplicated timestamps are not a gap and do not count as fresh reports', () => {
+  const probe = newProbe();
+  for (let now = 0; now <= 400; now += 4) { probe.push(resting, now); if (now % 40 === 0) probe.push(resting, now); }
+  assert.equal(probe.status(400).reason, 'settled');
+  const dup = newProbe();
+  for (let i = 0; i < 50; i++) dup.push(resting, 10 * Math.floor(i / 10));
+  assert.notEqual(dup.status(40).reason, 'settled', 'five distinct times are not a window');
 });
 
 // ------------------------------------------- diagnosi della preflight fallita

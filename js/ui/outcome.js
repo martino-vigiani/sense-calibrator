@@ -823,6 +823,22 @@ export function quickPreflightRoute(driftResult) {
   return null;
 }
 
+// Apertura di Quick con un test drift FRESCO (misurato dopo l'ultimo commit,
+// sullo stesso controller) che mette già uno stick oltre il raggio di Quick o
+// al bordo: la rotta di quickPreflightRoute diventa l'azione primaria e Quick
+// resta come "Try Quick anyway" (runQuick invariato, nessun comando in nessun
+// ramo). Con un test vecchio (un commit dopo) o assente: null, Quick normale.
+export function quickEntryRoute(driftResult, fresh) {
+  if (!fresh || !driftResult || driftResult.unstable === true) return null;
+  return quickPreflightRoute(driftResult);
+}
+
+// Il test drift aveva lo stick fermo dentro il raggio ma vicino al limite: da
+// qui un pollice e uno stick che si ferma appena oltre il 15% non si
+// distinguono. Sotto questa soglia la preflight fallita resta un probabile
+// pollice e quickPreflightCheckRoute tace.
+export const QUICK_NEAR_LIMIT_PCT = 12;
+
 // Quick non è partito e la sua stessa attesa ha visto uno stick FERMO oltre il
 // raggio (diagnosi `off-center` di createQuickPreflightProbe, in
 // js/quick-center-guard.js): riprovare Quick darebbe lo stesso esito, finché
@@ -838,7 +854,16 @@ export function quickPreflightCheckRoute(diag, driftResult = null) {
   const name = diag.side === 'right' ? 'right' : 'left';
   const stick = diag.result[name];
   if (!stick || !isNum(stick.offset)) return null;
-  if (driftRestedInside(driftResult, name)) return null;
+  if (driftRestedInside(driftResult, name)) {
+    const before = driftResult[name].offset;
+    if (!(before >= QUICK_NEAR_LIMIT_PCT)) return null;
+    return {
+      action: ACTION.guided,
+      then: null,
+      near: true,
+      text: `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check; the last drift test measured it at ${fmt(before)}, just inside Quick’s ${GUIDED_ONLY_MIN}% limit. That can be a thumb on the stick, or a stick that sometimes stops just past ${GUIDED_ONLY_MIN}%. Release both sticks and try Quick again; if it repeats with nobody touching it, use Guided calibration.`,
+    };
+  }
   if (stickTier(diag.result, name)?.id === 'pinned') {
     const [first, then] = routeFor(null, true);
     return {
