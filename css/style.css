@@ -2152,6 +2152,7 @@ a.btn { text-decoration: none; }
 @media (hover: hover) and (pointer: fine) {
   .guide-card:hover { border-color: var(--ink); }
 }
+.guides-more { margin: 10px 0 0; }
 @media (max-width: 640px) {
   .guides-grid { grid-template-columns: 1fr; }
 }
