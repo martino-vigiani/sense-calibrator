@@ -361,7 +361,7 @@
       <div class="action">
         <div>
           <h4>Range calibration</h4>
-          <p>Recalibrates the maximum travel: rotate the sticks along the edge to cover the whole perimeter.</p>
+          <p>Recalibrates the maximum travel: rotate the sticks along the edge to cover the whole perimeter. Only if a stick doesn’t reach full travel or reads at the edge: it doesn’t fix drift.</p>
         </div>
         <button id="btn-range" class="btn btn-secondary">Start</button>
       </div>
@@ -460,6 +460,7 @@
     </label>
     <div class="modal-actions">
       <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-quick-alt" class="btn btn-secondary hidden">Try Quick anyway</button>
       <button id="btn-quick-go" class="btn btn-primary" data-autofocus>Calibrate now</button>
     </div>
   </div>

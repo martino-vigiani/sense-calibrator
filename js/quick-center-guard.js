@@ -16,6 +16,13 @@ export function sticksWithinQuickCenter(sticks) {
 
 // Solo report nuovi contano: una pausa HID non dimostra che lo stick sia
 // rimasto centrato. Il chiamante gestisce timeout e rimozione del listener.
+//
+// Due report con lo STESSO tempo (event.timeStamp arrotondato: raffiche reali)
+// non sono un salto all'indietro: prima `now <= previous` azzerava la tenuta,
+// e con un doppio ogni ≤250 ms Quick non partiva mai (model-verified). Un
+// duplicato ora non azzera e non conta: servono comunque ≥10 report a tempi
+// distinti, e non allunga la durata. Fuori raggio azzera sempre, duplicato o
+// no; il tempo che torna indietro o un buco oltre 100 ms azzerano ancora.
 export function createQuickCenterHold() {
   let since = null;
   let previous = null;
@@ -26,7 +33,8 @@ export function createQuickCenterHold() {
       count = 0;
       return false;
     }
-    if (previous === null || now <= previous || now - previous > QUICK_CENTER_MAX_GAP_MS) {
+    if (previous !== null && now === previous) return count >= 10 && now - since >= QUICK_CENTER_HOLD_MS;
+    if (previous === null || now < previous || now - previous > QUICK_CENTER_MAX_GAP_MS) {
       since = now;
       count = 0;
     }
@@ -93,7 +101,11 @@ export function createQuickPreflightProbe({ spread, holdMs = QUICK_CENTER_HOLD_M
       while (win.length && win[0].t < now - holdMs) win.shift();
       let off = false;
       settled = false;
-      evaluated = win.length >= 10 && now - continuousStart >= holdMs;
+      // ≥10 report a tempi distinti, come la tenuta: un duplicato (stesso
+      // timeStamp) entra nella finestra ma non conta come report nuovo.
+      let distinct = 0;
+      for (let i = 0; i < win.length; i++) if (i === 0 || win[i].t !== win[i - 1].t) distinct += 1;
+      evaluated = distinct >= 10 && now - continuousStart >= holdMs;
       if (evaluated) {
         const stats = {};
         let maxSpread = 0;

@@ -145,8 +145,11 @@ test('a blocked attempt preserves an existing unsaved result and can be retried 
   await h.run(h.click('btn-quick-go'));
   assert.equal(h.peek().unsaved, true);
   assert.equal(h.peek().quickPreflightBlocked, true);
+  // C: il test drift è di prima del commit, quindi non dice più che lo stick
+  // riposa dentro il raggio: la rotta prudente (Guided) è primaria, Quick resta.
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
   await h.advance(5000); // la mano si stacca
-  await h.run(h.click('btn-quick-go'));
+  await h.run(h.click('btn-quick-alt'));
   assert.equal(h.peek().quickPreflightBlocked, false);
   assert.equal(dev.counts.begin, 1);
   assert.equal(h.sessions().filter(s => s.kind === 'quick').length, 2);
@@ -462,4 +465,67 @@ test('app: reports that keep pausing get a neutral connection message, not "Rele
   assert.match(h.$('quick-msg').innerHTML, /^Calibration has not started\. <b>The controller’s readings kept pausing<\/b>/);
   assert.doesNotMatch(h.$('quick-msg').innerHTML, /Release both sticks/);
   assert.equal(h.eval('quickHoldKnown'), false, 'no hand to show on the meter');
+});
+
+// ------------------------------------------------ blocco 2: rotta e ripetizioni
+
+test('C: a drift test from before the last commit no longer stretches the off-center wait or calls it a thumb', async () => {
+  const { h, dev } = await connectedApp();
+  assert.ok(h.peek().lastDriftResult, 'the automatic drift test ran');
+  assert.equal(h.eval('!!freshDriftResult()'), true);
+  h.ctx.setUnsaved(true); // un commit dopo il test drift
+  assert.equal(h.eval('!!freshDriftResult()'), false);
+  // stick tenuto fermo al ~20%
+  dev.touches.push({ stick: 0, t0: h.clock.now(), dur: 60_000, tail: 0, amp: [25, 0] });
+  await h.advance(300);
+  await h.click('btn-quick');
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now', 'no entry route from a stale test');
+  const t0 = h.clock.now();
+  let ended = null;
+  const go = h.click('btn-quick-go').then(() => { ended = h.clock.now(); });
+  while (ended === null && h.clock.now() - t0 < 20_000) await h.advance(100);
+  await h.run(go);
+  assert.equal(dev.counts.begin, 0);
+  assert.ok(ended - t0 < 5000, `stopped early (${ended - t0} ms), not after the 8 s budget`);
+  const msg = h.$('quick-msg').innerHTML;
+  assert.match(msg, /If nobody is touching it, use Guided calibration/);
+  assert.doesNotMatch(msg, /last drift test found it centered/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
+  assert.equal(h.visible('btn-quick-alt'), true);
+});
+
+test('A: a stale far drift test does not change the Quick entry', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[25, 0], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(6000);
+  h.ctx.setUnsaved(true);
+  await h.click('btn-quick');
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
+  assert.equal(h.visible('btn-quick-alt'), false);
+  assert.equal(dev.counts.begin, 0);
+});
+
+test('E: a second failed preflight on the same controller makes Guided the primary action', async () => {
+  const { h, dev } = await connectedApp();
+  dev.touches.push({ stick: 1, t0: h.clock.now(), dur: 120_000, tail: 0, at: t => 25 * Math.sin(t / 40) });
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  assert.match(h.$('quick-msg').innerHTML, /Release both sticks/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now', 'first failure: retry Quick');
+  assert.equal(h.visible('btn-quick-alt'), false);
+  await h.run(h.click('btn-quick-go'));
+  assert.match(h.$('quick-msg').innerHTML, /Quick couldn’t start twice; Guided works wherever the stick rests/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
+  assert.equal(h.visible('btn-quick-alt'), true);
+  assert.equal(dev.counts.begin, 0, 'nothing sent in any branch');
+  // Try Quick anyway lancia runQuick come prima
+  const before = h.sessions().filter(s => s.kind === 'quick').length;
+  await h.run(h.click('btn-quick-alt'));
+  assert.equal(h.sessions().filter(s => s.kind === 'quick').length, before + 1);
+  // il primario apre Guided
+  await h.run(h.click('btn-quick-go'));
+  await h.advance(500);
+  assert.equal(h.visible('modal-wizard'), true);
+  assert.equal(dev.counts.begin, 0);
 });

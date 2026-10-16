@@ -286,6 +286,61 @@ test('N1: the app forwards a plausible HID event timestamp to the sampler', asyn
   assert.equal(h.eval('lastStickReportAt'), reportAt);
 });
 
+// Raffiche HID reali: event.timeStamp arrotondato dà due report con lo stesso
+// tempo. Prima ogni doppio azzerava la tenuta centrata e, con un doppio ogni
+// ≤250 ms, Quick non partiva mai (model-verified).
+test('B: waitForStable is not reset by duplicate timestamps, needs 10 distinct ones, and resets on time going backwards', async () => {
+  const run = async times => {
+    let t = 0;
+    const listeners = new Set();
+    const source = { sticks: { lx: 0, ly: 0, rx: 0, ry: 0 }, now: () => t,
+      subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); } };
+    let result = null;
+    const hold = waitForStable(source, idleClock, { holdMs: 300, timeoutMs: 2000 });
+    hold.then(r => { result = r; });
+    for (const at of times) {
+      if (result !== null) break;
+      t = at;
+      for (const fn of [...listeners]) fn();
+      await Promise.resolve();
+    }
+    return { result, t };
+  };
+  const dup = [];
+  for (let at = 0; at <= 400; at += 4) { dup.push(at); if (at % 40 === 0) dup.push(at); }
+  const a = await run(dup);
+  assert.ok(a.result && a.t === 300, `passed at ${a.t}`);
+  const nine = [];
+  for (let k = 0; k < 9; k++) for (let r = 0; r < 20; r++) nine.push(k * 40);
+  assert.equal((await run(nine)).result, null, 'nine distinct times never pass');
+  const back = [];
+  for (let at = 0; at <= 200; at += 4) back.push(at);
+  for (let at = 100; at <= 450; at += 4) back.push(at);
+  const c = await run(back);
+  assert.ok(c.result && c.t >= 400, `time going backwards restarts the window (passed at ${c.t})`);
+});
+
+test('B: duplicated HID timestamps every 40 ms do not block the Quick start', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: DRIFTING });
+  const emit = dev.emit.bind(dev);
+  let lastDup = -Infinity;
+  dev.emit = function () {
+    const handler = this.oninputreport;
+    const stamp = Math.floor(clock.now());
+    this.oninputreport = event => handler?.({ ...event, timeStamp: stamp });
+    try {
+      emit();
+      if (stamp - lastDup >= 40) { lastDup = stamp; emit(); }
+    } finally { this.oninputreport = handler; }
+  };
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  assert.ok(dev.counts.begin >= 1, 'calibration began');
+});
+
 test('audit 08: a small quiet minority cannot verify a mostly moving Quick result', async () => {
   const quietMinority = {
     left: { offset: 0.55, noise: 0, x: 0, y: 0 },
@@ -747,7 +802,12 @@ test('a stick resting past the Quick radius is routed to Guided, not told to let
   await h.advance(6000);
   assert.equal(h.eval("stickTier(lastDriftResult, 'left')?.id"), 'guided-only');
   await h.click('btn-quick');
-  const go = h.click('btn-quick-go');
+  // A: con un test drift fresco la rotta è già l'azione primaria all'apertura.
+  assert.equal(h.$('btn-quick-go').textContent, 'Guided calibration');
+  assert.equal(h.visible('btn-quick-alt'), true);
+  assert.equal(h.$('btn-quick-alt').textContent, 'Try Quick anyway');
+  assert.match(h.$('quick-msg').innerHTML, /^<b>The left stick rests too far off-center for Quick calibration/);
+  const go = h.click('btn-quick-alt');
   await h.advance(20_000);
   await h.run(go);
   assert.equal(dev.counts.begin, 0, 'nothing sent');

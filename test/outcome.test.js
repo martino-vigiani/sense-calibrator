@@ -4,7 +4,7 @@ import { GRID_TABLE, TIER_OVERRIDES, tierForOffset } from '../js/calib/lattice.j
 import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../js/calib/quick-policy.js';
 import { QUICK_DEFAULTS } from '../js/calib/quick.js';
 import {
-  FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
+  FAR_RESTART_FIRST, FIX_RATE, FIX_RATE_WORDS, LOCK_REASONS, QUICK_NEAR_LIMIT_PCT, guidedFarStartCopy, quickEntryRoute, quickPreflightCheckRoute, REPAIR_STEPS, UNPLUG_UNKNOWN, describeTier, driftMessage, flashSummary,
   guidedOutcomeView, outcomeHtml, outcomeLogLine, pinnedFromSummary, powerCycleReminderView, quickOutcomeView, quickPreflightRoute, rangeOutcomeView, rangeStartFailedView, render,
   RANGE_MOVES_CENTER, RANGE_THEN_CENTER, rangeRecheckView, revertAdvice, saveCtaFor, stickRows, stuckAxes, writeLockFor,
 } from '../js/ui/outcome.js';
@@ -398,6 +398,14 @@ test('a Range start the controller did not accept asks for a restart, never a re
   assert.doesNotMatch(textOf(view), /0x8301|unplug/i, 'raw HID words stay in the log; no unplug advice');
   assert.equal(writeLockFor({ range: view.range, needsPowerCycle: true }).mode, 'disabled');
   assert.match(textOf(rangeStartFailedView({ error: refused, again: true })), /happened again after a restart/);
+  // Rifiuto subito dopo "I already turned it off": probabilmente non era spento
+  // del tutto. Il blocco e le azioni restano le stesse.
+  const afterConfirm = rangeStartFailedView({ error: refused, clearedBy: 'confirm' });
+  assert.match(textOf(afterConfirm), /probably wasn’t fully off/);
+  assert.match(textOf(afterConfirm), /Hold PS for about 10 s/);
+  assert.deepEqual(afterConfirm.actions.map(a => a.id), ['restart', 'powered-off']);
+  assert.deepEqual(afterConfirm.range, view.range);
+  assert.doesNotMatch(textOf(rangeStartFailedView({ error: refused, clearedBy: 'restart' })), /wasn’t fully off/);
   // Un timeout: la vista del controller avvelenato (Restart lì non parte).
   const timeout = Object.assign(new Error('Controller not responding'), { timeout: true, maybeReceived: true });
   const poisoned = rangeStartFailedView({ error: timeout });
@@ -876,6 +884,78 @@ test('a stopped Guided run reads as stopped, offers the restart exits and never 
       assert.equal(writeLockFor({ center: view.center, needsPowerCycle: true }).mode, 'disabled');
     }
   }
-  assert.match(textOf(guidedOutcomeView({ stopped: { why: 'stuck' }, leftOpen: true, committed: false })),
-    /stuck near the edge[\s\S]*haven’t confirmed/);
+  // F3: niente Range come passo successivo per uno stick bloccato; prima il
+  // riavvio e un nuovo test drift, poi l'ipotesi del guasto (o di qualcosa che
+  // preme lo stick) se resta oltre il 50%.
+  const stuck = textOf(guidedOutcomeView({ stopped: { why: 'stuck' }, leftOpen: true, committed: false }));
+  assert.match(stuck, /After restarting the controller, run the drift test again[\s\S]*beyond 50%[\s\S]*faulty or something is pressing it/);
+  assert.doesNotMatch(stuck, /Range/);
+});
+
+// F3 (telemetria v2, build 20261013): da uno stick a riposo oltre il 50%
+// Guided non è mai finito (0/20). L'azione resta Guided (che chiede conferma
+// prima di calibBegin), ma il primo passo detto è riavviare e rifare il test.
+test('a stick resting at 50% or more: restart and re-run the drift test come first, the action stays Guided', () => {
+  const stick = off => ({ offset: off, noise: 0.3, x: off / 100, y: 0 });
+  const rest = { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 };
+  for (const [off, far] of [[20, false], [49.9, false], [50, true], [72, true]]) {
+    const drift = { left: stick(off), right: rest };
+    const route = quickPreflightRoute(drift);
+    assert.equal(route.action.id, 'guided', `${off}%`);
+    const msg = driftMessage(drift);
+    assert.equal(msg.recommendation, describeTier('guided-only').recommendation);
+    const check = quickPreflightCheckRoute({ reason: 'off-center', side: 'left', result: drift });
+    assert.equal(check.action.id, 'guided');
+    for (const text of [route.text, msg.text, check.text]) {
+      if (far) {
+        assert.ok(text.indexOf(FAR_RESTART_FIRST) >= 0, text);
+        assert.ok(text.indexOf(FAR_RESTART_FIRST) < text.indexOf('Guided'), 'restart is said before Guided');
+        assert.match(text, /rarely finishes/);
+        assert.doesNotMatch(text, SUCCESS);
+      } else {
+        assert.doesNotMatch(text, /restart the controller/i, `${off}%`);
+      }
+    }
+  }
+  // Pinned resta su Range.
+  const pinned = quickPreflightRoute({ left: { offset: 100.2, noise: 0.1, x: 1, y: 0.05 }, right: rest });
+  assert.equal(pinned.action.id, 'range');
+});
+
+test('the far-start confirmation names the offset, the restart and says when it already failed', () => {
+  const one = guidedFarStartCopy({ far: [{ side: 'left', offset: 72.3 }] });
+  assert.match(one.lead, /The left stick rests 72\.3% from center: nothing was sent/);
+  const text = one.lines.join(' ');
+  assert.match(text, /rarely finishes/);
+  assert.match(text, /must be restarted/);
+  assert.match(text, /nothing is pressing the stick[\s\S]*L3\/R3[\s\S]*hold PS for about 10 s[\s\S]*drift test again/);
+  assert.doesNotMatch(text, /already failed/);
+  const both = guidedFarStartCopy({ far: [{ side: 'left', offset: 60 }, { side: 'right', offset: 55 }], repeat: true });
+  assert.match(both.lead, /Both sticks rest far from center \(60\.0% and 55\.0%\)/);
+  assert.equal(both.lines[0], 'This already failed once on this controller.');
+});
+
+test('A: quickEntryRoute only routes from a fresh, still drift test past the Quick radius or at the edge', () => {
+  const rest = { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 };
+  const far = { left: { offset: 20, noise: 0.3, x: 0.2, y: 0 }, right: rest };
+  assert.equal(quickEntryRoute(far, false), null, 'stale');
+  assert.equal(quickEntryRoute(null, true), null);
+  assert.equal(quickEntryRoute({ ...far, unstable: true }, true), null, 'moving');
+  assert.equal(quickEntryRoute({ left: { offset: 3, noise: 0.3, x: 0.03, y: 0 }, right: rest }, true), null);
+  assert.equal(quickEntryRoute(far, true).action.id, 'guided');
+  assert.equal(quickEntryRoute({ left: { offset: 100.2, noise: 0.1, x: 1, y: 0.05 }, right: rest }, true).action.id, 'range');
+  const veryFar = quickEntryRoute({ left: { offset: 70, noise: 0.3, x: 0.7, y: 0 }, right: rest }, true);
+  assert.ok(veryFar.text.indexOf('restart the controller') < veryFar.text.indexOf('Guided'));
+});
+
+test('E: the off-center check speaks up when the drift test had the stick resting at 12% or more', () => {
+  const rest = { offset: 0.555, noise: 0.3, x: 0.0039, y: 0.0039 };
+  const diag = { reason: 'off-center', side: 'left', result: { left: { offset: 18, noise: 0.3, x: 0.18, y: 0 }, right: rest } };
+  const drift = off => ({ left: { offset: off, noise: 0.3, x: off / 100, y: 0 }, right: rest });
+  assert.equal(quickPreflightCheckRoute(diag, drift(5)), null, 'a thumb, as before');
+  assert.equal(quickPreflightCheckRoute(diag, drift(11.9)), null);
+  const near = quickPreflightCheckRoute(diag, drift(QUICK_NEAR_LIMIT_PCT));
+  assert.equal(near.action.id, 'guided');
+  assert.match(near.text, /a thumb on the stick, or a stick that sometimes stops just past 15%/);
+  assert.match(near.text, /18\.0%[\s\S]*12\.0%/);
 });

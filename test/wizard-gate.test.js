@@ -4,7 +4,7 @@ import { DRIFT_MOVE_SPREAD, summarizeResult } from '../js/calib/measure.js';
 import { STICK_LSB, measureOffset } from '../js/calib/sampling.js';
 import {
   WIZARD_DEFAULTS, captureRestReference, captureRestReferenceDetailed, checkBefore, diagnoseRestTimeout, summarizeRestWindow, cornerProjection, createCornerTracker, gateWizardSample, restTolerance,
-  sampleGateOptions, wizardComparison, axisWorsening,
+  sampleGateOptions, wizardComparison, axisWorsening, farStart, farStartPct,
 } from '../js/calib/wizard-gate.js';
 
 // Gate del wizard guidato (WS7) su una sorgente scriptata: gli stick sono una
@@ -445,4 +445,18 @@ test('a wait that times out after the reports stopped is "no-data", not the last
     assert.equal(r.center ?? null, null, kind);
     assert.equal(source.listeners.size, 0, kind);
   }
+});
+
+// F1: partenza lontana = offset ≥ refRadius (50%), stessa soglia del
+// riferimento in sessione, nessuna soglia nuova.
+test('farStart lists the sticks at or beyond refRadius, from either summary shape', () => {
+  assert.equal(farStartPct(), WIZARD_DEFAULTS.refRadius * 100);
+  assert.deepEqual(farStart({ off: [49.9, 0.555] }), []);
+  assert.deepEqual(farStart({ off: [50, 0.555] }), [{ side: 'left', offset: 50 }]);
+  assert.deepEqual(farStart({ off: [0.555, 100] }), [{ side: 'right', offset: 100 }]);
+  assert.deepEqual(farStart({ off: [72, 50] }).map(st => st.side), ['left', 'right']);
+  assert.deepEqual(farStart({ left: { offset: 60 }, right: { offset: 49.9 } }), [{ side: 'left', offset: 60 }]);
+  assert.deepEqual(farStart(null), []);
+  assert.deepEqual(farStart({ off: [NaN, 70] }).map(st => st.side), ['right']);
+  assert.deepEqual(farStart({ off: [40, 0] }, { refRadius: 0.4 }).map(st => st.side), ['left']);
 });

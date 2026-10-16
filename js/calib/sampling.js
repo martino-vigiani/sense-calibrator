@@ -76,7 +76,10 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
       const sticks = source.sticks;
       // Un report vecchio non prolunga la tenuta: la finestra riparte dopo un
       // buco, anche quando il valore prima e dopo il buco è identico.
-      if (win.length && now - win.at(-1).t > MAX_REPORT_GAP_MS) {
+      // Il tempo che torna indietro azzera come un buco; un report con lo
+      // stesso tempo del precedente (timeStamp arrotondato) no, ma non conta
+      // fra i 10 report richiesti (vedi createQuickCenterHold).
+      if (win.length && (now < win.at(-1).t || now - win.at(-1).t > MAX_REPORT_GAP_MS)) {
         win.length = 0;
         continuousStart = null;
       }
@@ -84,7 +87,9 @@ export function waitForStable(source, clock, { spread = QUICK_STABLE_SPREAD, hol
       const centered = centerHold ? centerHold(sticks, now) : true;
       win.push({ ...sticks, t: now });
       while (win.length && win[0].t < now - holdMs) win.shift();
-      if (win.length >= 10) {
+      let distinct = 0;
+      for (let i = 0; i < win.length; i++) if (i === 0 || win[i].t !== win[i - 1].t) distinct += 1;
+      if (distinct >= 10) {
         let maxSpread = 0;
         const center = {};
         for (const a of ['lx', 'ly', 'rx', 'ry']) {
