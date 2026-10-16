@@ -754,8 +754,16 @@ export function rangeRecheckView({ before = null, after }) {
 // finché il riavvio non è provato. `again`: già rifiutato su questo controller
 // dopo un riavvio in questa pagina. Il timeout (controller avvelenato) ha la
 // sua vista: lì Restart non può partire.
-export function rangeStartFailedView({ error = null, again = false } = {}) {
+// `clearedBy`: come era stato tolto il blocco precedente ('restart' |
+// 'confirm' | null). Dopo una conferma a mano il controller probabilmente non
+// era spento del tutto: lo si dice, il blocco non cambia.
+export function rangeStartFailedView({ error = null, again = false, clearedBy = null } = {}) {
   if (error && isPoisonError(error)) return rangeOutcomeView({ error });
+  const retry = clearedBy === 'confirm'
+    ? 'The last block was cleared with “I already turned it off”, so the controller probably wasn’t fully off. Hold PS for about 10 s until the light goes out (or use Restart), then reconnect it and start Range again.'
+    : again
+      ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
+      : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.';
   return {
     kind: 'range',
     outcome: 'range',
@@ -763,9 +771,7 @@ export function rangeStartFailedView({ error = null, again = false } = {}) {
     title: 'Range calibration didn’t start',
     lines: [
       'The controller didn’t accept the start command, so no range was recorded. This usually means a calibration session is still open on it, for example after an interrupted attempt, a reload or another tool.',
-      again
-        ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
-        : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.',
+      retry,
       'Calibrating and saving stay off until the controller has restarted, and Write stays off until a complete Range calibration.',
     ],
     sticks: [],

@@ -1874,8 +1874,15 @@ function powerCycleLockFor(controller, key) {
 // smette di valere per lui (resta per gli altri). Senza chiave: decade il
 // blocco senza chiave; i blocchi con chiave restano, perché questo potrebbe
 // non essere il loro controller.
-function clearPowerCycle(reason, controller = ds5, key = deviceKey) {
+// Come è stato tolto l'ultimo blocco di power-cycle, per controller (chiave
+// salata, null se illeggibile), solo in memoria: un Range rifiutato subito
+// dopo un "I already turned it off" dice che probabilmente non era spento
+// del tutto (telemetria v2: i tre avvii rifiutati della build 20261013
+// arrivavano dopo un blocco tolto). Il blocco resta quello di sempre.
+const powerCycleClearedBy = new Map();
+function clearPowerCycle(reason, controller = ds5, key = deviceKey, how = null) {
   if (!powerCycleLockFor(controller, key)) return;
+  if (how) powerCycleClearedBy.set(key, how);
   if (key !== null) {
     powerCycleLocks.delete(key);
     powerCycleLocks.get(null)?.exempt.add(key);
@@ -1971,7 +1978,7 @@ function confirmPoweredOff() {
   const ok = confirm('Continue only if you turned the controller off (held PS for 10 s until the light went out, or used Restart) after the calibration pass was left open. Disconnecting or unplugging the cable doesn’t count. Did you turn it off?');
   if (!ok) return;
   calTimeline.op('power-cycle');
-  clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.');
+  clearPowerCycle('Power-off confirmed by the user: calibration unblocked. A session still open would be refused, never committed.', ds5, deviceKey, 'confirm');
   // Un controller dal seriale illeggibile non toglie i blocchi con chiave
   // (vedi clearPowerCycle): se uno vale ancora, il promemoria resta.
   if (powerCycleApplies()) reapplyPowerCycle();
@@ -2381,7 +2388,9 @@ const restNoise = createRestNoiseCollector();
 let restSlowCheckAt = -Infinity;
 let restSlowBlocked = false;
 function restNoiseAllowed(now) {
-  if (!ds5 || document.hidden || ops.busy || flashing || rangeSession || rangeCheck) return false;
+  // Con un blocco di power-cycle la sessione di centro può essere ancora
+  // aperta nel firmware e i valori in un altro riferimento: non si raccoglie.
+  if (!ds5 || document.hidden || ops.busy || flashing || rangeSession || rangeCheck || powerCycleApplies()) return false;
   // Modali (DOM) e consenso (localStorage): a 250 report/s basta
   // ricontrollarli ogni 200 ms.
   if (now - restSlowCheckAt > 200 || now < restSlowCheckAt) {
@@ -2418,7 +2427,7 @@ const landingDetector = createLandingDetector();
 let landingSlowCheckAt = -Infinity;
 let landingSlowBlocked = false;
 function landingAllowed(now) {
-  if (!ds5 || ops.busy || flashing || wizard || rangeSession || rangeCheck) return false;
+  if (!ds5 || ops.busy || flashing || wizard || rangeSession || rangeCheck || powerCycleApplies()) return false;
   if (now - landingSlowCheckAt > 200 || now < landingSlowCheckAt) {
     landingSlowCheckAt = now;
     landingSlowBlocked = !telemetryEnabled();
@@ -3635,7 +3644,7 @@ async function startRange() {
       if (ds5 === controller) {
         closeModal('modal-range');
         log(`Range start failed: ${error.message}`);
-        showOutcome(rangeStartFailedView({ error, again: refusals > 1 }));
+        showOutcome(rangeStartFailedView({ error, again: refusals > 1, clearedBy: powerCycleClearedBy.get(key) ?? null }));
       }
       return;
     }
@@ -4781,7 +4790,7 @@ async function boot() {
       // Disconnessione subito dopo un Restart inviato: il riavvio è avvenuto e
       // ha chiuso la sessione lasciata aperta.
       if (rebootConfirmedBy(ds5) && powerCycleApplies())
-        clearPowerCycle('Restart confirmed by the disconnect: the restart should have closed the calibration pass left open (a session still open would be refused, never committed).');
+        clearPowerCycle('Restart confirmed by the disconnect: the restart should have closed the calibration pass left open (a session still open would be refused, never committed).', ds5, deviceKey, 'restart');
       log('Controller disconnected.');
       teardown('Controller disconnected.');
     }

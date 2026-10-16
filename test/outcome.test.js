@@ -398,6 +398,14 @@ test('a Range start the controller did not accept asks for a restart, never a re
   assert.doesNotMatch(textOf(view), /0x8301|unplug/i, 'raw HID words stay in the log; no unplug advice');
   assert.equal(writeLockFor({ range: view.range, needsPowerCycle: true }).mode, 'disabled');
   assert.match(textOf(rangeStartFailedView({ error: refused, again: true })), /happened again after a restart/);
+  // Rifiuto subito dopo "I already turned it off": probabilmente non era spento
+  // del tutto. Il blocco e le azioni restano le stesse.
+  const afterConfirm = rangeStartFailedView({ error: refused, clearedBy: 'confirm' });
+  assert.match(textOf(afterConfirm), /probably wasn’t fully off/);
+  assert.match(textOf(afterConfirm), /Hold PS for about 10 s/);
+  assert.deepEqual(afterConfirm.actions.map(a => a.id), ['restart', 'powered-off']);
+  assert.deepEqual(afterConfirm.range, view.range);
+  assert.doesNotMatch(textOf(rangeStartFailedView({ error: refused, clearedBy: 'restart' })), /wasn’t fully off/);
   // Un timeout: la vista del controller avvelenato (Restart lì non parte).
   const timeout = Object.assign(new Error('Controller not responding'), { timeout: true, maybeReceived: true });
   const poisoned = rangeStartFailedView({ error: timeout });
