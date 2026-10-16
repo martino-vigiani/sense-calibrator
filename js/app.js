@@ -1845,7 +1845,15 @@ function syncPowerCycleFlag() {
 // staccato nel frattempo, e teardown azzera deviceKey). Sostituisce solo il
 // blocco di quel controller; un nuovo blocco senza chiave riparte senza
 // esenzioni (il controller illeggibile potrebbe essere uno di quelli esentati).
+// Come è stato tolto l'ultimo blocco di power-cycle, per controller (chiave
+// salata, null se illeggibile), solo in memoria: un Range rifiutato subito
+// dopo un "I already turned it off" dice che probabilmente non era spento
+// del tutto (telemetria v2: i tre avvii rifiutati della build 20261013
+// arrivavano dopo un blocco tolto). Il blocco resta quello di sempre.
+const powerCycleClearedBy = new Map();
 function markPowerCycle(controller, key) {
+  // Un blocco nuovo: come era stato tolto il precedente non conta più.
+  powerCycleClearedBy.delete(key);
   powerCycleLocks.set(key ?? null, { controller, reload: false, exempt: new Set() });
   diagNote('power-cycle', { lock: 'marked' });
   repairAllowed = false;
@@ -1878,12 +1886,6 @@ function powerCycleLockFor(controller, key) {
 // smette di valere per lui (resta per gli altri). Senza chiave: decade il
 // blocco senza chiave; i blocchi con chiave restano, perché questo potrebbe
 // non essere il loro controller.
-// Come è stato tolto l'ultimo blocco di power-cycle, per controller (chiave
-// salata, null se illeggibile), solo in memoria: un Range rifiutato subito
-// dopo un "I already turned it off" dice che probabilmente non era spento
-// del tutto (telemetria v2: i tre avvii rifiutati della build 20261013
-// arrivavano dopo un blocco tolto). Il blocco resta quello di sempre.
-const powerCycleClearedBy = new Map();
 function clearPowerCycle(reason, controller = ds5, key = deviceKey, how = null) {
   if (!powerCycleLockFor(controller, key)) return;
   if (how) powerCycleClearedBy.set(key, how);
@@ -2489,6 +2491,9 @@ function renderContactFault() {
   contactFaultShown = html;
   el.innerHTML = html;
   el.classList.toggle('hidden', !view);
+  // Il riquadro non è una regione live (si rileggerebbe tutto a ogni crescita
+  // dell'ampiezza): si annuncia solo il titolo, quando cambia.
+  setLive($('contact-fault-live'), view?.title ?? '');
 }
 function clearContactFault() {
   contactFault.clear();
@@ -2709,7 +2714,9 @@ async function quickCalibrate({ anyway = false } = {}) {
       if (failures) quickPreflightFailures.set(controllerKey ?? null, failures);
       const route = quickPreflightRoute(drift) ?? quickPreflightCheckRoute(diag, drift);
       if (route) {
-        if (ops.isCurrent(op)) offerQuickRoute(route.action);
+        // Vicino al limite il consiglio è riprovare Quick lasciando gli stick:
+        // Quick resta l'azione principale (il testo nomina Guided come seguito).
+        if (ops.isCurrent(op) && !route.near) offerQuickRoute(route.action);
         blockedMessage = `Calibration has not started. <b>${esc(route.text)}</b> If someone was touching the sticks, release them and run the drift test again.`;
         log(`Quick calibration not started: ${route.text}`);
         return;
@@ -2717,7 +2724,13 @@ async function quickCalibrate({ anyway = false } = {}) {
       // Seconda preflight fallita sullo stesso controller: riprovare Quick
       // tale e quale non ha mai funzionato. Guided parte da dove riposa lo
       // stick; Quick resta come seconda scelta.
-      if (failures >= 2) {
+      // Non quando il test drift fresco dice che Guided non serve (entro un
+      // passo: Guided risponderebbe "already centered" e rimanderebbe a Quick)
+      // o che lo stick fuori raggio era un pollice (fermo dentro il raggio).
+      const driftWorst = drift ? Math.max(drift.left?.offset ?? 0, drift.right?.offset ?? 0) : null;
+      const guidedPointless = driftWorst !== null && driftWorst <= WITHIN_ONE_STEP_MAX;
+      const thumb = diag.reason === 'off-center' && driftRestedInside(drift, diag.side);
+      if (failures >= 2 && !guidedPointless && !thumb) {
         if (ops.isCurrent(op)) {
           offerQuickRoute({ id: 'guided', label: 'Guided calibration' });
           quickHoldKnown = false;
@@ -3124,6 +3137,7 @@ async function wizardNext() {
         w.op = null;
         w.controller = null;
         $('btn-wizard-cancel').classList.remove('hidden');
+        clearWizardFarForce(w);
         btn.textContent = 'Start';
         $('wizard-msg').innerHTML = 'The sticks are moving or being touched. <b>Let go of both sticks</b>, then press '
           + '<b>Start</b> again. Nothing was sent to the controller.';
@@ -3144,6 +3158,7 @@ async function wizardNext() {
         w.op = null;
         w.controller = null;
         $('btn-wizard-cancel').classList.remove('hidden');
+        clearWizardFarForce(w);
         btn.textContent = 'Start';
         log(`Guided calibration: start measurement rejected (${beforeCheck.reason}); nothing sent.`);
         $('wizard-msg').innerHTML = (beforeCheck.reason === 'no-data'
@@ -3307,6 +3322,15 @@ async function wizardNext() {
 }
 
 // Bottoni del wizard come all'apertura (dopo "Try anyway" o un nuovo avvio).
+// Dopo un "Try anyway" che non arriva a calibBegin (stick mossi, misura
+// disturbata): bottoni normali e l'avviso di partenza lontana torna a valere.
+function clearWizardFarForce(w) {
+  if (!wizardFarForceNext) return;
+  wizardFarForceNext = false;
+  if (w) w.farPending = false;
+  wizardResetButtons();
+  $('btn-wizard-cancel').textContent = 'Cancel';
+}
 function wizardResetButtons() {
   const btn = $('btn-wizard-next');
   btn.className = 'btn btn-primary';

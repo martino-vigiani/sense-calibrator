@@ -104,6 +104,18 @@ test('un buco nei report oltre 100 ms riavvia la finestra', () => {
   assert.deepEqual(feed(det, 20_000, flipping(127, 131), { gapEvery: 120, gapMs: 150 }).out, []);
 });
 
+test('la deadzone copre la distanza dal centro, non solo l’escursione fra i due livelli', () => {
+  const det = createContactFaultDetector();
+  // Stick che riposa a ~12% e salta di 4 LSB: serve ben più del 5%.
+  const { out } = feed(det, 3000, flipping(112, 116));
+  assert.equal(out.length, 1);
+  assert.equal(out[0].spanPct, 3.1);
+  assert.equal(out[0].maxPct, 12.2);
+  const view = contactFaultView(out);
+  assert.equal(view.deadzone, 14);
+  assert.match(view.html, /deadzone of at least 14%/);
+});
+
 test('reset tiene le prove, clear le dimentica', () => {
   const det = createContactFaultDetector();
   feed(det, 3000, flipping(127, 131));
@@ -156,6 +168,8 @@ test('app: un contatto che salta a riposo compare nel riquadro, senza comandi HI
   const html = h.$('contact-fault').innerHTML;
   assert.match(html, /Left stick: the horizontal axis jumps on its own/);
   assert.match(html, /deadzone of at least \d+%/);
+  assert.equal(h.$('contact-fault').getAttribute?.('role') ?? null, null, 'il riquadro non è una regione live');
+  assert.equal(h.$('contact-fault-live').textContent, 'Left stick: the horizontal axis jumps on its own', 'si annuncia solo il titolo');
   assert.deepEqual(dev.counts, commandsBefore, 'nessun comando verso il controller');
   assert.ok(h.sessions().some(e => e.kind === 'contact-fault' && e.stick === 'left' && e.axis === 'x'));
   assert.equal(h.uploadsV2?.some?.(e => e.type === 'contact-fault') ?? false, false);

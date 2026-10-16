@@ -87,7 +87,12 @@ function judgeAxis(buf, spec, n, p) {
   }
   if (up + down < p.minJumps || up < p.minEachWay || down < p.minEachWay) return null;
   sizes.sort((a, b) => a - b);
-  return { jumps: up + down, jumpLsb: sizes[sizes.length >> 1], spanLsb: span };
+  // Distanza massima dal centro: la deadzone deve coprire questa, non solo
+  // l'escursione fra i due livelli (uno stick che riposa al 12% e salta di 4
+  // LSB ha bisogno di ~13%, non di 5%).
+  let maxAbs = 0;
+  for (let i = 0; i < n; i++) maxAbs = Math.max(maxAbs, Math.abs(v[i] - STICK_SCALE));
+  return { jumps: up + down, jumpLsb: sizes[sizes.length >> 1], spanLsb: span, maxAbsLsb: maxAbs };
 }
 
 export function createContactFaultDetector(options = {}) {
@@ -110,6 +115,7 @@ export function createContactFaultDetector(options = {}) {
       jumpLsb: e.jumpLsb,
       spanLsb: e.spanLsb,
       spanPct: Math.round((e.spanLsb / STICK_SCALE) * 1000) / 10,
+      maxPct: Math.round((e.maxAbsLsb / STICK_SCALE) * 1000) / 10,
       firstT: e.firstT,
       lastT: e.lastT,
     };
@@ -121,19 +127,20 @@ export function createContactFaultDetector(options = {}) {
       for (const spec of AXES) {
         const hit = judgeAxis(buf, spec, n, p);
         if (!hit) continue;
-        const prev = evidence.get(spec.key) ?? { windows: 0, jumps: 0, jumpLsb: 0, spanLsb: 0, firstT: start, lastT: t };
+        const prev = evidence.get(spec.key) ?? { windows: 0, jumps: 0, jumpLsb: 0, spanLsb: 0, maxAbsLsb: 0, firstT: start, lastT: t };
         const next = {
           windows: prev.windows + 1,
           jumps: prev.jumps + hit.jumps,
           jumpLsb: Math.max(prev.jumpLsb, hit.jumpLsb),
           spanLsb: Math.max(prev.spanLsb, hit.spanLsb),
+          maxAbsLsb: Math.max(prev.maxAbsLsb, hit.maxAbsLsb),
           firstT: prev.firstT,
           lastT: t,
         };
         evidence.set(spec.key, next);
         const confirmedNow = next.windows === p.confirmWindows;
         const grew = next.windows > p.confirmWindows
-          && (next.spanLsb > prev.spanLsb || next.jumpLsb > prev.jumpLsb);
+          && (next.spanLsb > prev.spanLsb || next.jumpLsb > prev.jumpLsb || next.maxAbsLsb > prev.maxAbsLsb);
         if (confirmedNow || grew) changed.push(finding(spec, next));
       }
     }

@@ -529,3 +529,19 @@ test('E: a second failed preflight on the same controller makes Guided the prima
   assert.equal(h.visible('modal-wizard'), true);
   assert.equal(dev.counts.begin, 0);
 });
+
+test('E: with a fresh drift test already within one step, two failed starts do not push Guided', async () => {
+  const clock = new VClock();
+  const dev = makeDevice(clock, { drift: [[0.6, -0.3], [-0.1, 0.4]] });
+  const h = await loadApp({ clock, authorized: [dev] });
+  await h.advance(5000);
+  dev.touches.push({ stick: 1, t0: h.clock.now(), dur: 120_000, tail: 0, at: t => 25 * Math.sin(t / 40) });
+  await h.click('btn-quick');
+  await h.run(h.click('btn-quick-go'));
+  await h.run(h.click('btn-quick-go'));
+  // Guided risponderebbe "already centered" e rimanderebbe a Quick: niente giro chiuso.
+  assert.doesNotMatch(h.$('quick-msg').innerHTML, /Quick couldn’t start twice/);
+  assert.equal(h.$('btn-quick-go').textContent, 'Calibrate now');
+  assert.equal(h.visible('btn-quick-alt'), false);
+  assert.equal(dev.counts.begin, 0);
+});

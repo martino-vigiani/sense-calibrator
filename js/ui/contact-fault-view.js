@@ -8,11 +8,13 @@
 const STICK = { left: 'Left', right: 'Right' };
 const AXIS = { x: 'horizontal', y: 'vertical' };
 
-// Deadzone consigliata: l'escursione misurata arrotondata per eccesso, più un
-// punto di margine (4,7% → 6%).
-export function deadzoneFor(spanPct) {
-  return Math.ceil(spanPct) + 1;
+// Deadzone consigliata: la distanza massima dal centro vista durante i salti,
+// arrotondata per eccesso, più un punto di margine (4,7% → 6%). Senza `maxPct`
+// (riscontri vecchi) si ripiega sull'escursione.
+export function deadzoneFor(pct) {
+  return Math.ceil(pct) + 1;
 }
+const reachPct = f => (Number.isFinite(f.maxPct) ? Math.max(f.maxPct, f.spanPct) : f.spanPct);
 
 function line(f) {
   return `<p>${STICK[f.stick]} stick, ${AXIS[f.axis]} axis: with the stick untouched, the reading jumped back and forth between two levels about ${f.jumpLsb} steps apart (${f.jumps} jumps, up to ${f.spanPct}% of travel), while the other axis stayed still.</p>`;
@@ -24,7 +26,7 @@ export function contactFaultView(findings) {
   const title = one
     ? `${STICK[findings[0].stick]} stick: the ${AXIS[findings[0].axis]} axis jumps on its own`
     : 'Unstable stick contacts';
-  const dz = deadzoneFor(Math.max(...findings.map(f => f.spanPct)));
+  const dz = deadzoneFor(Math.max(...findings.map(reachPct)));
   const where = one ? 'this stick' : 'these sticks';
   const html = `<h4 class="contact-fault-title">${title}</h4>`
     + findings.map(line).join('')
