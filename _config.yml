@@ -19,3 +19,7 @@ exclude:
   - ARTICLE.md
   - CHANGELOG.md
   - CONTRIBUTING.md
+  # Screenshot usato solo da ARTICLE.md (già escluso). THIRD_PARTY_NOTICES.md e
+  # LICENSE restano pubblicati: il sito distribuisce codice derivato da
+  # dualshock-tools (MIT) e la licenza deve accompagnarlo.
+  - paper/assets/01-landing.png

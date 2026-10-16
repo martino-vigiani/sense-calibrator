@@ -12,7 +12,7 @@ test('the public search surface stays focused on stick drift calibration', async
   const jsonLdSource = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/)?.[1];
   const heroAndFaq = html.match(/<section id="view-hero"[\s\S]*?<\/section>\s*<\/section>/)?.[0];
 
-  assert.equal(title, 'Fix PS5 Stick Drift from Your Browser | Sense Calibrator');
+  assert.equal(title, 'Sense Calibrator: PS5 Stick Drift Test &amp; DualSense Calibration');
   assert.ok(jsonLdSource, 'JSON-LD block should exist');
   assert.doesNotMatch(JSON.stringify(JSON.parse(jsonLdSource)), /sensitivity|gameplay|play test/i);
   assert.ok(heroAndFaq, 'hero and FAQ should exist');

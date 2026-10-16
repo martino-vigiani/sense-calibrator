@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>Fix PS5 Stick Drift from Your Browser | Sense Calibrator</title>
+  <title>Sense Calibrator: PS5 Stick Drift Test &amp; DualSense Calibration</title>
   <meta name="description" content="Test and recalibrate a standard PS5 DualSense for stick drift from desktop Chrome or Edge over USB. Free, open source and no install.">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="canonical" href="https://martino-vigiani.github.io/sense-calibrator/">
@@ -12,7 +12,7 @@
   <meta property="og:site_name" content="Sense Calibrator">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://martino-vigiani.github.io/sense-calibrator/">
-  <meta property="og:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
+  <meta property="og:title" content="Sense Calibrator: PS5 Stick Drift Test &amp; DualSense Calibration">
   <meta property="og:description" content="Test a standard DualSense, recalibrate correctable stick drift over USB, and compare the result before and after. No install.">
   <meta property="og:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
   <meta property="og:image:type" content="image/png">
@@ -20,12 +20,13 @@
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Fix PS5 Stick Drift from Your Browser | Sense Calibrator">
+  <meta name="twitter:title" content="Sense Calibrator: PS5 Stick Drift Test &amp; DualSense Calibration">
   <meta name="twitter:description" content="Test a standard DualSense, recalibrate correctable stick drift over USB, and compare the result before and after. No install.">
   <meta name="twitter:image" content="https://martino-vigiani.github.io/sense-calibrator/paper/assets/social-card-v2.png">
   <meta name="twitter:image:alt" content="Sense Calibrator browser utility for DualSense stick drift testing and calibration">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='black' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='black'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
+  <link rel="modulepreload" href="js/app.js">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -144,7 +145,7 @@
 
   <!-- ======================= VISTA: HERO ======================= -->
   <section id="view-hero" class="view view-hero">
-    <h1>Fix PS5 stick drift.<br>From your browser.</h1>
+    <h1>Test PS5 stick drift.<br>Then recalibrate.</h1>
     <div class="hero-intro">
       <div class="hero-copy">
         <p class="lede">Test a standard DualSense, recalibrate a correctable center or range offset, and compare the result before you save it.</p>
@@ -247,6 +248,7 @@
           <span>Two free browser tools compared: which controllers each supports and when to use which.</span>
         </a>
       </div>
+      <p class="guides-more"><a class="hero-guide-link" href="guides/sense-calibrator-vs-dualshock-tools/">Coming from dualshock-tools? See how they compare</a></p>
     </section>
   </section>
 
@@ -279,6 +281,10 @@
       </div>
       <p id="drift-status" class="drift-status" role="status" aria-live="polite" aria-atomic="true">Waiting&hellip;</p>
       <div id="drift-progress" class="progress hidden" aria-hidden="true"><i></i></div>
+      <!-- Contatto instabile di un asse (js/calib/contact-fault.js): compare solo
+           quando gli input report a riposo mostrano salti fra due livelli. -->
+      <div id="contact-fault" class="callout contact-fault hidden"></div>
+      <p id="contact-fault-live" class="sr-only" role="status" aria-live="polite"></p>
     </div>
 
     <nav class="result-help" aria-label="Help with your controller results">
@@ -356,7 +362,7 @@
       <div class="action">
         <div>
           <h4>Range calibration</h4>
-          <p>Recalibrates the maximum travel: rotate the sticks along the edge to cover the whole perimeter.</p>
+          <p>Recalibrates the maximum travel: rotate the sticks along the edge to cover the whole perimeter. Only if a stick doesn’t reach full travel or reads at the edge: it doesn’t fix drift.</p>
         </div>
         <button id="btn-range" class="btn btn-secondary">Start</button>
       </div>
@@ -455,6 +461,7 @@
     </label>
     <div class="modal-actions">
       <button id="btn-quick-cancel" class="btn btn-ghost">Cancel</button>
+      <button id="btn-quick-alt" class="btn btn-secondary hidden">Try Quick anyway</button>
       <button id="btn-quick-go" class="btn btn-primary" data-autofocus>Calibrate now</button>
     </div>
   </div>

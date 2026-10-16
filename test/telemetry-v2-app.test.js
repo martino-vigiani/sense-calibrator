@@ -329,6 +329,16 @@ test('no rest summary while the tab is hidden, a dialog is open or a calibration
   assert.equal(rest.length, 1, 'collects again once nothing is open');
 });
 
+test('no rest summary while the controller waits for a power cycle: the firmware frame is unknown', async () => {
+  const { h } = await setup();
+  h.eval('markPowerCycle(ds5, deviceKey)');
+  await h.advance(65_000);
+  assert.equal(h.uploadsV2.filter(e => e.type === 'rest').length, 0);
+  h.eval("clearPowerCycle('test', ds5, deviceKey, 'restart')");
+  await h.advance(35_000);
+  assert.equal(h.uploadsV2.filter(e => e.type === 'rest').length, 1, 'collects again once the lock is cleared');
+});
+
 test('after a Quick the rest summaries say the calibration is not saved yet', async () => {
   const { h } = await setup();
   await quick(h);

@@ -27,7 +27,7 @@ import {
 } from '../calib/lattice.js';
 import { QUICK_CATASTROPHIC_PCT, classifyOutcome } from '../calib/quick-policy.js';
 import { QUICK_DEFAULTS, QUICK_REGRESSION_EPS } from '../calib/quick.js';
-import { axisWorsening } from '../calib/wizard-gate.js';
+import { axisWorsening, farStartPct } from '../calib/wizard-gate.js';
 
 // Oltre questo aumento dello stick peggiore Write è spento, non solo
 // sconsigliato: tre passi del reticolo (3 × 0,784 punti).
@@ -112,6 +112,36 @@ export const RANGE_THEN_CENTER = `Afterwards the page measures the center again:
 export const RANGE_MOVES_CENTER = 'In shared results the center was off after most Range calibrations; this isn’t confirmed on hardware yet.';
 
 const SIDES = ['Left', 'Right'];
+
+// Stick a riposo oltre refRadius (farStartPct, 50%): telemetria v2 (build
+// 20261013) Guided da lì → 0/20 completati, 16 fermi al passo 0 con la
+// sessione aperta. Il primo passo detto all'utente è riavviare e rifare il
+// test drift, non un'altra calibrazione; l'azione resta Guided (che chiede
+// conferma prima di calibBegin, guidedFarStartCopy). Nessuna promessa: il
+// riavvio non è verificato come rimedio.
+export const FAR_RESTART_FIRST = 'First restart the controller (hold PS for about 10 s until the light goes out, then reconnect it) and run the drift test again; check that nothing is pressing the stick, and move it around and click it in a few times.';
+export const FAR_GUIDED_RARE = 'If it still rests this far, Guided calibration is the remaining option, but from this far it rarely finishes.';
+export const isFarRest = offset => isNum(offset) && offset >= farStartPct();
+
+// Testo della conferma di Guided con partenza lontana (app.js, F1): nessun
+// comando è partito. `far` = farStart(before), `repeat` = Guided è già fallito
+// da lontano su questo controller in questa pagina.
+export function guidedFarStartCopy({ far = [], repeat = false } = {}) {
+  const names = far.map(st => st.side);
+  const amount = far.map(st => fmt(st.offset)).join(' and ');
+  const lead = names.length === 2
+    ? `Both sticks rest far from center (${amount}): nothing was sent.`
+    : `The ${names[0] ?? 'left'} stick rests ${amount} from center: nothing was sent.`;
+  return {
+    lead,
+    lines: [
+      repeat ? 'This already failed once on this controller.' : null,
+      'From this far, Guided calibration rarely finishes, and if it fails the controller must be restarted before you can calibrate or save again.',
+      'Check that nothing is pressing the stick, move it around and click it in (L3/R3) a few times, then turn the controller off (hold PS for about 10 s), reconnect it and run the drift test again.',
+      'Use Try anyway only if it still rests this far after that.',
+    ].filter(Boolean),
+  };
+}
 const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const worstOfSummary = s => (s && Array.isArray(s.off) && s.off.every(isNum) ? Math.max(...s.off) : null);
 
@@ -554,7 +584,7 @@ export function guidedOutcomeView({ before = null, after = null, error = null, c
     // staccare il cavo. Il blocco di Write resta quello dell'errore.
     const why = {
       corner: 'The requested corner could not be reached.',
-      stuck: 'A stick stayed too far from center with nobody touching it, so Guided calibration could not use it as the center. It is probably stuck near the edge. Range calibration may help afterwards; we haven’t confirmed that it does for a stick like this.',
+      stuck: 'A stick stayed too far from center with nobody touching it, so Guided calibration could not use it as the center. After restarting the controller, run the drift test again. If a stick still rests beyond 50%, it is probably faulty or something is pressing it.',
       far: 'A stick kept settling too far from where it rested at the start.',
       rest: 'The sticks didn’t settle where they rested at the start.',
     }[stopped.why] ?? null;
@@ -724,8 +754,16 @@ export function rangeRecheckView({ before = null, after }) {
 // finché il riavvio non è provato. `again`: già rifiutato su questo controller
 // dopo un riavvio in questa pagina. Il timeout (controller avvelenato) ha la
 // sua vista: lì Restart non può partire.
-export function rangeStartFailedView({ error = null, again = false } = {}) {
+// `clearedBy`: come era stato tolto il blocco precedente ('restart' |
+// 'confirm' | null). Dopo una conferma a mano il controller probabilmente non
+// era spento del tutto: lo si dice, il blocco non cambia.
+export function rangeStartFailedView({ error = null, again = false, clearedBy = null } = {}) {
   if (error && isPoisonError(error)) return rangeOutcomeView({ error });
+  const retry = clearedBy === 'confirm'
+    ? 'The last block was cleared with “I already turned it off”, so the controller probably wasn’t fully off. Hold PS for about 10 s until the light goes out (or use Restart), then reconnect it and start Range again.'
+    : again
+      ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
+      : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.';
   return {
     kind: 'range',
     outcome: 'range',
@@ -733,9 +771,7 @@ export function rangeStartFailedView({ error = null, again = false } = {}) {
     title: 'Range calibration didn’t start',
     lines: [
       'The controller didn’t accept the start command, so no range was recorded. This usually means a calibration session is still open on it, for example after an interrupted attempt, a reload or another tool.',
-      again
-        ? 'It happened again after a restart, so this controller may not accept range calibration from this page. Trying again is unlikely to help.'
-        : 'Trying again right away would be refused the same way. Restart the controller first (or turn it off by holding PS for 10 s), then reconnect it and start Range again.',
+      retry,
       'Calibrating and saving stay off until the controller has restarted, and Write stays off until a complete Range calibration.',
     ],
     sticks: [],
@@ -785,11 +821,29 @@ export function quickPreflightRoute(driftResult) {
     return {
       action,
       then: null,
-      text: `The ${far.name} stick rests too far off-center for Quick calibration (${fmt(far.offset)} in the last drift test; Quick only starts within ${GUIDED_ONLY_MIN}%). Use Guided calibration.`,
+      text: isFarRest(far.offset)
+        ? `The ${far.name} stick rests ${fmt(far.offset)} from center (last drift test), too far for Quick calibration. ${FAR_RESTART_FIRST} ${FAR_GUIDED_RARE}`
+        : `The ${far.name} stick rests too far off-center for Quick calibration (${fmt(far.offset)} in the last drift test; Quick only starts within ${GUIDED_ONLY_MIN}%). Use Guided calibration.`,
     };
   }
   return null;
 }
+
+// Apertura di Quick con un test drift FRESCO (misurato dopo l'ultimo commit,
+// sullo stesso controller) che mette già uno stick oltre il raggio di Quick o
+// al bordo: la rotta di quickPreflightRoute diventa l'azione primaria e Quick
+// resta come "Try Quick anyway" (runQuick invariato, nessun comando in nessun
+// ramo). Con un test vecchio (un commit dopo) o assente: null, Quick normale.
+export function quickEntryRoute(driftResult, fresh) {
+  if (!fresh || !driftResult || driftResult.unstable === true) return null;
+  return quickPreflightRoute(driftResult);
+}
+
+// Il test drift aveva lo stick fermo dentro il raggio ma vicino al limite: da
+// qui un pollice e uno stick che si ferma appena oltre il 15% non si
+// distinguono. Sotto questa soglia la preflight fallita resta un probabile
+// pollice e quickPreflightCheckRoute tace.
+export const QUICK_NEAR_LIMIT_PCT = 12;
 
 // Quick non è partito e la sua stessa attesa ha visto uno stick FERMO oltre il
 // raggio (diagnosi `off-center` di createQuickPreflightProbe, in
@@ -806,7 +860,16 @@ export function quickPreflightCheckRoute(diag, driftResult = null) {
   const name = diag.side === 'right' ? 'right' : 'left';
   const stick = diag.result[name];
   if (!stick || !isNum(stick.offset)) return null;
-  if (driftRestedInside(driftResult, name)) return null;
+  if (driftRestedInside(driftResult, name)) {
+    const before = driftResult[name].offset;
+    if (!(before >= QUICK_NEAR_LIMIT_PCT)) return null;
+    return {
+      action: ACTION.guided,
+      then: null,
+      near: true,
+      text: `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check; the last drift test measured it at ${fmt(before)}, just inside Quick’s ${GUIDED_ONLY_MIN}% limit. That can be a thumb on the stick, or a stick that sometimes stops just past ${GUIDED_ONLY_MIN}%. Release both sticks and try Quick again; if it repeats with nobody touching it, use Guided calibration.`,
+    };
+  }
   if (stickTier(diag.result, name)?.id === 'pinned') {
     const [first, then] = routeFor(null, true);
     return {
@@ -818,7 +881,9 @@ export function quickPreflightCheckRoute(diag, driftResult = null) {
   return {
     action: ACTION.guided,
     then: null,
-    text: `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check, and Quick only starts within ${GUIDED_ONLY_MIN}%. If nobody is touching it, use Guided calibration.`,
+    text: isFarRest(stick.offset)
+      ? `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check. If nobody is touching it: ${FAR_RESTART_FIRST} ${FAR_GUIDED_RARE}`
+      : `The ${name} stick stayed still at ${fmt(stick.offset)} from center during the check, and Quick only starts within ${GUIDED_ONLY_MIN}%. If nobody is touching it, use Guided calibration.`,
   };
 }
 
@@ -847,7 +912,9 @@ export function driftMessage(result, { previous = null, unsaved = false, writeLo
       text = `Pinned at the edge: ${describeTier('pinned').advice}`;
       break;
     case 'guided-only':
-      text = `Severe offset (${pct(worst)}). ${describeTier('guided-only').advice}`;
+      text = isFarRest(worst)
+        ? `Severe offset (${pct(worst)}). ${FAR_RESTART_FIRST} ${FAR_GUIDED_RARE}`
+        : `Severe offset (${pct(worst)}). ${describeTier('guided-only').advice}`;
       break;
     case 'marked':
       text = `Marked drift detected. ${describeTier('marked').advice}`;
@@ -877,7 +944,7 @@ export function driftMessage(result, { previous = null, unsaved = false, writeLo
     else text = `${where} This calibration is still temporary: write it to memory to keep it.`;
   }
   if (noisy && worstTier?.id !== 'moving') {
-    text += ' The signal is also noisy. Retest with both sticks untouched; this reading does not determine the cause.';
+    text += ' The signal is also noisy. Retest with both sticks untouched; this reading does not determine the cause. Left connected and untouched, the page also watches for a stick contact that jumps on its own.';
   }
   if (previous && unsaved) {
     const before = Math.max(previous.left.offset, previous.right.offset);

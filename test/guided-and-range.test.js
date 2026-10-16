@@ -183,6 +183,8 @@ const v2Guided = h => JSON.parse(JSON.stringify(h.window.__senseTelemetryV2()))
 test('a stick stuck near the edge at step 0: the page says why, never offers the useless escape, and Stop exits without calibEnd', async () => {
   const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
   await startWizard(h);
+  assert.equal(A.counts.begin, 0, 'a far start asks first (F1)');
+  await h.run(h.click('btn-wizard-next')); // Try anyway
   assert.equal(A.counts.begin, 1, 'the session was opened');
   assert.equal(h.peek().wizard.phase, 'ref');
   assert.match(h.$('wizard-msg').innerHTML, /The left stick stays about 7\d% from center with nobody touching it/);
@@ -214,7 +216,7 @@ test('a stick stuck near the edge at step 0: the page says why, never offers the
   assert.equal(h.$('btn-flash').disabled, true);
   const panel = h.$('calib-outcome').innerHTML;
   assert.match(panel, /Guided calibration stopped/);
-  assert.match(panel, /stuck near the edge/);
+  assert.match(panel, /run the drift test again/);
   assert.match(panel, /Nothing from this run was committed/);
   assert.match(panel, /hold PS for 10 s/);
   assert.match(panel, /data-outcome-action="restart"/);
@@ -235,6 +237,80 @@ test('a stick stuck near the edge at step 0: the page says why, never offers the
   h.hid.fire('connect', A);
   await h.advance(5000);
   assert.equal(h.eval('powerCycleApplies()'), false);
+});
+
+// F1/F2 (telemetria v2, build 20261013): Guided con partenza ≥50% → 0/20
+// completati, 16 fermi al passo 0 con la sessione aperta. Prima di calibBegin
+// la pagina chiede conferma; "Try anyway" è il flusso di prima.
+test('F1: a far start sends nothing, takes no power-cycle lock and focuses Close', async () => {
+  const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
+  await h.click('btn-wizard');
+  const sent = A.commandLog.length;
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.begin, 0, 'no calibBegin');
+  assert.equal(A.commandLog.length, sent, 'nothing sent at all');
+  assert.equal(h.peek().busy, false);
+  assert.equal(h.peek().wizard.phase, 'intro');
+  assert.equal(h.eval('powerCycleApplies()'), false);
+  assert.equal(h.eval('tabPowerCycleFlag()'), false, 'no in-flight session flag');
+  const msg = h.$('wizard-msg').innerHTML;
+  assert.match(msg, /The left stick rests 7\d\.\d% from center: nothing was sent/);
+  assert.match(msg, /rarely finishes/);
+  assert.match(msg, /drift test again/);
+  assert.doesNotMatch(msg, /already failed/);
+  assert.equal(h.$('btn-wizard-cancel').textContent, 'Close');
+  assert.equal(h.$('btn-wizard-cancel').hasAttribute('data-autofocus'), true);
+  assert.equal(h.$('btn-wizard-next').hasAttribute('data-autofocus'), false);
+  assert.equal(h.$('btn-wizard-next').textContent, 'Try anyway');
+  assert.equal(h.doc.activeElement, h.$('btn-wizard-cancel'), 'focus on Close');
+  const ev = h.sessions().filter(s => s.kind === 'wizard').at(-1);
+  assert.deepEqual([ev.done, ev.aborted, ev.step, ev.repeat], [false, 'far-start', 0, false]);
+  assert.deepEqual(ev.far, ['left']);
+  assert.equal(v2Guided(h).length, 0, 'no v2 event for a far start');
+  // Close chiude senza nulla da sistemare; una nuova apertura riparte da Start.
+  await h.click('btn-wizard-cancel');
+  await h.advance(400);
+  assert.equal(h.visible('modal-wizard'), false);
+  await h.click('btn-wizard');
+  assert.equal(h.$('btn-wizard-next').textContent, 'Start');
+  assert.equal(h.$('btn-wizard-next').hasAttribute('data-autofocus'), true);
+  assert.equal(h.$('btn-wizard-cancel').hasAttribute('data-autofocus'), false);
+});
+
+test('F1: Try anyway runs today’s flow, with its v2 event', async () => {
+  const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
+  await startWizard(h);
+  assert.equal(A.counts.begin, 0);
+  await h.run(h.click('btn-wizard-next'));
+  assert.equal(A.counts.begin, 1, 'Try anyway opens the session');
+  assert.equal(h.peek().wizard.phase, 'ref');
+  assert.equal(h.$('btn-wizard-next').className, 'btn btn-primary');
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-cancel');
+  await h.advance(400);
+  const g = v2Guided(h);
+  assert.equal(g.length, 1);
+  assert.deepEqual([g[0].outcome, g[0].needsPowerCycle], ['error', true]);
+});
+
+test('F2: after a stuck Stop on this controller, the next far start says it already failed', async () => {
+  const { h, A } = await setup({ drift: [[-90, 2], [1, -1]] });
+  await startWizard(h);
+  await h.run(h.click('btn-wizard-next')); // Try anyway
+  await h.run(h.click('btn-wizard-next'));
+  h.confirmAnswer = true;
+  await h.click('btn-wizard-cancel');
+  await h.advance(400);
+  assert.equal(h.sessions().filter(s => s.kind === 'wizard').at(-1).stopWhy, 'stuck');
+  // conferma dello spegnimento: il blocco va via, il controller riparte
+  await h.run(h.eval("runOutcomeAction('powered-off')"));
+  A.powerCycle();
+  assert.equal(h.eval('powerCycleApplies()'), false);
+  const begins = A.counts.begin;
+  await startWizard(h);
+  assert.equal(A.counts.begin, begins, 'still nothing sent');
+  assert.match(h.$('wizard-msg').innerHTML, /This already failed once on this controller/);
+  assert.equal(h.sessions().filter(s => s.kind === 'wizard').at(-1).repeat, true);
 });
 
 test('Stop is offered after one rest timeout at a corner, hidden during the next wait, and gone once the step succeeds', async () => {
