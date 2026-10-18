@@ -34,10 +34,10 @@ hardware. Record schema `sense-hw-probe/2`.
 
 | Step | Writes? | What it records |
 |---|---|---|
-| `X-idle` | no | 5 min hands off: per second, median and spread of each axis (LSB); drift per axis, last minute minus first minute |
-| `X-release` | no | 8 directions × 3 flicks of the left stick, prompted on the page; each landing via `js/calib/landing.js`, median per direction, largest left-X difference between opposite directions. A flick that never lands is `null` after 10 s |
-| `X-pass` | RAM | 5 passes as H-b, the baseline restored with `[12,1]` and read back after each; per pass the reference, every sample's window mean, `outBefore`/`outAfter`, Δ per center, ideal Δ and the capture error E (LSB). Stops at an output ≥15% (after the restore) or on an inexact restore |
-| `X-fix` | RAM | Writes `LX + round(out.lx × u)` (and LY when \|out.ly\| ≥ 1 LSB and its fit qualifies) from a fresh read, under `checkFixWrite`; read-back, output at once, after 60 s, and the median of 8 landings |
+| `X-idle` | no | 5 min hands off: per second, median and spread of each axis (LSB); drift per axis, last minute minus first minute. Incomplete below 95% continuous-report coverage or 100 reports per end window |
+| `X-release` | no | 8 directions × 3 flicks of the left stick, prompted on the page; each landing via `js/calib/landing.js`, median per direction, largest left-X difference between opposite directions. A flick that never lands is `null` after 10 s; one whose peak is more than 45° off the prompted direction is `wrong-direction` and left out |
+| `X-pass` | RAM | 5 passes as H-b, the baseline restored with `[12,1]` and read back after each; per pass the reference, every sample's window mean, `outBefore`/`outAfter`, Δ per center, ideal Δ and the capture error E (LSB). Restores before pass 1 too. Stops at an output ≥15% (after the restore) or on an inexact restore; any stop with RAM changed blocks later writes until a power-cycle |
+| `X-fix` | RAM | Measures, prompts one release, measures again and stops unless left X repeats within 1 LSB (a still thumb); then writes `LX + round(out.lx × u)` (and LY when \|out.ly\| ≥ 1 LSB and its fit qualifies) from a fresh read, under `checkFixWrite`; read-back, output at once, after 60 s, and the median of 8 landings |
 | `X-replug` | no | On a new connection after an unplug without power-off (confirmed): `[12,2]` and the output against the last read of the previous connection, only with both serials known and equal (H11 for RAM) |
 
 `u` is the H-e slope of **this** connection, as units per LSB of center shift (`−unitsPerLsb`):

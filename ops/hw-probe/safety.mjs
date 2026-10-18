@@ -63,7 +63,7 @@ export function writeRefusal({ step, hostname, arming, connectionId, nv, baselin
   if (!isLocalProbeHost(hostname)) reasons.push('the probe only runs on localhost');
   if (!isArmed(arming, connectionId)) reasons.push(`not armed: tick "spare controller" and type ${SPARE_PHRASE} on this connection`);
   if (poisoned) reasons.push('the controller stopped responding: reconnect it first');
-  if (needsPowerCycle) reasons.push('a calibration session was left open: power-cycle the controller first');
+  if (needsPowerCycle) reasons.push('a calibration session was left open or an X-pass stopped with RAM changed: power-cycle the controller first');
   if (!baseline) reasons.push('no valid [12,2] baseline read on this connection');
   if (nv?.status !== 'locked') reasons.push(`NVS is not locked (${nv?.status ?? 'not read'}): a write could become permanent`);
   if (!WRITE_STEPS.has(step)) reasons.push(`unknown write step ${step}`);

@@ -63,16 +63,19 @@ More than one can be true. X1 is the only one with a software fix (write the rig
 
 | # | Step | Writes? | What it records |
 |---|---|---|---|
-| 1 | **X-idle** | no | 5 min hands-off: per second, the median and spread of each axis; total drift of left X (first minute vs last minute). |
-| 2 | **X-release** | no | Flick the left stick and let go, 3 times in each of 8 directions (the page prompts the direction). Each landing via `createLandingDetector` (`js/calib/landing.js`); median landing per direction. |
-| 3 | **X-pass** ×5 | RAM | Each pass as H-b (centered hold, in-session reference, 12 samples, `calibEnd`), plus: the window mean of every sample, the reference, the pre-session output; then `[12,2]` and the output. Per pass: `ΔLX`, `ΔLY`, `outBefore`, `outAfter`, the ideal ΔLX (`outBefore.lx × u`, u = the H-e slope from R1 on this controller) and the capture error `E = (ΔLX − idealΔLX) / u` in LSB. Restore the R1 baseline with `[12,1]` after each pass, so the 5 passes start from the same point. |
-| 4 | **X-fix** | RAM | From a fresh read: write `LX_ideal = LX + out.lx × u` (and the same for LY if |out.ly| ≥ 1 LSB), only on the left stick. Read back (exact?), then the output at once, after 60 s untouched, and after 8 flick-and-release landings. |
+| 1 | **X-idle** | no | 5 min hands-off: per second, the median and spread of each axis; total drift of left X (first minute vs last minute). Fresh reports only: continuous reports (no gap over 100 ms) must cover at least 95% of the run and each of the two minutes needs at least 100 reports, otherwise the step is marked incomplete and the rules treat X-idle as missing. |
+| 2 | **X-release** | no | Flick the left stick and let go, 3 times in each of 8 directions (the page prompts the direction). Each landing via `createLandingDetector` (`js/calib/landing.js`); median landing per direction. A landing counts only if the deepest point of that flick lies within ±45° of the prompted direction; otherwise it is recorded as `wrong-direction` and left out of the medians. |
+| 3 | **X-pass** ×5 | RAM | Each pass as H-b (centered hold, in-session reference, 12 samples, `calibEnd`), plus: the window mean of every sample, the reference, the pre-session output; then `[12,2]` and the output. Per pass: `ΔLX`, `ΔLY`, `outBefore`, `outAfter`, the ideal ΔLX (`outBefore.lx × u`, u = the H-e slope from R1 on this controller) and the capture error `E = (ΔLX − idealΔLX) / u` in LSB. Restore the R1 baseline with `[12,1]` (and read it back) before the first pass and after each pass, so the 5 passes start from the same point. |
+| 4 | **X-fix** | RAM | From a fresh read: measure the output, prompt one flick-and-release, measure again, and write only if left X agrees within 1 LSB between the two (a thumb resting still on the stick gives a steady but wrong reading that a release does not repeat). Then write `LX_ideal = LX + out.lx × u` (and the same for LY if |out.ly| ≥ 1 LSB), only on the left stick. Read back (exact?), then the output at once, after 60 s untouched, and after 8 flick-and-release landings. |
 | 5 | **X-replug** | no | Unplug the USB cable, wait 5 s, plug it back in (no power-off), Connect, Preflight: `[12,2]` and the output. This is also H11. |
 | 6 | Power-cycle + **H-f-check** | no | Back to the R1 baseline? |
 
 X-pass restores between passes because a capture error that only shows up once would otherwise be
 hidden by the next pass's starting point. If a pass ends with the output at 15% or more, stop there
-and go to step 6.
+and go to step 6. The probe restores the baseline first, but any X-pass stop with RAM changed or
+uncertain (the 15% ceiling, no output after a pass, a restore that does not read back, an HID error)
+marks the connection for a power-cycle: every later write step is refused until the controller is
+turned off and reconnected.
 
 ## Decision rules
 
