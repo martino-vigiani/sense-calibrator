@@ -13,16 +13,19 @@
 // finestra di misura sono gli stessi di js/calib/sampling.js). I timer servono
 // solo come durata della finestra e come guardia.
 
-import { waitForStable } from '../../js/calib/sampling.js';
+import { reportTimeOf, waitForStable } from '../../js/calib/sampling.js';
+import { createLandingDetector } from '../../js/calib/landing.js';
 import {
   CENTER_AXES, CENTER_INDEXES, MODULE_FIELDS, RANGE_INDEXES,
   centersOf, diffValues, readModuleCal, sameValues, writeModuleCal,
 } from './module-cal.mjs';
 import {
-  MAX_CENTER_DELTA, POSSIBLY_PERMANENT_STEPS, checkWriteValues, createArming, arm, isArmed, writeRefusal,
+  MAX_CENTER_DELTA, POSSIBLY_PERMANENT_STEPS, checkFixWrite, checkWriteValues, createArming, arm, fixFitRefusal, isArmed, writeRefusal,
 } from './safety.mjs';
 
-export const PROBE_SCHEMA = 'sense-hw-probe/1';
+// /2: i passi R1-X (docs/hw-probe-bdm040.md) e le medie delle finestre di ogni
+// campione nelle passate.
+export const PROBE_SCHEMA = 'sense-hw-probe/2';
 
 export const PROBE_DEFAULTS = {
   measureMs: 1500,       // finestra di misura dell'uscita (report 0x01)
@@ -35,7 +38,26 @@ export const PROBE_DEFAULTS = {
   slopeMaxOut: 8,        // H-e, LSB: oltre, niente gradini più ampi su quell'asse
   abReps: 3,             // A/B, ripetizioni per braccio
   abSamples: [12, 4],    // A/B, campioni per passata nei due bracci
+  // R1-X (docs/hw-probe-bdm040.md)
+  idleMs: 300000,        // X-idle, mani lontane per 5 minuti
+  releaseFlicks: 3,      // X-release, rilasci per direzione
+  flickTimeoutMs: 10000, // attesa di un punto fermo e poi dell'arrivo, per ogni rilascio
+  xPasses: 5,            // X-pass
+  fixWaitMs: 60000,      // X-fix, attesa a stick fermo prima della seconda misura
+  fixFlicks: 8,          // X-fix, rilasci dopo la correzione
 };
+
+const LSB = 127.5;
+// 15% di deflessione in LSB: il tetto di Quick (catastrofico) e del guard.
+export const CEILING_LSB = 0.15 * LSB;
+
+// Le 8 direzioni di X-release, nel frame del report (y positivo = giù).
+// L'opposta di una direzione è quella 4 posti più avanti.
+const D = Math.SQRT1_2;
+export const RELEASE_DIRECTIONS = [
+  { name: 'right', v: [1, 0] }, { name: 'down-right', v: [D, D] }, { name: 'down', v: [0, 1] }, { name: 'down-left', v: [-D, D] },
+  { name: 'left', v: [-1, 0] }, { name: 'up-left', v: [-D, -D] }, { name: 'up', v: [0, -1] }, { name: 'up-right', v: [D, -D] },
+];
 
 // Uscita a riposo in LSB rispetto a 127.5 (lo zero ideale non rappresentabile),
 // media per asse sulla finestra: la media di molti report recupera un po' di
@@ -60,6 +82,14 @@ export function measureOutput(source, clock, ms) {
 }
 
 const round4 = v => Math.round(v * 1e4) / 1e4;
+const round2 = v => Math.round(v * 100) / 100;
+function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  if (!s.length) return null;
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+const toLsb = c => Object.fromEntries(CENTER_AXES.map(a => [a, round2(c[a] * LSB)]));
 const outDelta = (a, b) => (a && b ? Object.fromEntries(CENTER_AXES.map(k => [k, round4(b.mean[k] - a.mean[k])])) : null);
 
 class StepAbort extends Error {
@@ -70,7 +100,11 @@ class StepAbort extends Error {
 // clock: { sleep, setTimeout, clearTimeout } (il browser o l'orologio virtuale).
 // confirm(step, text) → Promise<boolean>: conferma esplicita per ogni passo che
 //   scrive. Nessuna conferma = nessuna scrittura.
-export function createProbe({ hostname, clock, confirm, log = () => {}, now = () => Date.now(), params = {} }) {
+// prompt({ step, direction, index, n, total, text } | null): mostra a chi tiene
+//   il controller in che direzione spingere lo stick sinistro e lasciarlo
+//   (X-release, X-fix); null toglie l'indicazione. I test lo usano per muovere
+//   lo stick del finto.
+export function createProbe({ hostname, clock, confirm, prompt = async () => {}, log = () => {}, now = () => Date.now(), params = {} }) {
   const P = { ...PROBE_DEFAULTS, ...params };
   const record = {
     schema: PROBE_SCHEMA,
@@ -88,6 +122,8 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
   // riassegna mai: se la prima connessione non ha un seriale, nessuna
   // connessione successiva può diventare "la prima" al suo posto.
   let conn = null;
+  // La connessione precedente, per X-replug (stessa identità, RAM uguale?).
+  let prev = null;
   let firstIdentity = null;
   // Identità della connessione che ha scritto record.baseline (può non essere
   // la prima, se la prima si è fermata al preflight).
@@ -96,7 +132,8 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
 
   function attach({ ds5, source, info = {}, identity = null }) {
     const id = record.connections.length + 1;
-    conn = { id, ds5, source, identity: knownIdentity(identity) ? identity : null, arming: createArming(id), nv: null, baseline: null, baselineOut: null, snapshots: [], needsPowerCycle: false };
+    prev = conn;
+    conn = { id, ds5, source, identity: knownIdentity(identity) ? identity : null, arming: createArming(id), nv: null, baseline: null, baselineOut: null, snapshots: [], lastOut: null, needsPowerCycle: false };
     if (id === 1) firstIdentity = conn.identity;
     record.controller ??= { board: info.board ?? null, fwversion: info.fwversion ?? null, buildDate: info.buildDate ?? null };
     // true/false solo quando entrambi i seriali sono noti; null = sconosciuto.
@@ -113,8 +150,10 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
 
   const armed = () => !!conn && isArmed(conn.arming, conn.id);
 
-  function hold(what) {
-    return waitForStable(conn.source, clock, { requireCentered: true, timeoutMs: P.holdTimeoutMs }).then(ok => {
+  // centered: false solo per X-fix, che misura proprio un'uscita che può stare
+  // oltre il 15% (fino ai 24 LSB della sua regola): resta la finestra ferma.
+  function hold(what, { centered = true } = {}) {
+    return waitForStable(conn.source, clock, { requireCentered: centered, timeoutMs: P.holdTimeoutMs }).then(ok => {
       if (!ok) throw new StepAbort(`hands-off hold failed before ${what}: release both sticks and retry`);
       return ok;
     });
@@ -127,7 +166,13 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
     return r;
   }
 
-  const measure = () => measureOutput(conn.source, clock, P.measureMs);
+  // L'ultima uscita misurata resta sulla connessione: X-replug la confronta.
+  async function measure() {
+    const c = conn;
+    const out = await measureOutput(c.source, clock, P.measureMs);
+    if (out) c.lastOut = out;
+    return out;
+  }
 
   // La baseline del diario appartiene a questo controller? Sì se l'ha letta
   // questa stessa connessione, oppure se entrambi i seriali sono noti e
@@ -149,7 +194,9 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
     return snaps;
   }
 
-  async function guardWrite(step) {
+  // ask: false solo per ricontrollare (NVS, armamento, sessione) fra le
+  // passate di un passo già confermato.
+  async function guardWrite(step, { ask = true } = {}) {
     // Lo stato NVS si rilegge adesso: quello della connessione può essere vecchio.
     const nv = await conn.ds5.queryNvStatus();
     const reasons = writeRefusal({
@@ -157,6 +204,7 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       baseline: conn.baseline, poisoned: !!conn.ds5.poisoned, needsPowerCycle: conn.needsPowerCycle,
     });
     if (reasons.length) throw new StepAbort(`refused: ${reasons.join('; ')}`, { refused: true, nv: nv.status });
+    if (!ask) return;
     const permanent = POSSIBLY_PERMANENT_STEPS.has(step);
     const text = permanent
       ? `${step} may change the spare controller PERMANENTLY. Continue only on a spare DualSense.`
@@ -193,21 +241,121 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
     }
   }
 
+  // Il riferimento in sessione e la media della finestra stabile che ha
+  // preceduto ogni calibSample (LSB, frame dei report durante la sessione)
+  // restano nel risultato: X-pass li confronta con l'uscita prima della
+  // sessione (X4) e fra loro (lo stick era fermo dove il firmware campionava?).
   async function pass(n) {
     await hold('calibBegin');
+    const sampleMeans = [];
     return inOpenSession(async () => {
       const begin = await conn.ds5.calibBegin();
       const ref = await waitForStable(conn.source, clock, { maxRadius: 0.5, timeoutMs: P.sampleTimeoutMs });
       if (!ref) throw new StepAbort('no stable reference after calibBegin: session left open, power-cycle the controller', { stalled: true });
+      const reference = toLsb(ref.center);
       for (let i = 0; i < n; i++) {
         const ok = await waitForStable(conn.source, clock, { near: ref.center, timeoutMs: P.sampleTimeoutMs });
-        if (!ok) throw new StepAbort(`sample ${i + 1}/${n} never stable: session left open, power-cycle the controller`, { stalled: true, samples: i });
+        if (!ok) throw new StepAbort(`sample ${i + 1}/${n} never stable: session left open, power-cycle the controller`, { stalled: true, samples: i, reference, sampleMeans });
+        sampleMeans.push(toLsb(ok.center));
         await conn.ds5.calibSample();
       }
       await clock.sleep(P.settleMs);
       await conn.ds5.calibEnd();
-      return { samples: n, repairCommitted: begin?.committed === true };
+      return { samples: n, repairCommitted: begin?.committed === true, reference, sampleMeans };
     });
+  }
+
+  // --- aiuti R1-X ------------------------------------------------------------
+
+  // H-e riuscita su QUESTA connessione (la scala di un'altra connessione non
+  // vale: X-pass e X-fix la rifiutano).
+  const heHere = () => [...record.steps].reverse().find(s => s.id === 'H-e' && s.ok && s.connection === conn.id) ?? null;
+
+  // u per asse: unità a 16 bit per LSB di spostamento del CENTRO, cioè
+  // −unitsPerLsb di H-e (che è per LSB di uscita: +u sul centro sposta
+  // l'uscita di −1 LSB). Con questo segno idealΔ = uscita × u, come nel doc.
+  function slopesFrom(he) {
+    const u = {};
+    for (const a of CENTER_AXES) {
+      const f = he?.perAxis?.[a];
+      u[a] = Number.isFinite(f?.unitsPerLsb) && f.unitsPerLsb !== 0 ? -f.unitsPerLsb : null;
+    }
+    return u;
+  }
+
+  // Attende un report dopo cui `test()` è vero, al massimo `timeoutMs`.
+  // Guidato dai report; il timer è solo la guardia.
+  function untilReport(test, timeoutMs) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = ok => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        clock.clearTimeout(guard);
+        resolve(ok);
+      };
+      const unsubscribe = conn.source.subscribe(() => { if (test()) finish(true); });
+      const guard = clock.setTimeout(() => finish(false), timeoutMs);
+      if (test()) finish(true);
+    });
+  }
+
+  // Rilasci guidati dello stick sinistro: per ogni voce del piano attende un
+  // punto fermo (senza, il rilevatore non riconosce un rilascio), mostra la
+  // direzione e attende l'arrivo. Un timeout registra null e passa oltre.
+  async function flicks(step, plan) {
+    const detector = createLandingDetector();
+    const landings = [];
+    const unsubscribe = conn.source.subscribe(() => {
+      for (const l of detector.push(conn.source.sticks, reportTimeOf(conn.source))) if (l.stick === 'left') landings.push(l);
+    });
+    const out = [];
+    try {
+      for (const [k, item] of plan.entries()) {
+        const row = { direction: item.direction.name, index: item.index, landing: null };
+        out.push(row);
+        if (!(await untilReport(() => detector.phase('left') === 'rest', P.flickTimeoutMs))) { row.missed = 'no-rest'; continue; }
+        const seen = landings.length;
+        await prompt({
+          step, direction: item.direction.name, index: item.index, n: k + 1, total: plan.length,
+          text: `${step}: flick the LEFT stick ${item.direction.name.toUpperCase()} and let go (${k + 1}/${plan.length}). Leave the right stick alone.`,
+        });
+        if (!(await untilReport(() => landings.length > seen, P.flickTimeoutMs))) { row.missed = 'no-landing'; continue; }
+        const l = landings[seen];
+        row.landing = { axes: l.landAxes, peak: l.peak, settleMs: l.settleMs };
+      }
+    } finally {
+      unsubscribe();
+      await prompt(null);
+    }
+    return out;
+  }
+
+  const landingMedian = rows => {
+    const got = rows.filter(r => r.landing);
+    return got.length ? [round2(median(got.map(r => r.landing.axes[0]))), round2(median(got.map(r => r.landing.axes[1])))] : null;
+  };
+
+  // Una passata X-pass misurata: Δ dei centri, Δ ideale, errore di cattura E.
+  function analyzePass(i, before, after, outBefore, outAfter, p, u) {
+    const delta = {}, idealDelta = {}, E = {}, sampleVsRef = {}, inSessionVsPre = {};
+    CENTER_AXES.forEach((a, k) => {
+      const idx = CENTER_INDEXES[k];
+      delta[a] = after[idx] - before[idx];
+      idealDelta[a] = u[a] ? round2(outBefore.mean[a] * u[a]) : null;
+      E[a] = u[a] ? round2((delta[a] - outBefore.mean[a] * u[a]) / u[a]) : null;
+      sampleVsRef[a] = round2(Math.max(0, ...p.sampleMeans.map(m => Math.abs(m[a] - p.reference[a]))));
+      inSessionVsPre[a] = round2(p.sampleMeans.reduce((s, m) => s + m[a], 0) / p.sampleMeans.length - outBefore.mean[a]);
+    });
+    const o = outAfter.mean;
+    return {
+      pass: i, before, after, diff: diffValues(before, after),
+      outBefore: outBefore.mean, outAfter: o, delta, idealDelta, E,
+      reference: p.reference, sampleMeans: p.sampleMeans, sampleVsRef, inSessionVsPre,
+      repairCommitted: p.repairCommitted,
+      ceiling: Math.hypot(o.lx, o.ly) >= CEILING_LSB || Math.hypot(o.rx, o.ry) >= CEILING_LSB,
+    };
   }
 
   // --- passi ---------------------------------------------------------------
@@ -410,6 +558,175 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
         preCycleDiffered: !sameValues(record.preCycle.values, record.baseline.values),
       };
     },
+
+    // --- R1-X (docs/hw-probe-bdm040.md) --------------------------------------
+
+    // X-idle (sola lettura): mani lontane per `ms`. Per secondo mediana e
+    // escursione di ogni asse in LSB; deriva = mediana dell'ultimo minuto meno
+    // quella del primo (con una corsa corta, il primo e l'ultimo quinto).
+    async 'X-idle'({ ms = P.idleMs } = {}) {
+      const t0 = conn.source.now();
+      const raw = [];
+      const unsubscribe = conn.source.subscribe(() => {
+        const s = conn.source.sticks;
+        raw.push({ t: reportTimeOf(conn.source) - t0, lx: s.lx * LSB, ly: s.ly * LSB, rx: s.rx * LSB, ry: s.ry * LSB });
+      });
+      try {
+        await clock.sleep(ms);
+      } finally {
+        unsubscribe();
+      }
+      if (raw.length < 40) throw new StepAbort('no input reports during X-idle');
+      const bySecond = new Map();
+      for (const r of raw) {
+        const k = Math.floor(r.t / 1000);
+        if (!bySecond.has(k)) bySecond.set(k, []);
+        bySecond.get(k).push(r);
+      }
+      const perSecond = [...bySecond.entries()].sort((a, b) => a[0] - b[0]).map(([s, rs]) => ({
+        s, n: rs.length,
+        median: Object.fromEntries(CENTER_AXES.map(a => [a, round2(median(rs.map(r => r[a])))])),
+        spread: Object.fromEntries(CENTER_AXES.map(a => [a, round2(Math.max(...rs.map(r => r[a])) - Math.min(...rs.map(r => r[a])))])),
+      }));
+      const windowMs = Math.min(60000, ms / 5);
+      const first = raw.filter(r => r.t < windowMs);
+      const last = raw.filter(r => r.t >= ms - windowMs);
+      if (!first.length || !last.length) throw new StepAbort('X-idle: no reports in the first or last window');
+      const drift = Object.fromEntries(CENTER_AXES.map(a => [a, round2(median(last.map(r => r[a])) - median(first.map(r => r[a])))]));
+      const maxSpread = Object.fromEntries(CENTER_AXES.map(a => [a, Math.max(...perSecond.map(r => r.spread[a]))]));
+      return { ms, windowMs, reports: raw.length, perSecond, drift, driftLx: drift.lx, maxSpread };
+    },
+
+    // X-release (sola lettura): `flicksPer` rilasci dello stick sinistro in
+    // ognuna delle 8 direzioni. Mediana dell'arrivo per direzione e differenza
+    // su LX fra direzioni opposte.
+    async 'X-release'({ flicksPer = P.releaseFlicks } = {}) {
+      const plan = [];
+      for (const direction of RELEASE_DIRECTIONS) for (let index = 0; index < flicksPer; index++) plan.push({ direction, index });
+      const rows = await flicks('X-release', plan);
+      const byDirection = RELEASE_DIRECTIONS.map(d => {
+        const mine = rows.filter(r => r.direction === d.name);
+        return { direction: d.name, landed: mine.filter(r => r.landing).length, median: landingMedian(mine) };
+      });
+      const opposite = [];
+      for (let i = 0; i < 4; i++) {
+        const a = byDirection[i], b = byDirection[i + 4];
+        opposite.push({ pair: [a.direction, b.direction], lxDiff: a.median && b.median ? round2(Math.abs(a.median[0] - b.median[0])) : null });
+      }
+      const diffs = opposite.map(o => o.lxDiff).filter(Number.isFinite);
+      return {
+        flicksPer, flicks: rows, byDirection, opposite,
+        maxOppositeLxDiff: diffs.length ? Math.max(...diffs) : null,
+        missed: rows.filter(r => !r.landing).length,
+      };
+    },
+
+    // X-pass: `passes` passate come H-b, ognuna dalla stessa baseline
+    // (restaurata con [12,1] e riletta dopo ogni passata). Errore di cattura
+    // E = (Δ − idealΔ) / u in LSB per asse. Una passata che lascia un'uscita
+    // ≥15% ferma il passo (dopo il restauro): si spegne il controller.
+    async 'X-pass'({ passes = P.xPasses, samples = 12 } = {}) {
+      const he = heHere();
+      const u = slopesFrom(he);
+      if (!he || !u.lx) throw new StepAbort('run H-e on this connection first: X-pass needs its slope (u) on LX', { refused: true });
+      await guardWrite('X-pass');
+      const target = baselineIsThisController() ? record.baseline.values : conn.baseline.values;
+      const runs = [];
+      const summary = () => ({ u, heAt: he.at, target, passes: runs });
+      try {
+        for (let i = 1; i <= passes; i++) {
+          if (i > 1) await guardWrite('X-pass', { ask: false });
+          const before = await read(`before X-pass ${i}`);
+          await hold('the X-pass measurement');
+          const outBefore = await measure();
+          if (!outBefore) throw new StepAbort(`no input reports before X-pass ${i}`);
+          const p = await pass(samples);
+          const after = await read(`after X-pass ${i}`);
+          const outAfter = await measure();
+          if (!outAfter) throw new StepAbort(`no input reports after X-pass ${i}: the restore did not run, power-cycle the controller`);
+          const row = analyzePass(i, before.values, after.values, outBefore, outAfter, p, u);
+          runs.push(row);
+          await write(target);
+          const back = await read(`restore after X-pass ${i}`);
+          row.restoredExact = sameValues(back.values, target);
+          if (!row.restoredExact) throw new StepAbort(`the restore after X-pass ${i} did not read back exactly: stop and power-cycle the controller`);
+          if (row.ceiling) return { ...summary(), stoppedAtCeiling: i };
+        }
+      } catch (error) {
+        error.partial = summary();
+        throw error;
+      }
+      return { ...summary(), stoppedAtCeiling: null };
+    },
+
+    // X-fix: da una lettura fresca scrive il centro sinistro ideale
+    // (LX + uscita × u; LY solo se |uscita| ≥ 1 LSB), con la regola
+    // checkFixWrite. Poi rilettura, uscita subito, dopo `fixWaitMs` e la
+    // mediana degli arrivi di `count` rilasci. Lascia la RAM corretta: X-replug
+    // e lo spegnimento finale la riportano alla baseline.
+    async 'X-fix'({ count = P.fixFlicks } = {}) {
+      const he = heHere();
+      const u = slopesFrom(he);
+      if (!he || !u.lx) throw new StepAbort('run H-e on this connection first: X-fix needs its slope (u) on LX', { refused: true });
+      await guardWrite('X-fix');
+      const snap = await read('before X-fix');
+      await hold('the X-fix measurement', { centered: false });
+      const out = await measure();
+      if (!out) throw new StepAbort('no input reports before X-fix');
+      const values = [...snap.values];
+      const correction = { lx: Math.round(out.mean.lx * u.lx), ly: 0 };
+      values[8] += correction.lx;
+      let lySkipped = null;
+      if (Math.abs(out.mean.ly) < 1) lySkipped = 'LY output under 1 LSB';
+      else if (fixFitRefusal(he.perAxis.ly, 'LY')) lySkipped = fixFitRefusal(he.perAxis.ly, 'LY');
+      else {
+        correction.ly = Math.round(out.mean.ly * u.ly);
+        values[9] += correction.ly;
+      }
+      const data = { u: { lx: u.lx, ly: u.ly }, from: snap.values, outBefore: out.mean, correction, lySkipped, target: values };
+      const check = checkFixWrite({
+        step: 'X-fix', values, snapshot: snap.values, snapshots: conn.snapshots,
+        he: { connection: he.connection, perAxis: he.perAxis }, connectionId: conn.id,
+      });
+      if (!check.ok) throw new StepAbort(`refused write: ${check.reason}`, { refused: true, ...data });
+      await writeModuleCal(conn.ds5, values);
+      await clock.sleep(P.writeSettleMs);
+      const back = await read('after X-fix');
+      const outNow = await measure();
+      await clock.sleep(P.fixWaitMs);
+      const outLater = await measure();
+      const plan = Array.from({ length: count }, (_, i) => ({ direction: RELEASE_DIRECTIONS[i % RELEASE_DIRECTIONS.length], index: 0 }));
+      const rows = await flicks('X-fix', plan);
+      return {
+        ...data, after: back.values, exact: sameValues(values, back.values), diff: diffValues(values, back.values),
+        outNow: outNow?.mean ?? null, outLater: outLater?.mean ?? null, waitMs: P.fixWaitMs,
+        flicks: rows, landingMedian: landingMedian(rows), landed: rows.filter(r => r.landing).length,
+      };
+    },
+
+    // X-replug (sola lettura), su una NUOVA connessione dopo aver staccato e
+    // riattaccato il cavo SENZA spegnere: [12,2] e uscita uguali all'ultima
+    // lettura della connessione precedente? Risponde a H11 per la RAM. Serve
+    // la prova che sia lo stesso controller (seriali noti e uguali).
+    async 'X-replug'() {
+      if (!prev) throw new StepAbort('unplug the USB cable, plug it back in (no power-off), Connect and run the preflight first');
+      const same = sameIdentity(conn.identity, prev.identity);
+      if (same === false) throw new StepAbort('a different controller is connected');
+      if (same !== true) throw new StepAbort('serial unavailable, cannot confirm same controller', { sameController: null });
+      const previous = prev.snapshots.at(-1);
+      if (!previous) throw new StepAbort('the previous connection has no [12,2] read to compare with');
+      if (!(await confirm('X-replug', 'X-replug: confirm that you only unplugged the USB cable and plugged it back in, without turning the controller off.')))
+        throw new StepAbort('not confirmed: after a power-off this answers H-f, not H11', { refused: true });
+      const r = await read('after replug');
+      const out = await measure();
+      return {
+        previousConnection: prev.id, values: r.values, previous,
+        identicalToPrevious: sameValues(r.values, previous), diff: diffValues(previous, r.values),
+        out: out?.mean ?? null, outVsPrevious: outDelta(prev.lastOut, out),
+        previousDiffersFromBaseline: record.baseline ? !sameValues(previous, record.baseline.values) : null,
+        matchesBaseline: record.baseline ? sameValues(r.values, record.baseline.values) : null,
+      };
+    },
   };
 
   async function run(id, opts = {}) {
@@ -422,6 +739,8 @@ export function createProbe({ hostname, clock, confirm, log = () => {}, now = ()
       entry.ok = true;
     } catch (error) {
       entry.error = error.message;
+      // Ciò che un passo a più fasi aveva già misurato prima di fermarsi.
+      if (error.partial) Object.assign(entry, error.partial);
       if (error instanceof StepAbort) Object.assign(entry, error.data);
       else {
         entry.hidError = true;
@@ -571,6 +890,8 @@ export function evaluate(record) {
     else if (!ok) reasons.push('A/B: 4 samples scatter more or leave a larger residual than 12');
   }
 
+  const r1x = evaluateR1X(record, last);
+
   const core = ['readStable', 'tracksCalib', 'restoreExact', 'revertsOnPowerCycle'];
   const readback = !pre || !locked || poisoned || core.some(k => verdict[k] === 'fail') ? 'no-go'
     : core.every(k => verdict[k] === 'pass') ? 'go' : 'incomplete';
@@ -581,7 +902,110 @@ export function evaluate(record) {
     sampleCut: verdict.fourSamples === 'pass' ? 'candidate (needs the simulator gates too)' : 'keep 12',
     verdict,
     reasons,
+    r1x,
     ranSteps: [...new Set(record.steps.map(s => s.id))],
     fields: MODULE_FIELDS,
+  };
+}
+
+// Regole di R1-X (docs/hw-probe-bdm040.md, "Decision rules"). Come evaluate:
+// una lettura meccanica del diario, il verdetto lo scrive Martino. Ogni voce è
+// 'incomplete' finché manca un passo che la regola richiede.
+export function evaluateR1X(record, last) {
+  const reasons = [];
+  const idle = last('X-idle');
+  const release = last('X-release');
+  const xp = last('X-pass');
+  const fix = last('X-fix');
+  const replug = last('X-replug');
+  // La H-e usata da X-pass (stessa connessione), altrimenti l'ultima riuscita.
+  const he = (xp && [...record.steps].reverse().find(s => s.id === 'H-e' && s.ok && s.connection === xp.connection)) || last('H-e');
+
+  // X1: errore di cattura su LX.
+  let x1;
+  const passes = xp?.passes ?? [];
+  if (!xp) { x1 = 'incomplete'; reasons.push('X1: X-pass missing'); }
+  else if (!idle) { x1 = 'incomplete'; reasons.push('X1: X-idle missing (the rule needs left X still within 1 LSB)'); }
+  else if (passes.some(p => ['ly', 'rx', 'ry'].some(a => p.E[a] === null))) {
+    x1 = 'incomplete'; reasons.push('X1: H-e gave no slope on LY, RX or RY, so their E cannot be checked');
+  } else {
+    const big = passes.filter(p => Math.abs(p.E.lx) >= 4);
+    const signs = new Set(big.map(p => Math.sign(p.E.lx)));
+    const strong = big.filter(p => Math.abs(p.outAfter.lx + p.E.lx) <= 1);
+    const conds = {
+      idleStill: Math.abs(idle.driftLx) <= 1,
+      threeSameSign: strong.length >= 3 && signs.size === 1,
+      othersClean: passes.every(p => ['ly', 'rx', 'ry'].every(a => Math.abs(p.E[a]) <= 1)),
+      sampledWhereStill: passes.every(p => CENTER_AXES.every(a => p.sampleVsRef[a] <= 1)),
+    };
+    if (!conds.idleStill) reasons.push(`X1: left X drifted ${idle.driftLx} LSB in X-idle (more than 1)`);
+    if (!conds.threeSameSign) reasons.push(`X1: ${strong.length} of ${passes.length} passes with |E| ≥ 4 LSB on LX and the output after within 1 LSB of −E${signs.size > 1 ? ', with mixed signs' : ''}`);
+    if (!conds.othersClean) reasons.push('X1: |E| above 1 LSB on LY or the right stick');
+    if (!conds.sampledWhereStill) reasons.push('X1: a sample window mean is more than 1 LSB from the in-session reference');
+    if (Object.values(conds).every(Boolean)) x1 = 'confirmed';
+    else if (xp.stoppedAtCeiling && !conds.threeSameSign) {
+      x1 = 'inconclusive'; reasons.push(`X1: X-pass stopped at the 15% ceiling after pass ${xp.stoppedAtCeiling}`);
+    } else x1 = 'not-confirmed';
+  }
+
+  // Fix works: X-fix rilegge esatto e l'uscita LX resta entro 1 LSB da 0.
+  let fixWorks;
+  if (!fix) { fixWorks = 'incomplete'; reasons.push('Fix: X-fix missing'); }
+  else if (!fix.outNow || !fix.outLater || !fix.landingMedian) { fixWorks = 'incomplete'; reasons.push('Fix: an X-fix measurement or the landings are missing'); }
+  else {
+    const ok = fix.exact && Math.abs(fix.outNow.lx) <= 1 && Math.abs(fix.outLater.lx) <= 1 && Math.abs(fix.landingMedian[0]) <= 1;
+    fixWorks = ok ? 'yes' : 'no';
+    if (!fix.exact) reasons.push('Fix: the read after the X-fix write differs from what was written');
+    else if (!ok) reasons.push(`Fix: left X not within 1 LSB of 0 (now ${fix.outNow.lx}, later ${fix.outLater.lx}, landings ${fix.landingMedian[0]})`);
+  }
+
+  // X2: mappatura non lineare o bordi asimmetrici (H-e su LX, bordi letti).
+  let x2;
+  const lxFit = he?.perAxis?.lx;
+  if (!lxFit || lxFit.unitsPerLsb === null) { x2 = 'incomplete'; reasons.push('X2: no H-e fit on LX'); }
+  else {
+    const side = sign => fitSlope(lxFit.points.filter(pt => Math.sign(pt.delta) === sign)).lsbPerUnit;
+    const pos = lxFit.points.some(pt => pt.delta > 0) ? side(1) : null;
+    const neg = lxFit.points.some(pt => pt.delta < 0) ? side(-1) : null;
+    const slopeAsym = pos !== null && neg !== null && Math.max(Math.abs(pos), Math.abs(neg)) > 0
+      ? Math.abs(pos - neg) / Math.max(Math.abs(pos), Math.abs(neg)) : null;
+    const v = record.baseline?.values;
+    const up = v ? v[4] - v[8] : null, down = v ? v[8] - v[0] : null;
+    const edgeAsym = v && Math.max(Math.abs(up), Math.abs(down)) > 0 ? Math.abs(up - down) / Math.max(Math.abs(up), Math.abs(down)) : null;
+    const hits = [];
+    if (lxFit.r2 === null || lxFit.r2 < 0.9) hits.push(`H-e LX R² ${lxFit.r2} < 0.9`);
+    if (slopeAsym !== null && slopeAsym > 0.25) hits.push(`+/− slopes differ by ${Math.round(slopeAsym * 100)}%`);
+    if (edgeAsym !== null && edgeAsym > 0.1) hits.push(`(LR − LX) and (LX − LL) differ by ${Math.round(edgeAsym * 100)}%`);
+    x2 = hits.length ? 'yes' : slopeAsym === null || edgeAsym === null ? 'incomplete' : 'no';
+    for (const h of hits) reasons.push(`X2: ${h}`);
+    if (!hits.length && x2 === 'incomplete') reasons.push('X2: H-e lacks points on one side of LX, or no baseline read');
+  }
+
+  // X3: lo stick si muove da solo, o l'arrivo dipende dalla direzione.
+  const idleMoves = idle ? Math.abs(idle.driftLx) > 2 : null;
+  const releaseDepends = release && release.maxOppositeLxDiff !== null ? release.maxOppositeLxDiff > 2 : null;
+  const x3 = idleMoves || releaseDepends ? 'yes' : idleMoves === false && releaseDepends === false ? 'no' : 'incomplete';
+  if (idleMoves) reasons.push(`X3: left X drifted ${idle.driftLx} LSB in X-idle (more than 2)`);
+  if (releaseDepends) reasons.push(`X3: landing medians on left X differ by ${release.maxOppositeLxDiff} LSB between opposite directions`);
+  if (x3 === 'incomplete') reasons.push('X3: X-idle or X-release missing');
+
+  // X4 (= H0 su questo controller): le medie in sessione contro l'uscita prima.
+  let x4;
+  if (!passes.length) { x4 = 'incomplete'; reasons.push('X4: no X-pass'); }
+  else {
+    const worst = Math.max(...passes.map(p => Math.max(...CENTER_AXES.map(a => Math.abs(p.inSessionVsPre[a])))));
+    x4 = worst > 2 ? 'yes' : 'no';
+    if (x4 === 'yes') reasons.push(`X4: in-session window means differ from the pre-session output by ${round2(worst)} LSB`);
+  }
+
+  // X-replug: H11 per la RAM.
+  let h11;
+  if (!replug) h11 = 'incomplete';
+  else if (!replug.previousDiffersFromBaseline) { h11 = 'inconclusive'; reasons.push('X-replug: RAM equalled the baseline before the unplug, so nothing could be lost'); }
+  else h11 = replug.identicalToPrevious ? 'kept' : 'lost';
+
+  return {
+    label: 'R1-X (docs/hw-probe-bdm040.md); against the simulator it is model-verified',
+    x1, fixWorks, x2, x3, x4, replugKeepsRam: h11, reasons,
   };
 }

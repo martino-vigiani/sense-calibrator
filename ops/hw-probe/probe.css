@@ -3,9 +3,11 @@
 body { max-width: 60rem; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
 h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
 h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+h3 { font-size: .95rem; margin: 1.25rem 0 .4rem; }
 section { border-top: 1px solid #ccc; }
 .warn { border: 2px solid #111; padding: .6rem .8rem; }
 .status { font-family: ui-monospace, monospace; font-size: .9rem; }
+.prompt { font-size: 1.1rem; font-weight: 600; min-height: 1.5em; }
 .steps { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 button { font: inherit; padding: .4rem .7rem; border: 1px solid #111; background: #fff; color: #111; cursor: pointer; }
 button[data-write] { border-width: 2px; }

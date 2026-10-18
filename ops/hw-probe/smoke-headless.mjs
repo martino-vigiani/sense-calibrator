@@ -11,7 +11,8 @@
 // 2. su localhost, con un navigator.hid finto sostenuto da
 //    ops/sim/fake-dualsense.mjs (tempo reale), i pulsanti di scrittura restano
 //    disabilitati finché non si arma, il preflight legge [12,2], H-b e H-c
-//    passano con le conferme accettate, e il JSON non contiene il seriale.
+//    passano con le conferme accettate, X-pass rifiuta senza H-e, e il JSON
+//    non contiene il seriale.
 // Tutto "model-verified": il controller è il modello, non un DualSense.
 
 const [, , base = 'http://localhost:8790'] = process.argv;
@@ -70,6 +71,9 @@ try {
   await page.waitForFunction(() => /Connection 1/.test(document.getElementById('conn-status').textContent));
   check(await page.isEnabled('[data-step="preflight"]'), 'connected: preflight enabled');
   check(await page.isDisabled('[data-step="H-b"]'), 'connected but disarmed: H-b disabled');
+  check(await page.isDisabled('[data-step="X-pass"]') && await page.isDisabled('[data-step="X-fix"]'), 'connected but disarmed: X-pass and X-fix disabled');
+  check(await page.isEnabled('[data-step="X-idle"]') && await page.isEnabled('[data-step="X-replug"]'), 'connected: read-only R1-X steps enabled');
+  check(await page.getAttribute('#prompt', 'role') === 'status', 'the flick prompt is a status region');
 
   const runStep = async step => {
     await page.click(`[data-step="${step}"]`);
@@ -89,6 +93,8 @@ try {
 
   check(/done/.test(await runStep('H-b')), 'H-b done');
   check(/done/.test(await runStep('H-c')), 'H-c done');
+  // X-pass senza H-e su questa connessione: rifiutato prima di chiedere conferma.
+  check(/stopped.*run H-e on this connection first/.test(await runStep('X-pass')), 'X-pass refused without H-e on this connection');
   check(dialogs.length === 2 && /PERMANENTLY/.test(dialogs[1]), 'one confirmation per write step, H-c flagged permanent');
   const writes = await page.evaluate(() => window.__fakeDev.moduleCounts.write);
   check(writes === 1, `exactly one [12,1] write (${writes})`);

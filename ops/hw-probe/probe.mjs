@@ -24,13 +24,14 @@ async function main() {
     return;
   }
 
-  const [{ DS5, HID_FILTERS }, { parseSticks }, { createStickSource }, { createProbe }] = await Promise.all([
+  const [{ DS5, HID_FILTERS }, { parseSticks }, { createStickSource }, { createProbe, PROBE_DEFAULTS }] = await Promise.all([
     import('../../js/ds5.js'),
     import('../../js/calib/measure.js'),
     import('../../js/calib/sampling.js'),
     import('./protocol.mjs'),
   ]);
 
+  const PROBE_IDLE_MS = PROBE_DEFAULTS.idleMs;
   $('probe').hidden = false;
   const logEl = $('log');
   const log = msg => {
@@ -44,7 +45,10 @@ async function main() {
   };
   // Conferma per passo con il dialogo nativo: una scelta esplicita a ogni
   // scrittura, non un'impostazione ricordata.
-  const probe = createProbe({ hostname: location.hostname, clock, confirm: async (step, text) => window.confirm(text), log });
+  // La direzione dei rilasci (X-release, X-fix) va in un elemento visibile:
+  // il probe aspetta l'arrivo, non un clic.
+  const prompt = async p => { $('prompt').textContent = p ? p.text : ''; };
+  const probe = createProbe({ hostname: location.hostname, clock, confirm: async (step, text) => window.confirm(text), prompt, log });
 
   let device = null;
   let ds5 = null;
@@ -61,7 +65,7 @@ async function main() {
       ? `Armed for connection ${probe.connectionId}. A reconnect disarms.`
       : 'Disarmed. Read-only steps only.';
     const ev = probe.evaluate();
-    $('evaluation').textContent = JSON.stringify({ readbackRestore: ev.readbackRestore, subLsbNudge: ev.subLsbNudge, sampleCut: ev.sampleCut, verdict: ev.verdict, reasons: ev.reasons }, null, 2);
+    $('evaluation').textContent = JSON.stringify({ readbackRestore: ev.readbackRestore, subLsbNudge: ev.subLsbNudge, sampleCut: ev.sampleCut, verdict: ev.verdict, reasons: ev.reasons, r1x: ev.r1x }, null, 2);
     $('record').textContent = JSON.stringify(probe.record, null, 2);
     $('download').disabled = probe.record.steps.length === 0;
   }
@@ -121,11 +125,18 @@ async function main() {
       busy = true;
       refresh();
       const step = button.dataset.step;
-      $('step-status').textContent = `${step}: running, hands off the sticks…`;
+      $('step-status').textContent = step === 'X-release' || step === 'X-fix'
+        ? `${step}: running, hands off the sticks except when the prompt above asks for a flick…`
+        : step === 'X-idle' ? `${step}: running for ${Math.round(PROBE_IDLE_MS / 60000)} minutes, hands off the sticks…`
+          : `${step}: running, hands off the sticks…`;
       try {
         const opts = step === 'AB' ? { reps: Math.max(1, Math.min(10, Number($('ab-reps').value) || 5)) } : {};
         const entry = await probe.run(step, opts);
         $('step-status').textContent = entry.ok ? `${step}: done.` : `${step}: stopped. ${entry.error}`;
+        if (step === 'X-pass' && entry.stoppedAtCeiling)
+          $('step-status').textContent += ` Pass ${entry.stoppedAtCeiling} left an output at 15% or more: stop R1-X here, power-cycle, then H-f (2).`;
+        if (step === 'X-fix' && entry.ok)
+          $('step-status').textContent += ' Next: unplug the USB cable, wait 5 s, plug it back in (no power-off), Connect, Preflight, then X-replug.';
         if (step === 'H-f-prepare' && entry.ok)
           $('step-status').textContent += ' Now turn the controller off (hold PS for 10 s), turn it on, reconnect, run the preflight, then H-f (2).';
       } finally {

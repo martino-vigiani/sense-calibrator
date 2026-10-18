@@ -33,7 +33,7 @@ export const MAX_CENTER_DELTA = 512;
 // Passi che scrivono nella calibrazione del controller (RAM). H-c e H-d sono
 // trattati come possibilmente permanenti (piano R1) e chiedono una seconda
 // conferma esplicita.
-export const WRITE_STEPS = new Set(['H-b', 'H-c', 'H-d', 'H-e', 'AB', 'restore']);
+export const WRITE_STEPS = new Set(['H-b', 'H-c', 'H-d', 'H-e', 'AB', 'restore', 'X-pass', 'X-fix']);
 export const POSSIBLY_PERMANENT_STEPS = new Set(['H-c', 'H-d']);
 
 // Stato di armamento legato a una connessione: una riconnessione (nuovo DS5)
@@ -90,4 +90,54 @@ export function checkWriteValues(values, snapshots, { maxCenterDelta = MAX_CENTE
       ? `a center moves more than ${maxCenterDelta} units from every value read`
       : 'range fields (LL…RB) differ from every value read: the probe never writes a range it did not read',
   };
+}
+
+// Regola di scrittura di X-fix (R1-X, docs/hw-probe-bdm040.md). La correzione
+// di un errore di cattura di ~20 LSB può superare MAX_CENTER_DELTA a una scala
+// sconosciuta, quindi X-fix ha una regola sua, separata e più stretta su tutto
+// il resto: solo LX/LY, solo con la pendenza misurata da H-e su QUESTA
+// connessione (R² ≥ 0.9, |u| ≥ 2 unità per LSB), solo fino a 24 LSB × |u|, e
+// bordi del range e centri destri identici alla lettura da cui la correzione è
+// stata calcolata. Ogni altro passo resta su checkWriteValues (±512): questa
+// funzione rifiuta qualunque passo che non sia X-fix.
+export const FIX_STEP = 'X-fix';
+export const FIX_MAX_LSB = 24;
+export const FIX_MIN_R2 = 0.9;
+export const FIX_MIN_UNITS = 2;
+const FIX_AXES = [['lx', 'LX', 8], ['ly', 'LY', 9]];
+
+const isValues = v => Array.isArray(v) && v.length === 12 && v.every(x => Number.isInteger(x) && x >= 0 && x <= 0xffff);
+
+// La pendenza di H-e su un asse è adatta a una correzione? null = sì,
+// altrimenti il motivo. `fit` è perAxis[axis] di H-e ({ unitsPerLsb, r2 }).
+export function fixFitRefusal(fit, name) {
+  if (!fit || !Number.isFinite(fit.unitsPerLsb) || !Number.isFinite(fit.r2) || fit.r2 < FIX_MIN_R2)
+    return `H-e on this connection did not fit ${name} with R² ≥ ${FIX_MIN_R2}`;
+  if (Math.abs(fit.unitsPerLsb) < FIX_MIN_UNITS) return `H-e on this connection found under ${FIX_MIN_UNITS} units per LSB on ${name}`;
+  return null;
+}
+
+// step: il passo che chiede la scrittura. values: i 12 valori da scrivere.
+// snapshot: la lettura [12,2] da cui sono stati calcolati; snapshots: le
+// letture valide di questa connessione (snapshot deve essere una di esse).
+// he: { connection, perAxis } della H-e usata; connectionId: questa connessione.
+export function checkFixWrite({ step, values, snapshot, snapshots, he, connectionId }) {
+  const refuse = reason => ({ ok: false, reason });
+  if (step !== FIX_STEP) return refuse(`only ${FIX_STEP} may use the center-correction rule; ${step} keeps the ±${MAX_CENTER_DELTA} limit`);
+  if (!isValues(values)) return refuse('values must be 12 integers in 0..65535');
+  if (!isValues(snapshot) || !snapshots?.some(s => isValues(s) && s.every((v, i) => v === snapshot[i])))
+    return refuse('the correction must start from a [12,2] read on this connection');
+  if (!he || he.connection !== connectionId || !he.perAxis) return refuse('no H-e on this connection: the scale (units per LSB) is unknown');
+  if (!snapshot.slice(0, 8).every((v, i) => v === values[i])) return refuse('range fields (LL…RB) must stay identical to the read');
+  if (values[10] !== snapshot[10] || values[11] !== snapshot[11]) return refuse('right-stick centers (RX, RY) must stay identical to the read');
+  for (const [axis, name, idx] of FIX_AXES) {
+    const delta = values[idx] - snapshot[idx];
+    if (delta === 0) continue;
+    const fit = he.perAxis[axis];
+    const why = fixFitRefusal(fit, name);
+    if (why) return refuse(why);
+    const max = FIX_MAX_LSB * Math.abs(fit.unitsPerLsb);
+    if (Math.abs(delta) > max) return refuse(`${name} moves ${Math.abs(delta)} units, more than ${FIX_MAX_LSB} LSB × |u| = ${Math.round(max)}`);
+  }
+  return { ok: true };
 }

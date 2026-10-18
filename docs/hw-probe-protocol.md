@@ -11,6 +11,9 @@ read-back in the product.
 - Firmware model: `ops/sim/fake-dualsense.mjs` (`MODULE_DEFAULTS`)
 - Tests: `test/hw-probe.test.js`, `test/hw-probe-public-surface.test.js`
 
+A follow-up for the left-stick X capture error seen on BDM-040 (the catastrophic Quick results)
+is in [hw-probe-bdm040.md](hw-probe-bdm040.md) (R1-X); it starts only after R1 is GO.
+
 ## Why
 
 Upstream (dualshock-tools, `ds5-controller.js`) reads the calibration in controller RAM with

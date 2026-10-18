@@ -28,7 +28,7 @@ input reports use while a calibration session is open).
 | `fit.mjs` | Grid fit of the firmware/noise model with a minimal emulator that uses the real stop rule |
 | `fits.json` | Top-3 fitted parameter sets (`best`, `alt1`, `alt2`) |
 | `variants.mjs` | Named `params` overrides; `baseline` must stay empty. `legacyStop` restores the stop rule before quick-stopping-policy (paired comparisons, pre-refactor goldens); `plateau1` is the plateau-continuation candidate |
-| `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal` |
+| `scenarios/*.mjs` | Extra scenarios for `run.mjs --scenario` (WS1): `forced-hold`, `rim-hold`, `moving-hold`, `noisy-hold`, `replug`, `already-centered`, `one-step`. Disturbances use their own random generator, so sessions stay paired by index with `normal`. Also `left-x-capture` (BDM-040 left-X capture error, see below; not part of the release gates) |
 | `safety-gates.mjs` | WS1 safety gates on two paired runs: effective outcome, pass-rate and worse-than-start deltas (cluster bootstrap), sessions ≥15% (and how many are not ≥15% without the disturbance), commands on starts below 1.2, 12 samples per committed pass, `calibSample` after a timeout (instrumented in `harness.mjs`), replug checks, durations |
 | `equivalence.mjs` | Gate 2 (`--restricted 1`) compares every field of 400 normal and 400 hold synthetic sessions, seed 7, to the reviewed module golden, excluding only telemetry-only `passXY`. The full historical pre-refactor comparison remains available without `--restricted`. `restrictedCompare` and `ALLOWED_OUTCOME_CHANGES` describe that historical diagnostic, not an equivalence claim for the new timing. |
 | `release-gates.mjs` | Release gates of the plan §4.2 in one command: builds the baseline (and optionally WS1) tree with `git archive` plus this `ops/sim`, runs the fit × seed × scenario matrix on both trees (cached by a source hash), and prints every number next to its threshold with PASS/FAIL, plus gate 2 (restricted equivalence), gate 4 (real-data replay) and gate 5 (report v2 figures) |
@@ -250,6 +250,70 @@ Two side effects of the filter that the same run shows (model-verified):
   in-session reference; it stays, and depends on H0.
 
 Sessions depend only on `(seed, index)`, so worker count never changes a result.
+
+## Left-X capture error (BDM-040, 2026-10-18)
+
+Scenario `left-x-capture` (`scenarios/left-x-capture.mjs`). **Model-verified, pending hardware check
+R1-X in `docs/hw-probe-bdm040.md`: nothing here says the firmware does this.** It is not in the
+release-gates matrix; that is the plan owner's decision.
+
+**What it models.** The left stick has a persistent capture error on X: each `calibEnd` writes the
+center `B` LSB to the +X side of where the stick rested during the samples, so the output after the
+pass reads about −`B` and Y comes out exact. The fitted random bias of the left stick is switched
+off; the right stick is the normal model. `B` is drawn once per session and moves at each later
+`calibBegin` (jumps of 0, a few LSB, or rarely tens of LSB). With the real population only the
+`BDM-040` templates are used; the synthetic one keeps all of them. It uses only the scenario's own
+generator (`r2`), always the same number of draws, so sessions stay paired by index with `normal`.
+
+**Why.** Telemetry v2, 27 Sep–18 Oct 2026 (aggregates only): on some BDM-040 controllers Quick,
+Guided and Range leave the left stick X toward −X with Y exact, and 5 of the 6 catastrophic
+(≥15%) Quick sessions are BDM-040. The fitted model draws the bias axis and sign at random, so it
+never produces that direction. Parameters come from the aggregates (56 verified passes in 10
+affected visits), not from the rows: the header of the scenario file lists them.
+
+**Fit to the aggregates (model-verified, 714 BDM-040 sessions, seed 1, default params).**
+
+| Quantity | Model | Observed |
+|---|---|---|
+| Passes within ±1 half-LSB | 11% | 7/56 (12.5%) |
+| Bulk (below −1 half-LSB), median | −21 half-LSB | −21 |
+| Passes at −47 half-LSB or beyond | 2.9% | 2/56 (3.6%) |
+| Jumps between consecutive passes: 0 / 1–2 / 3–6 / 7–10 / >10 half-LSB | 34 / 35 / 25 / 2 / 4% | 38 / 28 / 24 / 7 / 3% |
+| First pass ≥15% | 10.3% (68/662) | 4/27 (15%) |
+| Later pass ≥15% | 4.5% | 1/29 (3%) |
+| Sessions with final true residual ≥15% | 16.7% (seeds 2 and 3: 16.1%, 16.8%) | 18.5% (scratch model: 16%) |
+
+What was tuned (7 runs of 714 sessions on the real BDM-040 templates; the aggregates above were
+the target): `zeroP`, the share of sessions with `B`≈0, 0.12 → 0.25, because sessions with no error
+stop after 1–2 passes, so a 12% share of sessions gave only 4–5% of passes within ±1 half-LSB; the
+lognormal `sigma` 0.55 (median fixed at the observed 10.5 LSB), which brings the tail and the
+session rate close (sigma 0.45 gave 19% with the first jump values, 0.35 gave 16%, with a thinner
+tail than observed); the jump probabilities 0.4 / ±1–5 LSB → 0.60 / ±0.5–3.5 LSB, because the
+fake's own firmware noise (`sf`) and the 8-bit lattice already add spread: the first values gave
+22% of jumps of 7–10 half-LSB against 7% observed and only 22% of zero jumps against 38%. The
+first-pass ≥15% share stays under the observed one (4/27 is a small sample); raising it needs a
+heavier tail and overshoots the session rate.
+
+**What the code does with it (model-verified, 714 sessions, seed 1).**
+
+| `maxPasses` | Final true residual ≥15% | `catastrophic` outcome | Mean `calibEnd`s | Final true residual <1.25% | Centered outcome |
+|---|---|---|---|---|---|
+| 4 (default) | 16.7% | 16.5% | 2.48 | 22.3% | 21.1% |
+| 2 | 12.2% | 12.0% | 1.56 | 21.6% | 20.7% |
+| 1 | 9.7% | 9.5% | 0.93 | 22.1% | 18.9% |
+
+Other outcomes at the default: worse-than-start 30.8%, residual-deterministic 12.3%, residual 5.7%,
+already-centered 3.4%, preflight 3.2%, lost-ground 2.9%, within-1-step 1.1%, stalled 1.0%, worn
+1.0%, moved 0.8%. Of the 119 sessions ≥15% at the default, 97 end on left −X, 21 on left +X (a
+rare large jump crosses zero) and 1 elsewhere. The synthetic population gives the same picture (15.8%
+catastrophic at 4 passes, 12.0% at 2, 9.7% at 1). Going from 1 to 4 passes adds 7 points of final ≥15% (9.7% → 16.7%) and 2 points of centered outcome (18.9% → 21.1%): 68 of
+the 119 sessions at the default are over the ceiling after pass 1 already. More passes also
+keep writing the same error, which is why the model cannot show an advantage for them here.
+
+Run it with `node ops/sim/run.mjs --n 714 --scenario left-x-capture --workers 4 --out left-x.json`
+(real population needs the telemetry; add `--population synthetic` without it). The test
+`test/sim-left-x-capture.test.js` covers the draw, the pairing and the bias placement on the
+synthetic population.
 
 ## Reference numbers (seed 1, `best` fit, 1,785 sessions, model-verified)
 

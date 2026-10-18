@@ -52,6 +52,17 @@
         <button type="button" data-step="H-f-prepare" disabled>H-f (1): snapshot before power-cycle</button>
         <button type="button" data-step="H-f-check" disabled>H-f (2): check after reconnect</button>
       </div>
+      <h3>R1-X (BDM-040)</h3>
+      <p>Only after R1 is GO on this controller. Protocol: <code>docs/hw-probe-bdm040.md</code>.
+        X-pass and X-fix need H-e on <strong>this</strong> connection. Hands off both sticks except when a prompt asks for a flick.</p>
+      <div class="steps">
+        <button type="button" data-step="X-idle" disabled>X-idle: 5 min hands off</button>
+        <button type="button" data-step="X-release" disabled>X-release: 8 directions × 3 flicks</button>
+        <button type="button" data-step="X-pass" data-write disabled>X-pass: 5 passes, restore after each</button>
+        <button type="button" data-step="X-fix" data-write disabled>X-fix: write the ideal left center</button>
+        <button type="button" data-step="X-replug" disabled>X-replug: compare after unplug and replug</button>
+      </div>
+      <p id="prompt" class="status prompt" role="status"></p>
       <p id="step-status" class="status" role="status">Idle.</p>
     </section>
 
