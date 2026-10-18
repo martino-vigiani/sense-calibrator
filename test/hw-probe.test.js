@@ -9,9 +9,9 @@ import {
   decodeModuleRead, encodeModuleWrite, isModuleValues, readModuleCal, writeModuleCal,
 } from '../ops/hw-probe/module-cal.mjs';
 import {
-  MAX_CENTER_DELTA, SPARE_PHRASE, arm, checkWriteValues, createArming, isArmed, isLocalProbeHost, writeRefusal,
+  FIX_MAX_LSB, MAX_CENTER_DELTA, SPARE_PHRASE, arm, checkFixWrite, checkWriteValues, createArming, isArmed, isLocalProbeHost, writeRefusal,
 } from '../ops/hw-probe/safety.mjs';
-import { createProbe, evaluate, fitSlope } from '../ops/hw-probe/protocol.mjs';
+import { CEILING_LSB, PROBE_DEFAULTS, PROBE_SCHEMA, RELEASE_DIRECTIONS, createProbe, evaluate, fitSlope } from '../ops/hw-probe/protocol.mjs';
 
 // Probe R1 contro il firmware finto: tutto qui è "model-verified". Dimostra che
 // il probe rispetta le proprie regole di sicurezza e che registra e valuta le
@@ -35,16 +35,28 @@ function connect(clock, dev) {
   return { ds5, source };
 }
 
-function setup({ hostname = 'localhost', confirm = async () => true, ...devOpts } = {}) {
+// Un rilascio dello stick sinistro del finto nella direzione chiesta: spinta
+// di `amp` LSB per 120 ms, poi ritorno a riposo (dove lo stick si ferma è
+// s.rest, che i test di X3 spostano).
+function flick(dev, clock, p, amp = 100) {
+  // 'any' (il rilascio di X-fix prima della correzione): verso destra.
+  const [vx, vy] = (RELEASE_DIRECTIONS.find(d => d.name === p.direction) ?? RELEASE_DIRECTIONS[0]).v;
+  dev.touches.push({ stick: 0, t0: clock.now() + 100, dur: 120, tail: 40, amp: [vx * amp, vy * amp] });
+}
+
+function setup({ hostname = 'localhost', confirm = async () => true, params = {}, onPrompt = flick, ...devOpts } = {}) {
   const clock = new VClock();
   const dev = makeDev(clock, devOpts);
   const sclock = { sleep: ms => new Promise(r => clock.setTimeout(r, ms)), setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout };
   const confirmations = [];
+  const prompts = [];
   const probe = createProbe({
     hostname,
     clock: sclock,
     confirm: async (step, text) => { confirmations.push({ step, text }); return confirm(step, text); },
+    prompt: async p => { prompts.push(p); if (p) onPrompt?.(dev, clock, p); },
     now: () => 1_700_000_000_000 + clock.now(),
+    params,
   });
   const { ds5, source } = connect(clock, dev);
   probe.attach({ ds5, source, info: { board: 'BDM-030' }, identity: 'serial-A' });
@@ -54,7 +66,7 @@ function setup({ hostname = 'localhost', confirm = async () => true, ...devOpts 
     const c = connect(clock, target);
     probe.attach({ ds5: c.ds5, source: c.source, info: {}, identity });
   };
-  return { clock, dev, probe, run, armNow, reconnect, confirmations };
+  return { clock, dev, probe, run, armNow, reconnect, confirmations, prompts };
 }
 
 const writes = dev => dev.moduleCounts.write;
@@ -531,4 +543,457 @@ test('a failing calibBegin or calibEnd also marks the connection for a power-cyc
       await assertSessionPoisoned(s, r);
     }
   }
+});
+
+/* ------------------------- R1-X (BDM-040, X1…X4) --------------------------- */
+
+// Parametri corti per l'orologio virtuale: la logica è la stessa dei default.
+const XP = { idleMs: 20000, fixWaitMs: 2000, flickTimeoutMs: 4000, releaseFlicks: 2 };
+
+async function r1xReady(opts = {}) {
+  const s = setup({ params: XP, ...opts });
+  assert.equal((await s.run('preflight')).ok, true);
+  s.armNow();
+  const he = await s.run('H-e');
+  assert.equal(he.ok, true, he.error);
+  return s;
+}
+
+async function r1xSequence(opts = {}) {
+  const s = await r1xReady(opts);
+  const out = {};
+  out.idle = await s.run('X-idle');
+  out.release = await s.run('X-release');
+  out.pass = await s.run('X-pass');
+  out.fix = await s.run('X-fix');
+  return { ...s, out };
+}
+
+test('the record schema is sense-hw-probe/2', () => {
+  assert.equal(PROBE_SCHEMA, 'sense-hw-probe/2');
+  const { probe } = setup();
+  assert.equal(probe.record.schema, 'sense-hw-probe/2');
+  assert.match(probe.exportJson(), /"schema": "sense-hw-probe\/2"/);
+});
+
+test('leftXCapture: 0 is the default and the capture lands on left X only (model-verified)', async () => {
+  assert.equal(MODULE_DEFAULTS.leftXCapture, 0);
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  const hb = await s.run('H-b');
+  assert.ok(Math.abs(hb.outAfter.mean.lx + 10) <= 1, `lx after ${hb.outAfter.mean.lx}`);
+  for (const a of ['ly', 'rx', 'ry']) assert.ok(Math.abs(hb.outAfter.mean[a]) <= 1, `${a} after ${hb.outAfter.mean[a]}`);
+});
+
+test('X1: a fixed +X capture on left X is confirmed and X-fix brings the output within 1 LSB (model-verified)', async () => {
+  const { out, probe, dev, prompts } = await r1xSequence({ module: { leftXCapture: 10 } });
+  for (const [k, r] of Object.entries(out)) assert.equal(r.ok, true, `${k}: ${r.error}`);
+
+  assert.equal(out.idle.perSecond.length, XP.idleMs / 1000);
+  assert.ok(Math.abs(out.idle.driftLx) <= 1);
+  assert.equal(out.release.flicks.length, 8 * XP.releaseFlicks);
+  assert.equal(out.release.missed, 0);
+  assert.equal(prompts.filter(p => p?.step === 'X-release').length, 8 * XP.releaseFlicks);
+  assert.equal(prompts.at(-1), null, 'the prompt is cleared at the end');
+
+  const passes = out.pass.passes;
+  assert.equal(passes.length, 5);
+  assert.equal(out.pass.stoppedAtCeiling, null);
+  assert.ok(Math.abs(out.pass.u.lx - MODULE_DEFAULTS.unitsPerLsb) <= 0.05 * MODULE_DEFAULTS.unitsPerLsb, `u ${out.pass.u.lx}`);
+  for (const p of passes) {
+    assert.ok(Math.abs(p.E.lx - 10) <= 1, `pass ${p.pass}: E.lx ${p.E.lx}`);
+    assert.ok(Math.abs(p.outAfter.lx + p.E.lx) <= 1, `pass ${p.pass}: out ${p.outAfter.lx}`);
+    for (const a of ['ly', 'rx', 'ry']) assert.ok(Math.abs(p.E[a]) <= 1, `pass ${p.pass}: E.${a} ${p.E[a]}`);
+    assert.equal(p.sampleMeans.length, 12);
+    assert.ok(p.reference && Number.isFinite(p.reference.lx));
+    assert.equal(p.restoredExact, true, 'restored after every pass');
+    assert.deepEqual(p.before, out.pass.target, 'every pass starts from the baseline');
+  }
+
+  assert.equal(out.fix.exact, true);
+  assert.ok(Math.abs(out.fix.outNow.lx) <= 1 && Math.abs(out.fix.outLater.lx) <= 1, JSON.stringify([out.fix.outNow, out.fix.outLater]));
+  assert.equal(out.fix.landed, PROBE_DEFAULTS.fixFlicks);
+  assert.ok(Math.abs(out.fix.landingMedian[0]) <= 1);
+  assert.deepEqual(out.fix.after.slice(0, 8), out.fix.from.slice(0, 8), 'range edges untouched');
+  assert.deepEqual(out.fix.after.slice(10), out.fix.from.slice(10), 'right centers untouched');
+
+  const r = probe.evaluate().r1x;
+  assert.equal(r.x1, 'confirmed', r.reasons.join('; '));
+  assert.equal(r.fixWorks, 'yes', r.reasons.join('; '));
+  assert.equal(r.x2, 'no', r.reasons.join('; '));
+  assert.equal(r.x3, 'no', r.reasons.join('; '));
+  assert.equal(r.x4, 'no', r.reasons.join('; '));
+  assert.match(r.label, /model-verified/);
+  // Le valutazioni R1 restano quelle di prima.
+  assert.equal(probe.evaluate().verdict.slope, 'pass');
+  assert.equal(unlocks(dev), 0);
+  assert.equal(dev.nvState, 'locked');
+});
+
+test('without a capture error X1 is not confirmed (model-verified)', async () => {
+  const { out, probe } = await r1xSequence();
+  assert.equal(out.pass.ok, true, out.pass.error);
+  for (const p of out.pass.passes) assert.ok(Math.abs(p.E.lx) <= 1, `E.lx ${p.E.lx}`);
+  const r = probe.evaluate().r1x;
+  assert.equal(r.x1, 'not-confirmed');
+  assert.equal(r.x3, 'no');
+});
+
+test('X3: a rest point that creeps while untouched is X3, not X1 (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  // Lo stick scivola su X di 15 LSB al minuto: ~4 LSB fra il primo e l'ultimo quinto dei 20 s.
+  const t0 = s.clock.now();
+  s.dev.touches.push({ stick: 0, t0, dur: 3_600_000, tail: 0, at: (t, ax) => (ax === 0 ? 15 * (t - t0) / 60000 : 0) });
+  const idle = await s.run('X-idle');
+  assert.ok(idle.driftLx > 2, `drift ${idle.driftLx}`);
+  const r = s.probe.evaluate().r1x;
+  assert.equal(r.x3, 'yes');
+  assert.match(r.reasons.join('; '), /X3: left X drifted/);
+});
+
+test('X3: landing medians that depend on the release direction (model-verified)', async () => {
+  const s = await r1xReady({
+    // Dove si ferma dipende da dove arriva: +3 LSB dopo un rilascio verso destra, −3 verso sinistra.
+    onPrompt: (dev, clock, p) => {
+      flick(dev, clock, p);
+      const vx = (RELEASE_DIRECTIONS.find(d => d.name === p.direction) ?? RELEASE_DIRECTIONS[0]).v[0];
+      dev.sticks[0].rest[0] = 2.3 + 3 * Math.sign(Math.round(vx * 10));
+    },
+  });
+  await s.run('X-idle');
+  const rel = await s.run('X-release');
+  assert.equal(rel.ok, true, rel.error);
+  assert.ok(rel.maxOppositeLxDiff > 2, `diff ${rel.maxOppositeLxDiff}`);
+  assert.equal(s.probe.evaluate().r1x.x3, 'yes');
+});
+
+test('X-release records null for a flick that never lands, without hanging (model-verified)', async () => {
+  const s = await r1xReady({ onPrompt: null });
+  const rel = await s.run('X-release', { flicksPer: 1 });
+  assert.equal(rel.ok, true, rel.error);
+  assert.equal(rel.flicks.length, 8);
+  assert.ok(rel.flicks.every(f => f.landing === null && f.missed === 'no-landing'));
+  assert.equal(rel.maxOppositeLxDiff, null);
+  assert.equal(s.probe.evaluate().r1x.x3, 'incomplete');
+});
+
+test('X-pass and X-fix refuse without H-e on this connection, before any command (model-verified)', async () => {
+  const s = setup({ params: XP });
+  await s.run('preflight');
+  s.armNow();
+  for (const id of ['X-pass', 'X-fix']) {
+    const r = await s.run(id);
+    assert.equal(r.ok, false, id);
+    assert.equal(r.refused, true, id);
+    assert.match(r.error, /run H-e on this connection first/, id);
+  }
+  assert.equal(writes(s.dev) + calibCommands(s.dev), 0);
+  assert.equal(s.confirmations.length, 0, 'refused before asking');
+
+  // Una H-e su una connessione precedente non vale.
+  await s.run('H-e');
+  s.reconnect();
+  await s.run('preflight');
+  s.armNow();
+  const w = writes(s.dev), c = calibCommands(s.dev);
+  assert.match((await s.run('X-pass')).error, /run H-e on this connection first/);
+  assert.match((await s.run('X-fix')).error, /run H-e on this connection first/);
+  assert.equal(writes(s.dev), w);
+  assert.equal(calibCommands(s.dev), c);
+});
+
+test('X-pass stops at the 15% ceiling after restoring the baseline (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 25 } });
+  const base = s.dev.moduleValues();
+  const xp = await s.run('X-pass');
+  assert.equal(xp.ok, true, xp.error);
+  assert.equal(xp.passes.length, 1);
+  assert.equal(xp.stoppedAtCeiling, 1);
+  assert.equal(xp.passes[0].ceiling, true);
+  assert.ok(Math.hypot(xp.passes[0].outAfter.lx, xp.passes[0].outAfter.ly) >= CEILING_LSB);
+  assert.equal(xp.passes[0].restoredExact, true);
+  assert.deepEqual(s.dev.moduleValues(), base);
+  assert.equal(s.dev.counts.begin, 1, 'no further pass');
+  const r = s.probe.evaluate().r1x;
+  assert.equal(r.x1, 'incomplete', 'X-idle not run');
+  await s.run('X-idle');
+  assert.equal(s.probe.evaluate().r1x.x1, 'inconclusive');
+});
+
+test('X-pass stops when the restore does not read back exactly (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  s.dev.module.writeApplies = false;
+  const xp = await s.run('X-pass');
+  assert.equal(xp.ok, false);
+  assert.match(xp.error, /restore after X-pass 1 did not read back exactly/);
+  assert.equal(xp.passes.length, 1);
+  assert.equal(xp.passes[0].restoredExact, false);
+  assert.equal(s.dev.counts.begin, 1);
+});
+
+test('X-fix applies a correction beyond ±512 units only under its own rule (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  // H-b lascia LX a circa −10 LSB: la correzione è ~640 unità, oltre MAX_CENTER_DELTA.
+  await s.run('H-b');
+  const fix = await s.run('X-fix');
+  assert.equal(fix.ok, true, fix.error);
+  assert.ok(Math.abs(fix.correction.lx) > MAX_CENTER_DELTA, `correction ${fix.correction.lx}`);
+  assert.equal(fix.exact, true);
+  assert.ok(Math.abs(fix.outNow.lx) <= 1, `now ${fix.outNow.lx}`);
+  // H-c resta sotto ±512 da ogni lettura: uno spostamento come quello di X-fix
+  // (lontano da tutto ciò che è stato letto) è rifiutato.
+  const w = writes(s.dev);
+  const big = [...fix.after]; big[8] -= 1000;
+  const hc = await s.run('H-c', { target: big });
+  assert.equal(hc.ok, false);
+  assert.match(hc.error, /refused write: a center moves more than 512/);
+  assert.equal(writes(s.dev), w);
+});
+
+test('X-fix refuses a correction larger than 24 LSB × |u| and writes nothing (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 30 } });
+  await s.run('H-b');
+  const w = writes(s.dev);
+  const fix = await s.run('X-fix');
+  assert.equal(fix.ok, false);
+  assert.equal(fix.refused, true);
+  assert.match(fix.error, /LX moves \d+ units, more than 24 LSB/);
+  assert.equal(writes(s.dev), w);
+});
+
+test('the X-fix write rule refuses every condition it does not meet', () => {
+  const snap = [10, 20, 30, 40, 50, 60, 70, 80, 32768, 32768, 32768, 32768];
+  const fit = { unitsPerLsb: -64, r2: 0.99 };
+  const he = { connection: 2, perAxis: { lx: fit, ly: fit, rx: fit, ry: fit } };
+  const ok = { step: 'X-fix', values: [...snap], snapshot: snap, snapshots: [snap], he, connectionId: 2 };
+  const withV = patch => { const v = [...snap]; for (const [i, d] of Object.entries(patch)) v[i] += d; return v; };
+  const max = FIX_MAX_LSB * 64;
+  assert.equal(checkFixWrite({ ...ok, values: withV({ 8: max, 9: -max }) }).ok, true);
+  assert.equal(checkFixWrite({ ...ok, values: withV({ 8: 600 }) }).ok, true, 'beyond ±512 is allowed here');
+  for (const [label, patch, pattern] of [
+    ['another step', { step: 'H-c', values: withV({ 8: 600 }) }, /only X-fix/],
+    ['restore with the large delta', { step: 'restore', values: withV({ 8: 600 }) }, /only X-fix/],
+    ['no H-e', { he: null, values: withV({ 8: 64 }) }, /no H-e on this connection/],
+    ['H-e on another connection', { connectionId: 3, values: withV({ 8: 64 }) }, /no H-e on this connection/],
+    ['R² too low on LX', { he: { ...he, perAxis: { ...he.perAxis, lx: { unitsPerLsb: -64, r2: 0.8 } } }, values: withV({ 8: 64 }) }, /did not fit LX with R²/],
+    ['R² too low on LY', { he: { ...he, perAxis: { ...he.perAxis, ly: { unitsPerLsb: -64, r2: 0.5 } } }, values: withV({ 9: 64 }) }, /did not fit LY with R²/],
+    ['no fit on LX', { he: { ...he, perAxis: { ...he.perAxis, lx: { unitsPerLsb: null, r2: null } } }, values: withV({ 8: 64 }) }, /did not fit LX/],
+    ['under 2 units per LSB', { he: { ...he, perAxis: { ...he.perAxis, lx: { unitsPerLsb: 1.5, r2: 0.99 } } }, values: withV({ 8: 3 }) }, /under 2 units per LSB on LX/],
+    ['too large on LX', { values: withV({ 8: max + 1 }) }, /LX moves \d+ units, more than 24 LSB/],
+    ['too large on LY', { values: withV({ 9: -(max + 1) }) }, /LY moves \d+ units, more than 24 LSB/],
+    ['a range edge changes', { values: withV({ 8: 64, 0: 1 }) }, /range fields/],
+    ['RX changes', { values: withV({ 10: 1 }) }, /right-stick centers/],
+    ['RY changes', { values: withV({ 11: -1 }) }, /right-stick centers/],
+    ['snapshot not read on this connection', { snapshots: [withV({ 8: 1 })] }, /read on this connection/],
+    ['malformed values', { values: snap.slice(1) }, /12 integers/],
+  ]) {
+    const r = checkFixWrite({ ...ok, ...patch });
+    assert.equal(r.ok, false, label);
+    assert.match(r.reason, pattern, label);
+  }
+  // La regola generale non cambia: ±512 per ogni altro passo.
+  assert.equal(checkWriteValues(withV({ 8: 600 }), [snap]).ok, false);
+});
+
+test('X-replug compares RAM across a replug of the same controller and refuses an unproven identity (model-verified)', async () => {
+  const { out, probe, dev, reconnect, run, clock } = await r1xSequence({ module: { leftXCapture: 10 } });
+  assert.equal(out.fix.ok, true, out.fix.error);
+  // Stesso controller, cavo staccato e riattaccato senza spegnere.
+  reconnect(dev, 'serial-A');
+  assert.equal((await run('preflight')).ok, true);
+  const rp = await run('X-replug');
+  assert.equal(rp.ok, true, rp.error);
+  assert.equal(rp.identicalToPrevious, true);
+  assert.equal(rp.previousDiffersFromBaseline, true);
+  assert.equal(probe.evaluate().r1x.replugKeepsRam, 'kept');
+
+  // Un altro controller.
+  const other = makeDev(clock, { seed: 99 });
+  reconnect(other, 'serial-B');
+  await run('preflight');
+  assert.match((await run('X-replug')).error, /different controller/);
+
+  // Seriale mancante: nessun verdetto.
+  reconnect(other, null);
+  await run('preflight');
+  const unknown = await run('X-replug');
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.error, /serial unavailable, cannot confirm same controller/);
+  assert.equal(unknown.sameController, null);
+  // Il verdetto resta quello della prova valida.
+  assert.equal(probe.evaluate().r1x.replugKeepsRam, 'kept');
+});
+
+test('X-replug needs a previous connection and an explicit "no power-off" confirmation', async () => {
+  const s = setup({ params: XP, confirm: async step => step !== 'X-replug' });
+  await s.run('preflight');
+  assert.match((await s.run('X-replug')).error, /Connect and run the preflight first/);
+  s.reconnect();
+  await s.run('preflight');
+  const r = await s.run('X-replug');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not confirmed/);
+});
+
+test('evaluate on a record without R1-X steps marks every R1-X item incomplete', () => {
+  const r = evaluate({ connections: [], steps: [] }).r1x;
+  assert.deepEqual([r.x1, r.fixWorks, r.x2, r.x3, r.x4, r.replugKeepsRam], ['incomplete', 'incomplete', 'incomplete', 'incomplete', 'incomplete', 'incomplete']);
+});
+
+/* ---------------------- R1-X: correzioni della review ----------------------- */
+
+const commandsSent = dev => dev.moduleCounts.read + dev.moduleCounts.write + calibCommands(dev);
+
+async function assertFixRefusedAfterStop(s) {
+  assert.equal(s.probe.needsPowerCycle, true, 'the connection is marked for a power-cycle');
+  const before = commandsSent(s.dev);
+  const prompts = s.prompts.length;
+  for (const step of ['X-fix', 'H-e', 'X-pass']) {
+    const r = await s.run(step);
+    assert.equal(r.ok, false, step);
+    assert.match(r.error, /power-cycle/, step);
+  }
+  assert.equal(commandsSent(s.dev), before, 'no [12,x] or 0x82 command after the stop');
+  assert.equal(s.prompts.length, prompts);
+}
+
+test('an X-pass stopped at the 15% ceiling blocks every later write until a reconnect (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 25 } });
+  const xp = await s.run('X-pass');
+  assert.equal(xp.stoppedAtCeiling, 1);
+  assert.equal(xp.needsPowerCycle, true);
+  await assertFixRefusedAfterStop(s);
+});
+
+test('an X-pass stopped by an inexact restore blocks every later write (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  s.dev.module.writeApplies = false;
+  const xp = await s.run('X-pass');
+  assert.match(xp.error, /restore after X-pass 1/);
+  await assertFixRefusedAfterStop(s);
+});
+
+test('an X-pass with no output after the pass (no restore) blocks every later write (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  // I report smettono appena parte calibEnd: la passata è committata, la misura dopo no.
+  s.dev.faults.push(({ op }) => { if (op === 'end') s.dev.stopped = true; return null; });
+  const w = writes(s.dev);
+  const xp = await s.run('X-pass');
+  assert.equal(xp.ok, false);
+  assert.match(xp.error, /no input reports after X-pass 1/);
+  assert.equal(writes(s.dev), w + 1, 'only the initial restore, no restore after the pass');
+  await assertFixRefusedAfterStop(s);
+});
+
+test('X-pass restores the baseline before pass 1, so a previous H-b does not shift the start (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  await s.run('H-b');
+  assert.notDeepEqual(s.dev.moduleValues(), s.probe.record.baseline.values);
+  const xp = await s.run('X-pass', { passes: 2 });
+  assert.equal(xp.ok, true, xp.error);
+  assert.equal(xp.initialRestore, true);
+  for (const p of xp.passes) assert.deepEqual(p.before, s.probe.record.baseline.values, `pass ${p.pass}`);
+  assert.ok(Math.abs(xp.passes[0].E.lx - 10) <= 1, `E.lx ${xp.passes[0].E.lx}`);
+});
+
+test('X-release drops a flick in the wrong direction: it neither enters the median nor triggers X3 (model-verified)', async () => {
+  const s = await r1xReady({
+    onPrompt: (dev, clock, p) => {
+      if (p.direction === 'right' && p.index === 0) {
+        // Rilascio verso SINISTRA quando è chiesto destra, e un arrivo spostato di 6 LSB.
+        flick(dev, clock, { direction: 'left' });
+        dev.sticks[0].rest[0] = 2.3 + 6;
+      } else {
+        dev.sticks[0].rest[0] = 2.3;
+        flick(dev, clock, p);
+      }
+    },
+  });
+  await s.run('X-idle');
+  const rel = await s.run('X-release');
+  assert.equal(rel.ok, true, rel.error);
+  assert.equal(rel.wrongDirection, 1);
+  const row = rel.flicks.find(f => f.direction === 'right' && f.index === 0);
+  assert.equal(row.landing, null);
+  assert.equal(row.missed, 'wrong-direction');
+  assert.ok(row.peakAt[0] < 0, 'the recorded peak is on the left');
+  assert.equal(rel.byDirection.find(d => d.direction === 'right').landed, XP.releaseFlicks - 1);
+  assert.ok(rel.maxOppositeLxDiff <= 2, `diff ${rel.maxOppositeLxDiff}`);
+  assert.equal(s.probe.evaluate().r1x.x3, 'no');
+});
+
+test('X-fix writes nothing when the output does not repeat after a release (a still thumb) (model-verified)', async () => {
+  const thumb = { stick: 0, t0: 0, dur: 1e9, tail: 0, amp: [6, 0] };
+  const s = await r1xReady({
+    onPrompt: (dev, clock, p) => {
+      // Il pollice fermo se ne va con il rilascio.
+      dev.touches = dev.touches.filter(t => t !== thumb);
+      flick(dev, clock, p);
+    },
+  });
+  thumb.t0 = s.clock.now();
+  s.dev.touches.push(thumb);
+  const w = writes(s.dev);
+  const fix = await s.run('X-fix');
+  assert.equal(fix.ok, false);
+  assert.match(fix.error, /output not reproducible after a release: a thumb may be on the stick/);
+  assert.ok(Math.abs(fix.repeat.lx + 6) <= 1, `repeat ${fix.repeat.lx}`);
+  assert.equal(writes(s.dev), w);
+});
+
+test('X-idle with a 2-minute report pause is incomplete and counts as missing for X1 and X3 (model-verified)', async () => {
+  const s = await r1xReady({ module: { leftXCapture: 10 } });
+  const t0 = s.clock.now();
+  s.clock.setTimeout(() => { s.dev.stopped = true; }, 60000);
+  s.clock.setTimeout(() => { s.dev.stopped = false; s.dev.schedule(); }, 180000);
+  const idle = await s.run('X-idle', { ms: 300000 });
+  assert.equal(idle.ok, true, idle.error);
+  assert.equal(idle.incomplete, true);
+  assert.ok(idle.gaps >= 1);
+  assert.ok(idle.coverage < 0.95, `coverage ${idle.coverage}`);
+  assert.match(idle.incompleteReason, /continuous reports cover/);
+  assert.ok(s.clock.now() - t0 >= 300000);
+  await s.run('X-pass', { passes: 3 });
+  const r = s.probe.evaluate().r1x;
+  assert.equal(r.x1, 'incomplete');
+  assert.match(r.reasons.join('; '), /X-idle incomplete/);
+});
+
+test('X-idle with continuous reports is complete and counts only reports inside its duration', async () => {
+  const s = await r1xReady();
+  const idle = await s.run('X-idle');
+  assert.equal(idle.incomplete, false);
+  assert.equal(idle.gaps, 0);
+  assert.ok(idle.coverage >= 0.95);
+  assert.ok(idle.perSecond.every(r => r.s < XP.idleMs / 1000 + 1));
+});
+
+test('X-replug skips an intermediate connection with no read and compares with the X-fix connection (model-verified)', async () => {
+  const { out, probe, dev, reconnect, run } = await r1xSequence({ module: { leftXCapture: 10 } });
+  assert.equal(out.fix.ok, true, out.fix.error);
+  reconnect(dev, 'serial-A'); // connessione 2: nessuna lettura
+  reconnect(dev, 'serial-A'); // connessione 3
+  assert.equal((await run('preflight')).ok, true);
+  const rp = await run('X-replug');
+  assert.equal(rp.ok, true, rp.error);
+  assert.equal(rp.previousConnection, 1);
+  assert.equal(rp.identicalToPrevious, true);
+  assert.equal(probe.evaluate().r1x.replugKeepsRam, 'kept');
+});
+
+test('X1 judges the sign on strong passes only: a large but not strong opposite pass does not cancel it', () => {
+  const zero = { lx: 0, ly: 0, rx: 0, ry: 0 };
+  const passRow = (pass, e, outLx) => ({ pass, E: { lx: e, ly: 0, rx: 0, ry: 0 }, outAfter: { ...zero, lx: outLx }, sampleVsRef: zero, inSessionVsPre: zero });
+  const recordOf = passes => ({
+    connections: [], steps: [
+      { id: 'X-idle', ok: true, connection: 1, driftLx: 0.2, incomplete: false },
+      { id: 'X-pass', ok: true, connection: 1, passes, stoppedAtCeiling: null },
+    ],
+  });
+  const strong4 = [1, 2, 3, 4].map(i => passRow(i, 10, -10));
+  const r = evaluate(recordOf([...strong4, passRow(5, -5, 0)])).r1x;
+  assert.equal(r.x1, 'confirmed', r.reasons.join('; '));
+  assert.match(r.reasons.join('; '), /pass 5 has \|E\| ≥ 4 LSB on LX with the opposite sign but is not strong/);
+  // Una passata strong di segno opposto invece sì.
+  const mixed = evaluate(recordOf([...strong4.slice(0, 3), passRow(4, -6, 6)])).r1x;
+  assert.equal(mixed.x1, 'not-confirmed');
 });

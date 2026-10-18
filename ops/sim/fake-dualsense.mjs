@@ -49,6 +49,11 @@ export const MODULE_DEFAULTS = {
   // il firmware come lo descrive DS5.calibBegin). Serve ai test del blocco di
   // spegnimento: con 'reopen' una riparazione che committa un parziale non si vede.
   beginWhileOpen: 'reopen',
+  // R1-X (docs/hw-probe-bdm040.md, ipotesi X1): LSB aggiunti al centro di LX
+  // a ogni calibEnd con campioni, cioè un errore di cattura fisso verso +X
+  // (l'uscita dopo la passata legge circa −leftXCapture). A 0 non cambia nulla
+  // e non consuma numeri casuali.
+  leftXCapture: 0,
 };
 
 export class FakeDualSense {
@@ -186,6 +191,7 @@ export class FakeDualSense {
             const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
             const bias = s.bias.axis === ax ? s.bias.B : 0;
             s.center[ax] = mean + bias + this.fw.sf * gauss(this.r);
+            if (i === 0 && ax === 0 && this.module.leftXCapture) s.center[ax] += this.module.leftXCapture;
           }
         });
         this.calibEnds++;
