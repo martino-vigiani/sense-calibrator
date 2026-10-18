@@ -41,13 +41,12 @@ None of this has been checked on our hardware. The questions:
 
 - **Spare controller only.** Never the controller Martino plays with. H-c and H-d are treated as
   possibly permanent.
-- **Localhost only.** `ops/` is published by GitHub Pages with the rest of the repo, so the page
-  checks `location.hostname` first. Anywhere else it shows a refusal and does not even load the HID
-  code (`probe.mjs` imports only `safety.mjs` statically). It is not linked from any page, carries
-  `noindex, nofollow`, and `robots.txt` disallows `/ops/`. On the project-pages URL
-  (`…github.io/sense-calibrator/`) crawlers ignore that robots file, so the `noindex` meta and the
-  missing links are what actually keep it out of search. A CSP with `connect-src 'none'` blocks
-  every network request from the page.
+- **Localhost only.** `_config.yml` excludes `ops/` from GitHub Pages (since 2026-10-15), so the
+  probe is not published at all (its URLs return 404). The page still checks `location.hostname`
+  first, in case it is ever served elsewhere: anywhere but localhost it shows a refusal and does not
+  even load the HID code (`probe.mjs` imports only `safety.mjs` statically). It is not linked from
+  any page and carries `noindex, nofollow`. A CSP with `connect-src 'none'` blocks every network
+  request from the page.
 - **Armed per connection.** Write steps stay disabled until the person ticks "spare controller"
   and types `SPARE`. A reconnect disarms.
 - **Every write step asks again** (a native confirm dialog). H-c and H-d say "PERMANENTLY".
