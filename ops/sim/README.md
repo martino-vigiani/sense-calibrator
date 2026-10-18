@@ -313,7 +313,11 @@ keep writing the same error, which is why the model cannot show an advantage for
 **Left-X signature: one-pass cap, in-run stop off (2026-10-19).** The page remembers a controller
 whose verified Quick pass or done Guided showed the signature (`hasLeftXSignature`: left X ≤ −4 LSB,
 |left Y| ≤ 1 LSB, right stick within one step) and runs later Quicks on it with `maxPasses: 1` (the
-`maxPasses` 1 row above; the simulator has no visits, so the cap is not run here). A stop inside the
+`maxPasses` 1 row above; the simulator has no visits, so the cap is not run here). Only a pass
+verified by a stable reading below the ceiling marks a controller, and the left stick must be under
+15%. Capped runs stay out of v1 (`leftXCap`); in v2, from build 20261019, a one-pass Quick event may be
+a capped run and cannot be told apart (known limit, contract unchanged): reports comparing pass counts
+across builds must account for it. A stop inside the
 run (`leftXSignatureStop`) exists only as a simulator switch and is **off by default**: the model
 favours it, real data does not (replay below), and worse-than-start rises even in the model. The
 gate 2 goldens are unchanged. Paired runs with the switch, off → `--params '{"leftXSignatureStop":true}'`

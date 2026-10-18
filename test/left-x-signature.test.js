@@ -8,12 +8,14 @@ import assert from 'node:assert/strict';
 import {
   LEFT_X_SIGNATURE_X_LSB, LEFT_X_SIGNATURE_Y_LSB, POLICY_DEFAULTS, classifyOutcome, decideAfterPass, hasLeftXSignature,
 } from '../js/calib/quick-policy.js';
-import { QUICK_DEFAULTS } from '../js/calib/quick.js';
+import { QUICK_DEFAULTS, stablePassXY } from '../js/calib/quick.js';
+import { buildCalibrationUpload } from '../js/telemetry.js';
 import { LSB_PCT, WITHIN_ONE_STEP_MAX } from '../js/calib/lattice.js';
 import { LEFT_X_CAPPED_NOTE, LEFT_X_FOUND_NOTE } from '../js/ui/outcome.js';
 import { VClock } from '../ops/sim/vclock.mjs';
 import { FakeDualSense } from '../ops/sim/fake-dualsense.mjs';
 import { makeSimInstance } from '../ops/sim/harness.mjs';
+import { onCommand } from '../ops/sim/scenarios/_hooks.mjs';
 import { loadApp, makeDevice } from './helpers/app-harness.mjs';
 
 // Assi come li dà summarizeResult: punti percentuali con segno, 3 decimali.
@@ -27,7 +29,10 @@ test('the signature: left X at −4 LSB or beyond, left Y exact, right stick wit
   assert.equal(LEFT_X_SIGNATURE_Y_LSB, 1);
   assert.equal(hasLeftXSignature(xy(-4.5, 0.5)), true, 'byte 123: the first value past −4 LSB');
   assert.equal(hasLeftXSignature(xy(-4, -0.5)), true, 'a half-byte median at −4.0 LSB, rounded to 3 decimals');
-  assert.equal(hasLeftXSignature(xy(-20.5, -0.5)), true, 'far left, still the signature');
+  assert.equal(hasLeftXSignature(xy(-18.5, -0.5)), true, 'far left (14.5%), still the signature');
+  // Sotto il tetto soltanto: catastrofico o al bordo non è "un po' a sinistra".
+  assert.equal(hasLeftXSignature(xy(-19.5, -0.5)), false, '15.3%: at the ceiling');
+  assert.equal(hasLeftXSignature(xy(-127.5, 0.5)), false, 'at the edge');
   assert.equal(hasLeftXSignature(xy(-3.5, 0.5)), false, 'byte 124 is not enough');
   assert.equal(hasLeftXSignature(xy(4.5, 0.5)), false, 'toward +X is not the signature');
   assert.equal(hasLeftXSignature(xy(-6.5, 1)), true, 'Y within 1 LSB');
@@ -37,6 +42,28 @@ test('the signature: left X at −4 LSB or beyond, left Y exact, right stick wit
   assert.equal(hasLeftXSignature(xy(-6.5, 0.5, 2.5, 0.5)), false, 'right stick two steps off');
   for (const bad of [null, undefined, [], [[1, 2]], [[NaN, 0], [0, 0]], [[-5, 0], [0]], 'x'])
     assert.equal(hasLeftXSignature(bad), false, JSON.stringify(bad));
+});
+
+test('stablePassXY keeps only passes verified by a stable reading below the ceiling', () => {
+  const sig = xy(-6.5, 0.5);
+  const attempt = (pass, n, accepted) => ({ pass, attempt: n, accepted });
+  const session = (attempts, passes = [5.1]) => ({ passes, passXY: passes.map(() => sig), verification: { attempts } });
+  assert.deepEqual(stablePassXY(session([attempt(1, 1, true)])), [sig]);
+  assert.deepEqual(stablePassXY(session([attempt(1, 1, false), attempt(1, 2, true)])), [sig], 'stable on the second attempt');
+  // Lettura tenuta come `implausible` (instabile o ≥15%): mai `accepted`.
+  assert.deepEqual(stablePassXY(session([attempt(1, 1, false), attempt(1, 2, false)])), []);
+  assert.deepEqual(stablePassXY({ passes: [null], passXY: [null], verification: { attempts: [attempt(1, 1, false)] } }), []);
+  assert.deepEqual(stablePassXY(null), []);
+});
+
+test('a capped run never goes to the v1 payload', () => {
+  const entry = {
+    kind: 'quick', t: '2026-10-19T10:00:00.000Z', board: 'BDM-040', fw: 1,
+    before: { off: [4.4, 0.555], noise: [0.2, 0.2] }, after: { off: [5.1, 0.555], noise: [0.2, 0.2] }, passes: [5.1],
+    unstableEvents: 0, gate: 0.035, gateOff: false, best: 5.1, gateMax: 0.035, gateBase: 0.035, gateWidenings: 0, settled: true,
+  };
+  assert.notEqual(buildCalibrationUpload(entry), null);
+  assert.equal(buildCalibrationUpload({ ...entry, leftXCap: true }), null);
 });
 
 // ---------------------------------------------------------------- regola
@@ -61,6 +88,7 @@ test('the in-run stop is off by default; switched on (simulator only) it stops w
 
 test('the ceiling still comes first, and the outcome is still classifyOutcome’s', () => {
   const cat = decideAfterPass(state(16, xy(-20.5, 0.5)), STOP);
+  assert.equal(decideAfterPass(state(14.5, xy(-18.5, 0.5)), STOP).reason, 'left-x-signature');
   assert.equal(cat.reason, 'catastrophic');
   // La firma non è un esito: una passata peggiore dell'inizio resta tale.
   assert.equal(classifyOutcome({ worst: 5.1, beforeWorst: 2.5, bestWorst: 2.5, maxNoise: 0.3, unstableEvents: 0, passes: [5.1] }, QUICK_DEFAULTS), 'worse-than-start');
@@ -175,7 +203,9 @@ test('the page: the signature run ends by its usual rules, then one pass on the 
   const runWrites = msgWrites.slice(before);
   assert.equal(occurrences(runWrites, 'one pass only'), 1, 'the modal says it once');
   for (let i = 1; i < runWrites.length; i++) assert.notEqual(runWrites[i], runWrites[i - 1], 'no live-region rewrite with the same text');
+  assert.equal(occurrences(runWrites, LEFT_X_FOUND_NOTE), 0, 'the panel already said it');
   assert.equal(occurrences([h.$('calib-outcome').innerHTML], LEFT_X_FOUND_NOTE), 0, 'the panel does not repeat it');
+  assert.equal(buildCalibrationUpload(session), null, 'the capped run stays out of v1');
 
   // 3) Un altro controller (seriale diverso, leggibile): nessun limite.
   h.confirmAnswer = true;
@@ -204,7 +234,7 @@ const CORNERS = [
 
 test('a verified Guided result with the signature caps the next Quick on that controller', async () => {
   const clock = new VClock();
-  const A = makeDevice(clock, { seed: 21, drift: [[14, -9], [-2, 3]], module: { leftXCapture: 6 } });
+  const A = withSerial(makeDevice(clock, { seed: 21, drift: [[14, -9], [-2, 3]], module: { leftXCapture: 6 } }), 'E8475C3A1B2F');
   const h = await loadApp({ clock, authorized: [A] });
   await h.advance(5000);
   await h.click('btn-wizard');
@@ -226,4 +256,82 @@ test('a verified Guided result with the signature caps the next Quick on that co
   const next = await quick(h, A);
   assert.equal(next.ends, 1);
   assert.equal(h.sessions().filter(s => s.kind === 'quick').at(-1).leftXCap, true);
+});
+
+// Corsa che si rompe alla passata 2 dopo una passata 1 con la firma, poi
+// "I already turned it off" (il fake riapre la sessione da capo).
+async function signatureThenFailure({ serial = 'E8475C3A1B2F', orphan = false } = {}) {
+  const clock = new VClock();
+  let armed = true;
+  const failPass2 = ({ op, counts }) => (armed && op === 'sample' && counts.end === 1 ? (armed = false, new Error('device closed')) : null);
+  const A = makeDevice(clock, { drift: DRIFTING, module: { leftXCapture: 6 }, faults: orphan ? [] : [failPass2] });
+  if (serial) withSerial(A, serial);
+  const h = await loadApp({ clock, authorized: [A], chooser: [A] });
+  await h.advance(5000);
+  if (orphan) {
+    // Scollegato appena parte la passata 2: il ciclo diventa orfano.
+    onCommand(A, 'begin', 2, () => { A.unplug(); h.hid.fire('disconnect', A); });
+  }
+  const first = await quick(h, A);
+  if (orphan) {
+    await h.advance(1000);
+    A.unplugged = false; A.open(); A.stopped = false; A.schedule();
+    h.hid.fire('connect', A);
+    await h.advance(5000);
+  }
+  h.confirmAnswer = true;
+  await h.run(h.eval("runOutcomeAction('powered-off')"));
+  await h.advance(5000);
+  A.module.leftXCapture = -6;
+  return { h, A, first };
+}
+
+test('a signature seen on a run that showed no note: the next Quick says it in full', async () => {
+  const { h, A, first } = await signatureThenFailure();
+  assert.equal(first.ends, 1);
+  assert.match(h.sessions().filter(s => s.kind === 'quick').at(-1).aborted ?? '', /error/);
+  const msgWrites = spyWrites(h.$('quick-msg'));
+  const next = await quick(h, A);
+  assert.equal(next.ends, 1, 'capped');
+  assert.equal(occurrences(msgWrites, LEFT_X_FOUND_NOTE), 1, 'the full note, once');
+  assert.equal(occurrences(msgWrites, 'Quick does <b>one pass only</b>'), 0);
+  // La terza volta la versione breve.
+  const later = spyWrites(h.$('quick-msg'));
+  await h.click('btn-quick');
+  assert.equal(occurrences(later, 'Quick does <b>one pass only</b>'), 1);
+  assert.equal(occurrences(later, LEFT_X_FOUND_NOTE), 0);
+});
+
+test('an orphan run (unplugged mid-run) records nothing', async () => {
+  const { h, A, first } = await signatureThenFailure({ orphan: true });
+  assert.equal(first.ends, 1);
+  assert.equal(h.sessions().filter(s => s.kind === 'quick').at(-1).leftXSignature, true, 'seen, in the local event');
+  // Difetto preesistente (vedi il test `todo` sotto): il ciclo orfano lascia
+  // "Calibrate now" disabilitato. Qui interessa solo il limite.
+  h.$('btn-quick-go').disabled = false;
+  const next = await quick(h, A);
+  assert.ok(next.ends >= 2, `not capped: ${next.ends} passes`);
+});
+
+test('after an orphan Quick (unplugged mid-run) and a replug, Calibrate now is enabled again', { todo: 'quickCalibrate re-enables the modal buttons only when its op is still current; teardown never does' }, async () => {
+  const { h } = await signatureThenFailure({ orphan: true });
+  await h.click('btn-quick');
+  assert.equal(h.$('btn-quick-go').disabled, false);
+});
+
+test('an unreadable serial gets neither the cap nor the note', async () => {
+  const clock = new VClock();
+  const A = makeDevice(clock, { drift: DRIFTING, module: { leftXCapture: 6 } });
+  const h = await loadApp({ clock, authorized: [A], chooser: [A] });
+  await h.advance(5000);
+  const msgWrites = spyWrites(h.$('quick-msg'));
+  const first = await quick(h, A);
+  assert.ok(first.ends >= 2);
+  assert.equal(h.sessions().filter(s => s.kind === 'quick').at(-1).leftXSignature, true);
+  assert.equal(occurrences([h.$('calib-outcome').innerHTML], LEFT_X_FOUND_NOTE), 0);
+  A.module.leftXCapture = -6;
+  await h.advance(5000);
+  const next = await quick(h, A);
+  assert.ok(next.ends >= 2, 'not capped');
+  assert.equal(occurrences(msgWrites, 'one pass only'), 0);
 });

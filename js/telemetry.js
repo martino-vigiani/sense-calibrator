@@ -28,7 +28,9 @@ export function buildCalibrationUpload(entry) {
   // fallisce) o troncata dal tetto di durata (`truncated`) resta locale. Nel
   // payload a nove campi sembrerebbe un algoritmo che si ferma da solo con
   // meno passate, e sporcherebbe il confronto dei KPI con la baseline (§4.5).
-  if (entry.aborted != null || entry.truncated != null) return null;
+  // Lo stesso per una corsa limitata a una passata dalla firma X sinistra
+  // (`leftXCap`, app.js): il v1 è il riferimento delle corse a più passate.
+  if (entry.aborted != null || entry.truncated != null || entry.leftXCap === true) return null;
   if (!isCanonicalTimestamp(entry.t)) return null;
   if (entry.board !== null && (typeof entry.board !== 'string' || entry.board.length > 20)) return null;
   if (entry.fw !== null && !Number.isInteger(entry.fw)) return null;

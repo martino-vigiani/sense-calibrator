@@ -53,7 +53,8 @@ export const QUICK_EXTRA_AT_FLOOR_CAP = 1;
 // telemetria v2 27/9–18/10, solo aggregati): su alcuni controller ogni
 // passata verificata lascia la X
 // dello stick SINISTRO a −4 LSB o oltre (≥3.1% su quell'asse, verso sinistra)
-// con la Y esatta (±0.5 LSB) e lo stick destro al pavimento. L'errore segue il
+// con la Y esatta e lo stick destro al pavimento. La regola accetta la Y entro
+// ±1 LSB, come il replay e il simulatore. L'errore segue il
 // controller, fra passate e fra sessioni (anche Guided e Range), e 5 dei 6
 // Quick catastrofici venivano da lì: altre passate riscrivono lo stesso errore
 // e a volte saltano oltre il 15%. La telemetria la vede quasi solo su BDM-040,
@@ -66,10 +67,13 @@ export const LEFT_X_SIGNATURE_X_LSB = -4;
 export const LEFT_X_SIGNATURE_Y_LSB = 1;
 // `xy` = summarizeResult(r).xy, [[lx, ly], [rx, ry]] in punti percentuali con
 // segno, da una misura VERIFICATA (stabile, nel frame calibrato). Pura.
+// Solo sotto il tetto: uno stick sinistro al 15% o oltre (catastrofico, o al
+// bordo) non è "un po' a sinistra" e non segna il controller.
 export function hasLeftXSignature(xy) {
   if (!Array.isArray(xy) || xy.length !== 2 || !xy.every(a => Array.isArray(a) && a.length === 2 && a.every(Number.isFinite))) return false;
   const [[lx, ly], [rx, ry]] = xy;
-  return lx <= LEFT_X_SIGNATURE_X_LSB * LSB_PCT + DECODE_TOLERANCE
+  return Math.hypot(lx, ly) < QUICK_CATASTROPHIC_PCT
+    && lx <= LEFT_X_SIGNATURE_X_LSB * LSB_PCT + DECODE_TOLERANCE
     && Math.abs(ly) <= LEFT_X_SIGNATURE_Y_LSB * LSB_PCT + DECODE_TOLERANCE
     && Math.hypot(rx, ry) <= WITHIN_ONE_STEP_MAX;
 }
