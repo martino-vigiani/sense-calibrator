@@ -111,6 +111,16 @@ export const RANGE_THEN_CENTER = `Afterwards the page measures the center again:
 // su 13 con un range completo in mezzo, 29 su 93 senza.
 export const RANGE_MOVES_CENTER = 'In shared results the center was off after most Range calibrations; this isn’t confirmed on hardware yet.';
 
+// Firma "cattura X sinistra" (hasLeftXSignature in js/calib/quick-policy.js):
+// la pagina la ricorda per controller e le Quick successive fanno una passata.
+// Telemetria v2 (27/9–18/10, aggregati): sugli stessi controller anche Guided e
+// Range lasciavano lo stesso residuo verso −X. È un indizio, non verificato
+// sull'hardware (R1-X): "may", mai "won't". `FOUND` va nel pannello la prima
+// volta che la firma compare sul controller, `CAPPED` nel modale delle Quick
+// limitate che seguono.
+export const LEFT_X_FOUND_NOTE = 'On this controller each pass tends to leave the left stick a little to the left of center, so from now on Quick does one pass only. Calibration may not fix this: in shared results Guided and Range often left the same offset on controllers like this one.';
+export const LEFT_X_CAPPED_NOTE = 'On this controller each pass tends to leave the left stick a little to the left of center, so Quick does <b>one pass only</b>. Calibration may not fix this.';
+
 const SIDES = ['Left', 'Right'];
 
 // Stick a riposo oltre refRadius (farStartPct, 50%): telemetria v2 (build

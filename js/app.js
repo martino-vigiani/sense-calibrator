@@ -20,13 +20,13 @@ import {
 } from './calib/measure.js';
 import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
 import { runQuick } from './calib/quick.js';
-import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
+import { QUICK_CATASTROPHIC_PCT, hasLeftXSignature } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedFarStartCopy, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   driftRestedInside, quickEntryRoute, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
-  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
+  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor, LEFT_X_CAPPED_NOTE, LEFT_X_FOUND_NOTE,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
@@ -2001,6 +2001,23 @@ let quickRouteNext = null;
 // preflight erano ripetizioni nella stessa visita, e l'attesa di 8 s non ne ha
 // recuperato nessuno.
 const quickPreflightFailures = new Map();
+// Controller (chiave salata, null se illeggibile, come quickPreflightFailures)
+// su cui una passata Quick o un Guided VERIFICATI hanno mostrato la firma
+// "cattura X sinistra" (hasLeftXSignature, js/calib/quick-policy.js). Solo in
+// memoria, mai salvata né inviata. Le Quick successive su quel controller
+// fanno una passata sola (maxPasses 1): nella telemetria ogni passata in più
+// riscriveva lo stesso errore o saltava oltre il 15%. Nessun comando nuovo e
+// nessun cambio al blocco di Write.
+const leftXSignatures = new Set();
+// Vero se la firma è NUOVA per quel controller: il pannello lo dice una volta.
+function noteLeftXSignature(key) {
+  if (leftXSignatures.has(key ?? null)) return false;
+  leftXSignatures.add(key ?? null);
+  return true;
+}
+const leftXCapped = key => leftXSignatures.has(key ?? null);
+// La riga della firma in coda al pannello, solo la prima volta.
+const withLeftXNote = (view, found) => found ? { ...view, lines: [...view.lines, LEFT_X_FOUND_NOTE] } : view;
 // Rotta come azione primaria (Guided o Range) e Quick come secondaria. Nessun
 // comando: il bottone primario apre l'altra procedura, "Try Quick anyway"
 // lancia runQuick esattamente come "Calibrate now".
@@ -2544,6 +2561,8 @@ async function quickCalibrate({ anyway = false } = {}) {
   const controllerKey = deviceKey;
   const recovery = quickRecoveryNext;
   const force = quickForceNext || recovery;
+  // Firma X sinistra già vista su questo controller: una passata sola.
+  const capped = leftXCapped(controllerKey);
   // Test drift solo se fresco (dopo l'ultimo commit, stesso controller).
   const drift = freshDriftResult(controller);
   cancelDriftTest();
@@ -2613,7 +2632,7 @@ async function quickCalibrate({ anyway = false } = {}) {
       isCancelled: () => quickCancelRequested,
       force,
       params: {
-        ...(recovery ? { maxPasses: 1 } : {}),
+        ...(recovery || capped ? { maxPasses: 1 } : {}),
         // Il test drift ha visto entrambi gli stick fermi dentro il raggio: uno
         // stick fermo fuori raggio adesso è un pollice, e conviene aspettare
         // che si stacchi invece di fermarsi dopo 3 s (solo l'attesa cambia).
@@ -2656,6 +2675,14 @@ async function quickCalibrate({ anyway = false } = {}) {
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
     });
     const { session, outcome } = run;
+    // Firma X sinistra su una passata verificata (anche se il ciclo si è
+    // fermato per altro, per esempio il tetto): si ricorda il controller anche
+    // da un ciclo orfano, la chiave è quella catturata. Solo nell'evento locale.
+    const leftXSeen = Array.isArray(session.passXY)
+      && session.passXY.some((xy, i) => session.passes?.[i] != null && hasLeftXSignature(xy));
+    const leftXFound = leftXSeen && noteLeftXSignature(controllerKey);
+    if (leftXSeen) session.leftXSignature = true;
+    if (capped) session.leftXCap = true;
     // Una preflight passata (o un arresto prima dell'attesa) azzera il conto.
     if (outcome !== 'preflight') quickPreflightFailures.delete(controllerKey ?? null);
     // Tutti gli esiti tranne 'error', che passa da fail() con i suoi flag.
@@ -2786,7 +2813,7 @@ async function quickCalibrate({ anyway = false } = {}) {
     // Pannello persistente al posto del toast: a 15% o più non suona mai come
     // un successo e disabilita Write; il consiglio di spegnere il controller
     // compare solo con la NVS letta `locked` (C0-11).
-    showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
+    showOutcome(withLeftXNote(quickOutcomeView(run, { nvStatus: lastNvStatus }), leftXFound));
     log(outcomeLogLine(run));
     ops.endOp(op);
     startDriftTest();
@@ -3058,10 +3085,15 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   const comparison = wizardComparison(w.before, after);
   lastWizardComparison = comparison;
   w.reported = true;
+  // Firma X sinistra solo da un dopo VERIFICATO (stabile): un dopo instabile
+  // tenuto solo perché ≥15% non basta a limitare le Quick successive.
+  const leftXSeen = !!after && measuredAfter.stableFraction >= DRIFT_MIN_STABLE && hasLeftXSignature(after.xy);
+  const leftXFound = leftXSeen && noteLeftXSignature(w.key);
   // Solo locale (il payload v1 porta soltanto sessioni quick).
   recordEvent('wizard', {
     done: true, before: w.before ?? null, after,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses, escaped: w.escaped,
+    ...(leftXSeen ? { leftXSignature: true, board: w.device?.board ?? null } : {}),
   });
   // Completata ma ancora oltre refRadius: per F1 conta come un fallimento.
   if (after && farStart(after).length) noteWizardFarFailure(w, { after });
@@ -3073,7 +3105,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   wizardHideLive();
   // Prima e dopo anche nel pannello persistente (WS5), con lo stesso blocco di
   // Write della rapida (peggiore dell'inizio, ≥15%, asse incollato).
-  showOutcome(guidedOutcomeView({ before: w.before ?? null, after }, { nvStatus: lastNvStatus }));
+  showOutcome(withLeftXNote(guidedOutcomeView({ before: w.before ?? null, after }, { nvStatus: lastNvStatus }), leftXFound));
   $('wizard-msg').innerHTML = `${wizardResultHtml(comparison, w.escaped)}<br>The result stays on the page after you close this.`;
   btn.textContent = 'Done';
 }
@@ -4288,6 +4320,9 @@ $('btn-quick').addEventListener('click', () => {
     offerQuickRoute(entry.action);
     $('quick-msg').innerHTML = `<b>${esc(entry.text)}</b> If someone was touching the sticks during the drift test, use Try Quick anyway.`;
   }
+  // Firma X sinistra già vista: detto una volta, all'apertura, prima di ogni
+  // comando (l'intro non viene riscritta finché la corsa non parte).
+  if (leftXCapped(deviceKey)) $('quick-msg').innerHTML += ` ${LEFT_X_CAPPED_NOTE}`;
   openQuickModal();
 });
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);
