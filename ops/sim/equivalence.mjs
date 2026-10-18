@@ -98,7 +98,7 @@ export async function goldenGate({ refresh = false, params = {} } = {}) {
     const common = { ...GOLDEN_COMMON, scenario };
     const sessions = await runVariant({ ...common, impl: 'module', variant: 'baseline', params });
     if (refresh) fs.writeFileSync(goldenPath(scenario), JSON.stringify({
-      label: MODEL_LABEL, generatedBy: 'module', regeneratedFor: '8 s preflight wait, 3 s off-center stop and preflight diagnosis (2026-10-12)',
+      label: MODEL_LABEL, generatedBy: 'module', regeneratedFor: 'left-X signature stop (2026-10-19)',
       ...common, sessions: sessions.map(goldenRecord),
     }) + '\n');
     const golden = JSON.parse(fs.readFileSync(goldenPath(scenario), 'utf8'));

@@ -1,6 +1,6 @@
 'use strict';
 
-import { LSB_PCT } from './lattice.js';
+import { DECODE_TOLERANCE, LSB_PCT, WITHIN_ONE_STEP_MAX } from './lattice.js';
 
 // Regole di arresto ed esito della calibrazione rapida, come funzioni pure.
 // Il simulatore e ops/sim/replay-sequences.mjs le applicano a sequenze di
@@ -49,6 +49,31 @@ export const QUICK_PLATEAU_EXTRA_PASSES = 0;
 // QUICK_EXTRA_AT_FLOOR_CAP in quel caso, qualunque sia il parametro.
 export const QUICK_EXTRA_AT_FLOOR_CAP = 1;
 
+// Firma "cattura X sinistra" (ipotesi X1 del documento BDM-040 in docs/;
+// telemetria v2 27/9–18/10, solo aggregati): su alcuni controller ogni
+// passata verificata lascia la X
+// dello stick SINISTRO a −4 LSB o oltre (≥3.1% su quell'asse, verso sinistra)
+// con la Y esatta (±0.5 LSB) e lo stick destro al pavimento. L'errore segue il
+// controller, fra passate e fra sessioni (anche Guided e Range), e 5 dei 6
+// Quick catastrofici venivano da lì: altre passate riscrivono lo stesso errore
+// e a volte saltano oltre il 15%. La telemetria la vede quasi solo su BDM-040,
+// ma qui non si filtra per scheda (la scheda finisce nell'evento locale): la
+// firma è la direzione, non il modello. −4 LSB e 1 LSB vengono dal documento;
+// "entro un passo" per il destro è la riga di GRID_TABLE. La tolleranza di
+// decodifica copre l'arrotondamento a 3 decimali di summarizeResult (una
+// mediana a −4.0 LSB vale −3.137%).
+export const LEFT_X_SIGNATURE_X_LSB = -4;
+export const LEFT_X_SIGNATURE_Y_LSB = 1;
+// `xy` = summarizeResult(r).xy, [[lx, ly], [rx, ry]] in punti percentuali con
+// segno, da una misura VERIFICATA (stabile, nel frame calibrato). Pura.
+export function hasLeftXSignature(xy) {
+  if (!Array.isArray(xy) || xy.length !== 2 || !xy.every(a => Array.isArray(a) && a.length === 2 && a.every(Number.isFinite))) return false;
+  const [[lx, ly], [rx, ry]] = xy;
+  return lx <= LEFT_X_SIGNATURE_X_LSB * LSB_PCT + DECODE_TOLERANCE
+    && Math.abs(ly) <= LEFT_X_SIGNATURE_Y_LSB * LSB_PCT + DECODE_TOLERANCE
+    && Math.hypot(rx, ry) <= WITHIN_ONE_STEP_MAX;
+}
+
 // Default dei parametri introdotti qui, per chi chiama con un `params` che non
 // li contiene (test, varianti parziali). runQuick li riceve da QUICK_DEFAULTS.
 // `seedBestWithBefore: false` e `catastrophicPct: Infinity` esistono solo per
@@ -61,24 +86,29 @@ export const POLICY_DEFAULTS = Object.freeze({
   extraAtFloorCap: QUICK_EXTRA_AT_FLOOR_CAP,
   ceilingMargin: QUICK_CEILING_MARGIN,
   seedBestWithBefore: true,
+  // Arresto sulla firma "cattura X sinistra" (vedi hasLeftXSignature). `false`
+  // solo per confrontarla nel simulatore.
+  leftXSignatureStop: true,
 });
 const withDefaults = params => ({ ...POLICY_DEFAULTS, ...params });
 
 // Decisione dopo una passata VERIFICATA (worst non nullo).
 //   state  = { pass, worst, beforeWorst, prevWorst, bestWorst, bestPass?,
-//              otherWorst?, extraUsed? }
+//              otherWorst?, extraUsed?, xy? }
 //            prevWorst/bestWorst/bestPass null alla passata 1. `bestWorst` è
 //            il migliore visto incluso il punto di partenza, `bestPass` la
 //            migliore passata; `otherWorst` l'offset dello stick migliore in
 //            questa verifica (null se ignoto); `extraUsed` le passate già
-//            aggiunte rispetto alla regola precedente.
+//            aggiunte rispetto alla regola precedente; `xy` gli assi con
+//            segno della verifica (summarizeResult), per la firma X sinistra.
 //   params = { okMax, convergeEps, maxPasses } più i POLICY_DEFAULTS
 // Ritorna { stop, reason, regressed, extra, prevWorst, bestWorst, bestPass,
 // extraUsed }: il chiamante ripassa lo stato alla passata successiva.
 // reason: 'target' | 'catastrophic' | 'converged' | 'floor-cap' (plateau
 //         peggiore dell'inizio, ma lo stick buono è al pavimento e la passata
 //         extra concessa è già stata spesa) | 'near-ceiling' (plateau entro
-//         un passo di reticolo dal tetto: nessuna passata extra) | 'budget'
+//         un passo di reticolo dal tetto: nessuna passata extra) |
+//         'left-x-signature' (la passata mostra la firma X sinistra) | 'budget'
 //         (passate finite) | 'continue'.
 // `extra`: null, oppure perché si continua dove la regola precedente si
 //         fermava: 'recovery' (plateau peggiore dell'inizio) o 'plateau'
@@ -117,6 +147,15 @@ export function decideAfterPass(state, params) {
   // Tetto fisico prima di tutto il resto: né "converso" né altre passate.
   // Non è un `break` su "non è migliorato": è implausibilità fisica.
   if (worst >= p.catastrophicPct) return out(true, 'catastrophic', { regressed });
+  // Firma X sinistra: una regola documentata, non un `break` su "non è
+  // migliorato". Su quei controller la passata successiva riscrive quasi lo
+  // stesso errore (22/29 entro 2 LSB) o, di rado, salta. Model-verified
+  // (scenario left-x-capture, 714 sessioni BDM-040): finali ≥15% 16.7% → 10.9%
+  // con la stessa quota centrata. Nel replay degli eventi v2 reali le 13
+  // sessioni che si sarebbero fermate prima non hanno mai superato il 15%, e
+  // in una una passata successiva ha centrato: la regola compra margine sul
+  // tetto, non precisione. bestWorst e l'esito restano quelli di sempre.
+  if (p.leftXSignatureStop && hasLeftXSignature(state.xy)) return out(true, 'left-x-signature', { regressed });
   const lastPass = pass >= p.maxPasses;
   const atFloor = otherWorst !== null && otherWorst < p.okMax;
   // Vicino al tetto una passata in più può superarlo con un solo passo: le

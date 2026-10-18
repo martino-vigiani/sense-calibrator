@@ -619,7 +619,8 @@ export async function runQuick({
       // `otherWorst`: lo stick migliore. Se è già al pavimento, le passate
       // oltre la regola precedente sono limitate (rischiano di rovinarlo).
       const otherWorst = Math.min(result.left.offset, result.right.offset);
-      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed }, p);
+      const xy = summarizeResult(result).xy;
+      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed, xy }, p);
       ({ prevWorst, bestWorst, bestPass, extraUsed } = decision);
       log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (decision.reason === 'target') break;
@@ -635,6 +636,14 @@ export async function runQuick({
         log(`Pass ${pass} came out worse than the previous one: trying again instead of stopping.`);
       if (decision.reason === 'converged') {
         log('Converged: residual offset at the noise floor, further passes won’t help.');
+        break;
+      }
+      if (decision.reason === 'left-x-signature') {
+        // Solo locale (né v1 né v2 lo portano): la pagina ricorda il controller
+        // e le corse successive fanno una passata sola.
+        session.leftXSignature = true;
+        session.stop = 'left-x-signature';
+        log(`Pass ${pass}: the left stick ended to the left of center with Y exact, a pattern that repeats on this controller: stopping, another pass tends to write the same error.`);
         break;
       }
       if (decision.reason === 'near-ceiling') {
