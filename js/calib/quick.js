@@ -639,8 +639,8 @@ export async function runQuick({
         break;
       }
       if (decision.reason === 'left-x-signature') {
-        // Solo locale (né v1 né v2 lo portano): la pagina ricorda il controller
-        // e le corse successive fanno una passata sola.
+        // Solo con leftXSignatureStop (spento di default: vedi quick-policy.js).
+        // Solo locale, né v1 né v2 lo portano.
         session.leftXSignature = true;
         session.stop = 'left-x-signature';
         log(`Pass ${pass}: the left stick ended to the left of center with Y exact, a pattern that repeats on this controller: stopping, another pass tends to write the same error.`);

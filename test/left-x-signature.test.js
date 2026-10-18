@@ -1,7 +1,7 @@
 // Firma "cattura X sinistra" (hasLeftXSignature in js/calib/quick-policy.js):
-// la regola d'arresto dentro una corsa Quick e il limite a una passata sulle
-// corse successive dello stesso controller (app.js, chiave salata, solo in
-// memoria). Tutto model-verified (DualSense virtuale con `leftXCapture`),
+// il limite a una passata sulle corse successive dello stesso controller
+// (app.js, chiave salata, solo in memoria). L'arresto dentro la corsa
+// (`leftXSignatureStop`) è spento di default e resta solo per il simulatore. Tutto model-verified (DualSense virtuale con `leftXCapture`),
 // nessuna verifica hardware.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,22 +44,23 @@ test('the signature: left X at −4 LSB or beyond, left Y exact, right stick wit
 const state = (worst, axes, more = {}) => ({ pass: 1, worst, beforeWorst: 2.5, prevWorst: null, bestWorst: null, bestPass: null,
   otherWorst: 0.555, extraUsed: 0, xy: axes, ...more });
 
-test('a verified pass with the signature stops the run with its own reason', () => {
-  const d = decideAfterPass(state(5.1, xy(-6.5, 0.5)), QUICK_DEFAULTS);
+const STOP = { ...QUICK_DEFAULTS, leftXSignatureStop: true };
+
+test('the in-run stop is off by default; switched on (simulator only) it stops with its own reason', () => {
+  assert.equal(POLICY_DEFAULTS.leftXSignatureStop, false);
+  assert.equal(QUICK_DEFAULTS.leftXSignatureStop, false);
+  const off = decideAfterPass(state(5.1, xy(-6.5, 0.5)), QUICK_DEFAULTS);
+  assert.deepEqual([off.stop, off.reason], [false, 'continue']);
+  const d = decideAfterPass(state(5.1, xy(-6.5, 0.5)), STOP);
   assert.deepEqual([d.stop, d.reason], [true, 'left-x-signature']);
   assert.equal(d.bestWorst, 2.5, 'bestWorst still seeded with the start');
-  assert.equal(POLICY_DEFAULTS.leftXSignatureStop, true);
-  assert.equal(QUICK_DEFAULTS.leftXSignatureStop, true);
-  // Spenta (solo simulatore): la regola di sempre.
-  const off = decideAfterPass(state(5.1, xy(-6.5, 0.5)), { ...QUICK_DEFAULTS, leftXSignatureStop: false });
-  assert.deepEqual([off.stop, off.reason], [false, 'continue']);
   // Senza assi (replay v1, chiamanti vecchi) o senza la firma: nulla cambia.
-  assert.equal(decideAfterPass(state(5.1, undefined), QUICK_DEFAULTS).reason, 'continue');
-  assert.equal(decideAfterPass(state(5.1, xy(6.5, 0.5)), QUICK_DEFAULTS).reason, 'continue');
+  assert.equal(decideAfterPass(state(5.1, undefined), STOP).reason, 'continue');
+  assert.equal(decideAfterPass(state(5.1, xy(6.5, 0.5)), STOP).reason, 'continue');
 });
 
 test('the ceiling still comes first, and the outcome is still classifyOutcome’s', () => {
-  const cat = decideAfterPass(state(16, xy(-20.5, 0.5)), QUICK_DEFAULTS);
+  const cat = decideAfterPass(state(16, xy(-20.5, 0.5)), STOP);
   assert.equal(cat.reason, 'catastrophic');
   // La firma non è un esito: una passata peggiore dell'inizio resta tale.
   assert.equal(classifyOutcome({ worst: 5.1, beforeWorst: 2.5, bestWorst: 2.5, maxNoise: 0.3, unstableEvents: 0, passes: [5.1] }, QUICK_DEFAULTS), 'worse-than-start');
@@ -82,8 +83,12 @@ async function simQuick({ capture, params = {} }) {
   return { res, dev };
 }
 
-test('runQuick stops after the first pass that shows the signature (model-verified)', async () => {
-  const on = await simQuick({ capture: 6 });
+test('runQuick keeps its usual rules by default; the simulator switch stops on the signature (model-verified)', async () => {
+  const def = await simQuick({ capture: 6 });
+  assert.ok(def.dev.counts.end >= 2, `${def.dev.counts.end} passes by default`);
+  assert.equal(def.res.session.stop, undefined);
+  assert.equal(def.dev.counts.sample, 12 * def.dev.counts.end);
+  const on = await simQuick({ capture: 6, params: { leftXSignatureStop: true } });
   assert.equal(on.dev.counts.end, 1);
   assert.equal(on.dev.counts.sample, 12);
   assert.equal(on.res.session.stop, 'left-x-signature');
@@ -91,12 +96,8 @@ test('runQuick stops after the first pass that shows the signature (model-verifi
   assert.equal(on.res.session.passes.length, 1);
   assert.equal(on.res.session.board, 'BDM-040', 'the board stays in the local session');
   assert.equal(on.res.outcome, 'worse-than-start', 'the outcome is the usual classification');
-  const off = await simQuick({ capture: 6, params: { leftXSignatureStop: false } });
-  assert.ok(off.dev.counts.end >= 2, `${off.dev.counts.end} passes without the stop`);
-  assert.equal(off.res.session.stop, undefined);
-  assert.equal(off.dev.counts.sample, 12 * off.dev.counts.end);
   // Errore verso +X: nessuna firma, il ciclo di sempre.
-  const plus = await simQuick({ capture: -6 });
+  const plus = await simQuick({ capture: -6, params: { leftXSignatureStop: true } });
   assert.ok(plus.dev.counts.end >= 2);
   assert.equal(plus.res.session.stop, undefined);
 });
@@ -139,7 +140,7 @@ async function quick(h, dev) {
 }
 const occurrences = (list, text) => list.filter(v => String(v).includes(text)).length;
 
-test('the page: signature stop, then one pass on the same controller, said once; another controller is not capped', async () => {
+test('the page: the signature run ends by its usual rules, then one pass on the same controller, said once; another controller is not capped', async () => {
   const clock = new VClock();
   const A = withSerial(makeDevice(clock, { drift: DRIFTING, module: { leftXCapture: 6 } }), 'E8475C3A1B2F');
   const tabSession = new Map();
@@ -147,12 +148,14 @@ test('the page: signature stop, then one pass on the same controller, said once;
   await h.advance(5000);
   const msgWrites = spyWrites(h.$('quick-msg'));
 
-  // 1) Prima Quick: la passata 1 mostra la firma, nessuna passata 2.
+  // 1) Prima Quick: la passata 1 mostra la firma, la corsa continua con le
+  // sue regole (nessun arresto sulla firma).
   const first = await quick(h, A);
-  assert.equal(first.ends, 1);
+  assert.ok(first.ends >= 2, `${first.ends} passes on the first run`);
   assert.ok(first.ops.every(op => ['begin', 'sample', 'end'].includes(op)), `only calibration commands: ${[...new Set(first.ops)]}`);
+  assert.equal(first.ops.filter(op => op === 'sample').length, 12 * first.ends);
   let session = h.sessions().filter(s => s.kind === 'quick').at(-1);
-  assert.equal(session.stop, 'left-x-signature');
+  assert.equal(session.stop, undefined);
   assert.equal(session.leftXSignature, true);
   assert.equal(session.leftXCap, undefined, 'the first run was not capped');
   assert.equal(occurrences([h.$('calib-outcome').innerHTML], LEFT_X_FOUND_NOTE), 1, 'the panel says it once');

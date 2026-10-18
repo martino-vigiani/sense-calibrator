@@ -86,9 +86,13 @@ export const POLICY_DEFAULTS = Object.freeze({
   extraAtFloorCap: QUICK_EXTRA_AT_FLOOR_CAP,
   ceilingMargin: QUICK_CEILING_MARGIN,
   seedBestWithBefore: true,
-  // Arresto sulla firma "cattura X sinistra" (vedi hasLeftXSignature). `false`
-  // solo per confrontarla nel simulatore.
-  leftXSignatureStop: true,
+  // Arresto sulla firma "cattura X sinistra" dentro una corsa (vedi
+  // hasLeftXSignature): SPENTO. Esiste solo per il simulatore. Il modello lo
+  // dava utile (finali ≥15% 16.7% → 10.9%), ma nel replay degli eventi v2 reali
+  // non evitava nessuna catastrofica, rinunciava a un centraggio e a due
+  // miglioramenti di oltre un punto, e worse-than-start saliva anche nel
+  // modello. Della firma resta il limite a una passata fra corse (app.js).
+  leftXSignatureStop: false,
 });
 const withDefaults = params => ({ ...POLICY_DEFAULTS, ...params });
 
@@ -147,14 +151,9 @@ export function decideAfterPass(state, params) {
   // Tetto fisico prima di tutto il resto: né "converso" né altre passate.
   // Non è un `break` su "non è migliorato": è implausibilità fisica.
   if (worst >= p.catastrophicPct) return out(true, 'catastrophic', { regressed });
-  // Firma X sinistra: una regola documentata, non un `break` su "non è
-  // migliorato". Su quei controller la passata successiva riscrive quasi lo
-  // stesso errore (22/29 entro 2 LSB) o, di rado, salta. Model-verified
-  // (scenario left-x-capture, 714 sessioni BDM-040): finali ≥15% 16.7% → 10.9%
-  // con la stessa quota centrata. Nel replay degli eventi v2 reali le 13
-  // sessioni che si sarebbero fermate prima non hanno mai superato il 15%, e
-  // in una una passata successiva ha centrato: la regola compra margine sul
-  // tetto, non precisione. bestWorst e l'esito restano quelli di sempre.
+  // Firma X sinistra, solo con `leftXSignatureStop` (spento di default, vedi
+  // POLICY_DEFAULTS): una regola documentata, non un `break` su "non è
+  // migliorato". bestWorst e l'esito restano quelli di sempre.
   if (p.leftXSignatureStop && hasLeftXSignature(state.xy)) return out(true, 'left-x-signature', { regressed });
   const lastPass = pass >= p.maxPasses;
   const atFloor = otherWorst !== null && otherWorst < p.okMax;

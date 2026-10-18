@@ -24,8 +24,8 @@ export const EVENTS_V2_ENDPOINT = 'https://subralabs.com/api/calib/v2/events';
 // Data della release che produce gli eventi (YYYYMMDD). Va aggiornata a ogni
 // rilascio che cambia cosa si misura o come si comporta Quick, così il report
 // separa le versioni (la release 1016 non l'ha fatto: i suoi dati restano
-// mescolati a 20261013). 20261019: arresto sulla firma X sinistra e Quick a una
-// passata sui controller che l'hanno mostrata.
+// mescolati a 20261013). 20261019: Quick a una passata sui controller che
+// hanno mostrato la firma X sinistra.
 export const TELEMETRY_APP_BUILD = 20261019;
 // Versione della descrizione a cui acconsente chi sceglie "Keep sharing".
 // Salvata in localStorage (`sense-telemetry-scope`): se la pagina ne mostra una

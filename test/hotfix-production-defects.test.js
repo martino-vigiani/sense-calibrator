@@ -75,10 +75,8 @@ test('in the page, a failure in pass 2 leaves the unsaved banner up', async () =
   // Stick sinistro a ~5% e firmware che non centra mai: la passata 1 non basta.
   const failSecondPass = ({ op, counts }) => (op === 'sample' && counts.end === 1 ? new Error('device closed') : null);
   const { h, dev } = await connectedApp({ faults: [failSecondPass], drift: [[6.2, 0.3], [0.2, 0.1]], sf: 0 });
-  // Bias persistente: il centro catturato resta a 5 LSB dal riposo. Verso −X
-  // (uscita +X): a +X l'uscita sarebbe la firma X sinistra e Quick si
-  // fermerebbe dopo la passata 1, senza la passata 2 che qui deve fallire.
-  dev.sticks[0].bias = { axis: 0, B: -5 };
+  // Bias persistente: il centro catturato resta a 5 LSB dal riposo.
+  dev.sticks[0].bias = { axis: 0, B: 5 };
   await h.click('btn-quick');
   await h.run(h.click('btn-quick-go'));
 

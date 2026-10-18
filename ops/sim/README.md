@@ -82,22 +82,6 @@ final ≥15% unchanged (4 → 4, attributable 0 → 0 on rim-hold), no
 per 714 in four scenarios (a rescued start disturbed later in pass 1). All
 model-verified.
 
-### Gate 2 rebaseline (left-X signature stop, 2026-10-19)
-
-`decideAfterPass` stops after a verified pass that shows the left-X signature
-(`hasLeftXSignature` in `js/calib/quick-policy.js`, reason `left-x-signature`).
-The synthetic population draws its persistent bias axis and sign at random, so
-a few sessions land on left X ≤ −4 LSB with Y exact and the right stick within
-one step. Before the refresh, the new code against the old goldens changed
-**3 of 400 sessions in each case and nothing else** (with
-`{"leftXSignatureStop":false}` the old goldens matched field by field):
-normal #124 (3 → 1 `calibEnd`, worse-than-start, same true residual 12.16),
-#205 (4 → 1, worse-than-start, true residual 3.55 → 4.33) and #314 (3 → 1,
-residual-deterministic at 2.00 → worse-than-start at 3.55); hold #88 (4 → 2,
-residual-deterministic at 2.77 → residual at 3.55), #124 and #205 (4 → 1, same
-outcome and true residual). Each stopped on the first pass with the signature;
-the changes are the passes the rule no longer takes. All model-verified.
-
 ## Commands
 
 ```sh
@@ -326,11 +310,14 @@ catastrophic at 4 passes, 12.0% at 2, 9.7% at 1). Going from 1 to 4 passes adds 
 the 119 sessions at the default are over the ceiling after pass 1 already. More passes also
 keep writing the same error, which is why the model cannot show an advantage for them here.
 
-**Signature stop and one-pass cap (2026-10-19, model-verified, 714 sessions).** `runQuick` stops after
-a verified pass with left X ≤ −4 LSB, |left Y| ≤ 1 LSB and the right stick within one step
-(`leftXSignatureStop`, on by default), and the page runs later Quicks on that controller with
-`maxPasses: 1` (the `maxPasses` 1 row above; the simulator has no visits, so the cap is not run here).
-Paired runs, stop off (`--params '{"leftXSignatureStop":false}'`) → on:
+**Left-X signature: one-pass cap, in-run stop off (2026-10-19).** The page remembers a controller
+whose verified Quick pass or done Guided showed the signature (`hasLeftXSignature`: left X ≤ −4 LSB,
+|left Y| ≤ 1 LSB, right stick within one step) and runs later Quicks on it with `maxPasses: 1` (the
+`maxPasses` 1 row above; the simulator has no visits, so the cap is not run here). A stop inside the
+run (`leftXSignatureStop`) exists only as a simulator switch and is **off by default**: the model
+favours it, real data does not (replay below), and worse-than-start rises even in the model. The
+gate 2 goldens are unchanged. Paired runs with the switch, off → `--params '{"leftXSignatureStop":true}'`
+(model-verified, 714 sessions):
 
 | Scenario, seed | Final true residual ≥15% | `catastrophic` | Final true residual <1.25% | Centered outcome | Worse-than-start | Mean `calibEnd`s | Signature stops |
 |---|---|---|---|---|---|---|---|
@@ -361,7 +348,8 @@ already ≥15% on that pass, so the stop prevents none of the real catastrophic 
 7, BDM-050 5, BDM-010 1): 15 later Quicks, 8 with more than one pass; their 13 passes after the
 first: 1 reached 15% (one of the 6 catastrophic results), none within one step, 5 better and 5
 worse than pass 1. So the cap would have prevented one real catastrophic result and lost no centered
-one; the in-run stop rests on the model.
+one, while the in-run stop would have prevented none and given up one centering and two improvements
+of more than a point: that is why it ships off.
 
 Run it with `node ops/sim/run.mjs --n 714 --scenario left-x-capture --workers 4 --out left-x.json`
 (real population needs the telemetry; add `--population synthetic` without it). The test
