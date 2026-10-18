@@ -82,6 +82,22 @@ final ≥15% unchanged (4 → 4, attributable 0 → 0 on rim-hold), no
 per 714 in four scenarios (a rescued start disturbed later in pass 1). All
 model-verified.
 
+### Gate 2 rebaseline (left-X signature stop, 2026-10-19)
+
+`decideAfterPass` stops after a verified pass that shows the left-X signature
+(`hasLeftXSignature` in `js/calib/quick-policy.js`, reason `left-x-signature`).
+The synthetic population draws its persistent bias axis and sign at random, so
+a few sessions land on left X ≤ −4 LSB with Y exact and the right stick within
+one step. Before the refresh, the new code against the old goldens changed
+**3 of 400 sessions in each case and nothing else** (with
+`{"leftXSignatureStop":false}` the old goldens matched field by field):
+normal #124 (3 → 1 `calibEnd`, worse-than-start, same true residual 12.16),
+#205 (4 → 1, worse-than-start, true residual 3.55 → 4.33) and #314 (3 → 1,
+residual-deterministic at 2.00 → worse-than-start at 3.55); hold #88 (4 → 2,
+residual-deterministic at 2.77 → residual at 3.55), #124 and #205 (4 → 1, same
+outcome and true residual). Each stopped on the first pass with the signature;
+the changes are the passes the rule no longer takes. All model-verified.
+
 ## Commands
 
 ```sh
@@ -309,6 +325,43 @@ rare large jump crosses zero) and 1 elsewhere. The synthetic population gives th
 catastrophic at 4 passes, 12.0% at 2, 9.7% at 1). Going from 1 to 4 passes adds 7 points of final ≥15% (9.7% → 16.7%) and 2 points of centered outcome (18.9% → 21.1%): 68 of
 the 119 sessions at the default are over the ceiling after pass 1 already. More passes also
 keep writing the same error, which is why the model cannot show an advantage for them here.
+
+**Signature stop and one-pass cap (2026-10-19, model-verified, 714 sessions).** `runQuick` stops after
+a verified pass with left X ≤ −4 LSB, |left Y| ≤ 1 LSB and the right stick within one step
+(`leftXSignatureStop`, on by default), and the page runs later Quicks on that controller with
+`maxPasses: 1` (the `maxPasses` 1 row above; the simulator has no visits, so the cap is not run here).
+Paired runs, stop off (`--params '{"leftXSignatureStop":false}'`) → on:
+
+| Scenario, seed | Final true residual ≥15% | `catastrophic` | Final true residual <1.25% | Centered outcome | Worse-than-start | Mean `calibEnd`s | Signature stops |
+|---|---|---|---|---|---|---|---|
+| left-x-capture, 1 | 16.7% → 10.9% | 16.5% → 10.8% | 22.3% → 21.8% | 21.1% → 20.9% | 30.8% → 37.0% | 2.48 → 1.16 | 383 |
+| left-x-capture, 2 | 16.1% → 11.3% | 16.1% → 11.3% | 21.8% → 21.3% | 18.9% → 18.6% | 32.1% → 38.1% | 2.51 → 1.19 | 390 |
+| left-x-capture, 3 | 16.8% → 11.5% | 16.8% → 11.5% | 22.0% → 21.1% | 20.2% → 19.9% | 31.0% → 37.4% | 2.49 → 1.19 | 387 |
+| normal, 1 | 0.6% → 0.6% | 0.6% → 0.6% | 76.2% → 76.2% | 66.7% → 66.7% | 4.1% → 4.1% | 1.39 → 1.37 | 8 |
+| hold, 1 | 1.1% → 1.1% | 0.7% → 0.7% | 74.6% → 74.6% | 67.5% → 67.5% | 3.8% → 3.8% | 1.38 → 1.35 | 8 |
+| rim-hold, 1 | 0.6% → 0.6% | 0.6% → 0.6% | 76.2% → 76.2% | 67.5% → 67.5% | 3.6% → 3.6% | 1.40 → 1.38 | 9 |
+
+Worse-than-start rises on left-x-capture because sessions that used to end over the ceiling
+(`catastrophic` takes precedence) now end on their first pass, which is often worse than the start.
+On the stopped sessions the true residual is better in 130–147, the same in 117–135 and worse in
+105–128 of about 385 (mean −1.7 to −2.4 points); 3–6 of them would have ended centered with more
+passes. In normal, hold and rim-hold the safety gates (`safety-gates.mjs`) are identical on and off:
+final ≥15% 4/5/4, attributable 0/1/0, pass rate and worse-than-start deltas 0, 12 samples per commit,
+no sample after a timeout; the 8–9 stopped sessions change only `residual-deterministic` ↔ `residual`
+labels and the true residual by −0.17 to +0.10 points on average.
+
+**Real-data replay (v2 events 27 Sep–18 Oct, 1,106 Quick events with `passAxes`, aggregates only).**
+Verified passes with the signature: BDM-040 40/206, BDM-030 1/277, every other board 0. 18 sessions
+show it (17 BDM-040, 1 BDM-030), 17 on pass 1. 13 would have stopped earlier (12 BDM-040), 28 passes
+fewer. Their 27 later passes: none reached 15%, 1 was within one step (5.11 → 0.55 on pass 4), 13
+were better than the signature pass, 10 worse, 4 the same; final against the stop point: better 6
+(two by more than a point), same 4, worse 3. The 4 catastrophic sessions with the signature were
+already ≥15% on that pass, so the stop prevents none of the real catastrophic results. Across runs
+(same visit and board, after a Quick or a done Guided with the signature; Guided showed it on BDM-040
+7, BDM-050 5, BDM-010 1): 15 later Quicks, 8 with more than one pass; their 13 passes after the
+first: 1 reached 15% (one of the 6 catastrophic results), none within one step, 5 better and 5
+worse than pass 1. So the cap would have prevented one real catastrophic result and lost no centered
+one; the in-run stop rests on the model.
 
 Run it with `node ops/sim/run.mjs --n 714 --scenario left-x-capture --workers 4 --out left-x.json`
 (real population needs the telemetry; add `--population synthetic` without it). The test
