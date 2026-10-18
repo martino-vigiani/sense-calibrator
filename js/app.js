@@ -2052,6 +2052,15 @@ function resetQuickModal() {
   $('btn-quick-cancel').textContent = 'Cancel';
   $('btn-quick-cancel').className = 'btn btn-ghost';
   $('btn-quick-cancel').removeAttribute('data-autofocus');
+  // Un ciclo orfano (controller staccato a metà) esce senza riabilitare i
+  // bottoni: solo l'op corrente può farlo, e teardown non lo fa. Senza
+  // un'operazione in corso il modale riparte dallo stato iniziale; con un'op
+  // corrente (busy) qui non si tocca nulla.
+  if (!ops.busy) {
+    $('btn-quick-go').disabled = false;
+    $('btn-quick-cancel').disabled = false;
+    $('quick-bar').style.width = '0%';
+  }
 }
 
 // Partenza già centrata: "Close" è l'azione principale, "Calibrate anyway" la

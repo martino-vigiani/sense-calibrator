@@ -306,17 +306,25 @@ test('an orphan run (unplugged mid-run) records nothing', async () => {
   const { h, A, first } = await signatureThenFailure({ orphan: true });
   assert.equal(first.ends, 1);
   assert.equal(h.sessions().filter(s => s.kind === 'quick').at(-1).leftXSignature, true, 'seen, in the local event');
-  // Difetto preesistente (vedi il test `todo` sotto): il ciclo orfano lascia
-  // "Calibrate now" disabilitato. Qui interessa solo il limite.
-  h.$('btn-quick-go').disabled = false;
   const next = await quick(h, A);
   assert.ok(next.ends >= 2, `not capped: ${next.ends} passes`);
 });
 
-test('after an orphan Quick (unplugged mid-run) and a replug, Calibrate now is enabled again', { todo: 'quickCalibrate re-enables the modal buttons only when its op is still current; teardown never does' }, async () => {
-  const { h } = await signatureThenFailure({ orphan: true });
+test('after an orphan Quick (unplugged mid-run) and a replug, Calibrate now is enabled and a Quick completes', async () => {
+  const { h, A } = await signatureThenFailure({ orphan: true });
   await h.click('btn-quick');
   assert.equal(h.$('btn-quick-go').disabled, false);
+  assert.equal(h.$('btn-quick-cancel').disabled, false);
+  h.eval("closeModal('modal-quick')");
+  const ends = A.counts.end;
+  const next = await quick(h, A);
+  assert.ok(next.ends >= 1);
+  assert.equal(A.counts.end - ends, next.ends);
+  assert.equal(next.ops.filter(op => op === 'sample').length, 12 * next.ends);
+  const s = h.sessions().filter(x => x.kind === 'quick').at(-1);
+  assert.equal(s.aborted, undefined, 'a complete run');
+  assert.ok(s.after, 'verified');
+  assert.equal(h.peek().busy, false);
 });
 
 test('an unreadable serial gets neither the cap nor the note', async () => {
