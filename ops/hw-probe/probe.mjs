@@ -3,8 +3,8 @@
 // Collegamento DOM del probe R1. Solo UI: le regole stanno in safety.mjs, il
 // protocollo in protocol.mjs.
 //
-// La cartella ops/ viene pubblicata da GitHub Pages insieme al sito, quindi il
-// controllo dell'host è la PRIMA cosa: fuori da localhost la pagina non carica
+// _config.yml esclude ops/ da GitHub Pages, ma il controllo dell'host resta la
+// PRIMA cosa, nel caso la pagina venga servita altrove: fuori da localhost la pagina non carica
 // nemmeno il codice che parla al controller (import dinamico dopo il
 // controllo) e non mostra alcun pulsante.
 

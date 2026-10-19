@@ -19,14 +19,15 @@ import {
   analyzeDrift, extractStableSamples, parseSticks, summarizeResult, verdictFor,
 } from './calib/measure.js';
 import { MAX_REPORT_GAP_MS, STICK_LSB, measureOffset as measureOffsetFrom, waitForStable as waitForStableFrom } from './calib/sampling.js';
-import { runQuick } from './calib/quick.js';
-import { QUICK_CATASTROPHIC_PCT } from './calib/quick-policy.js';
+import { runQuick, stablePassXY } from './calib/quick.js';
+import { QUICK_CATASTROPHIC_PCT, hasLeftXSignature } from './calib/quick-policy.js';
 import { createOpGate } from './calib/ops.js';
 import { CENTERED_MAX, GUIDED_ONLY_MIN, LSB_PCT, WITHIN_ONE_STEP_MAX, formatOffset } from './calib/lattice.js';
 import {
   driftMessage, flashSummary, guidedFarStartCopy, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   driftRestedInside, quickEntryRoute, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
-  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor,
+  revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor, LEFT_X_CAPPED_NOTE, LEFT_X_FOUND_NOTE,
+  FIRMWARE_UPDATE_LINE, FIRMWARE_WARNING, firmwareRefusesCalibration,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
@@ -789,7 +790,23 @@ function renderDeviceInfo(info) {
   $('device-info').innerHTML = rows
     .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
     .join('');
+  renderFirmwareWarning(info);
 }
+
+// Scheda + firmware su cui la calibrazione non è mai partita nei dati
+// (firmwareRefusesCalibration): avviso nella scheda del controller, nessun
+// blocco. Regione live: il testo si scrive solo quando cambia, e teardown lo
+// svuota, così una nuova connessione lo annuncia di nuovo.
+function renderFirmwareWarning(info) {
+  const device = { board: info?.board ?? null, fw: info?.fwversion ?? null };
+  const on = firmwareRefusesCalibration(device);
+  setLive($('fw-warning'), on ? FIRMWARE_WARNING : '');
+  $('fw-warning').classList.toggle('hidden', !on);
+  if (on) recordEvent('firmware-warning', device);
+}
+// La riga sull'aggiornamento in coda a un pannello di avvio fallito.
+const withFirmwareLine = (view, device, failedStart) => (failedStart && firmwareRefusesCalibration(device ?? {})
+  ? { ...view, lines: [...view.lines, FIRMWARE_UPDATE_LINE] } : view);
 
 function finalizeInterruptedWizard(w, { now = false } = {}) {
   if (!w?.beginSent || w.reported || !(w.sessionOpen || w.guard || w.committed)) return;
@@ -849,6 +866,7 @@ function teardown(message = null) {
   flashing = false;
   battery = null;
   deviceInfo = null;
+  renderFirmwareWarning(null);
   nvStatus = null;
   oldFirmwareAck = false;
   rangeSession = null;
@@ -2001,6 +2019,37 @@ let quickRouteNext = null;
 // preflight erano ripetizioni nella stessa visita, e l'attesa di 8 s non ne ha
 // recuperato nessuno.
 const quickPreflightFailures = new Map();
+// Controller (chiave salata) su cui una passata Quick o un Guided verificati e
+// STABILI hanno mostrato la firma "cattura X sinistra" (hasLeftXSignature,
+// js/calib/quick-policy.js). Solo in memoria, mai salvata né inviata. Le Quick
+// successive su quel controller fanno una passata sola (maxPasses 1): nella
+// telemetria ogni passata in più riscriveva lo stesso errore o saltava oltre
+// il 15%. Nessun comando nuovo e nessun cambio al blocco di Write.
+// Seriale illeggibile (chiave null): né limite né nota. La chiave null vale
+// per ogni controller senza seriale, e la nota direbbe "this controller" di
+// uno che la firma non l'ha mai mostrata.
+// Valore: `noted` = la nota completa (LEFT_X_FOUND_NOTE) è già stata mostrata.
+// Si consuma solo quando la si mostra davvero: una firma vista su un percorso
+// senza la nota (errore, stallo, scollegamento) la porta nel modale della
+// Quick successiva.
+const leftXSignatures = new Map();
+function noteLeftXSignature(key) {
+  if (key == null || leftXSignatures.has(key)) return;
+  leftXSignatures.set(key, { noted: false });
+}
+const leftXCapped = key => key != null && leftXSignatures.has(key);
+// La nota completa, se non è ancora stata mostrata per quel controller: chi la
+// chiede la mostra subito, quindi qui si consuma.
+function takeLeftXNote(key) {
+  const entry = key == null ? null : leftXSignatures.get(key);
+  if (!entry || entry.noted) return null;
+  entry.noted = true;
+  return LEFT_X_FOUND_NOTE;
+}
+const withLeftXNote = (view, key) => {
+  const note = takeLeftXNote(key);
+  return note ? { ...view, lines: [...view.lines, note] } : view;
+};
 // Rotta come azione primaria (Guided o Range) e Quick come secondaria. Nessun
 // comando: il bottone primario apre l'altra procedura, "Try Quick anyway"
 // lancia runQuick esattamente come "Calibrate now".
@@ -2021,6 +2070,15 @@ function resetQuickModal() {
   $('btn-quick-cancel').textContent = 'Cancel';
   $('btn-quick-cancel').className = 'btn btn-ghost';
   $('btn-quick-cancel').removeAttribute('data-autofocus');
+  // Un ciclo orfano (controller staccato a metà) esce senza riabilitare i
+  // bottoni: solo l'op corrente può farlo, e teardown non lo fa. Senza
+  // un'operazione in corso il modale riparte dallo stato iniziale; con un'op
+  // corrente (busy) qui non si tocca nulla.
+  if (!ops.busy) {
+    $('btn-quick-go').disabled = false;
+    $('btn-quick-cancel').disabled = false;
+    $('quick-bar').style.width = '0%';
+  }
 }
 
 // Partenza già centrata: "Close" è l'azione principale, "Calibrate anyway" la
@@ -2544,6 +2602,8 @@ async function quickCalibrate({ anyway = false } = {}) {
   const controllerKey = deviceKey;
   const recovery = quickRecoveryNext;
   const force = quickForceNext || recovery;
+  // Firma X sinistra già vista su questo controller: una passata sola.
+  const capped = leftXCapped(controllerKey);
   // Test drift solo se fresco (dopo l'ultimo commit, stesso controller).
   const drift = freshDriftResult(controller);
   cancelDriftTest();
@@ -2601,7 +2661,10 @@ async function quickCalibrate({ anyway = false } = {}) {
     session.err = String(error.message || error).slice(0, 120);
     recordSessionOnce(session);
     closeModal('modal-quick');
-    showOutcome(quickOutcomeView({ outcome: 'error', error, committed, needsPowerCycle, worst: null, session }, { nvStatus: lastNvStatus }));
+    // Avvio rifiutato (sessione lasciata aperta, nessuna passata): su una
+    // combinazione scheda + firmware nota, la riga sull'aggiornamento.
+    const failedStart = needsPowerCycle && !(session.passes?.length);
+    showOutcome(withFirmwareLine(quickOutcomeView({ outcome: 'error', error, committed, needsPowerCycle, worst: null, session }, { nvStatus: lastNvStatus }), quickDevice, failedStart));
     log(`Quick calibration error: ${error.message}`);
   };
   try {
@@ -2613,7 +2676,7 @@ async function quickCalibrate({ anyway = false } = {}) {
       isCancelled: () => quickCancelRequested,
       force,
       params: {
-        ...(recovery ? { maxPasses: 1 } : {}),
+        ...(recovery || capped ? { maxPasses: 1 } : {}),
         // Il test drift ha visto entrambi gli stick fermi dentro il raggio: uno
         // stick fermo fuori raggio adesso è un pollice, e conviene aspettare
         // che si stacchi invece di fermarsi dopo 3 s (solo l'attesa cambia).
@@ -2656,6 +2719,17 @@ async function quickCalibrate({ anyway = false } = {}) {
       meta: { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null },
     });
     const { session, outcome } = run;
+    // Firma X sinistra su una passata verificata e stabile (stablePassXY: una
+    // lettura ≥15% tenuta come implausibile non conta). Un ciclo orfano non
+    // registra nulla: la pagina ora è di un'altra operazione.
+    const leftXSeen = stablePassXY(session).some(hasLeftXSignature);
+    if (leftXSeen) {
+      session.leftXSignature = true;
+      if (ops.isCurrent(op)) noteLeftXSignature(controllerKey);
+    }
+    // Corsa limitata: resta fuori dal v1 (buildCalibrationUpload), riferimento
+    // KPI delle corse a più passate.
+    if (capped) session.leftXCap = true;
     // Una preflight passata (o un arresto prima dell'attesa) azzera il conto.
     if (outcome !== 'preflight') quickPreflightFailures.delete(controllerKey ?? null);
     // Tutti gli esiti tranne 'error', che passa da fail() con i suoi flag.
@@ -2786,7 +2860,7 @@ async function quickCalibrate({ anyway = false } = {}) {
     // Pannello persistente al posto del toast: a 15% o più non suona mai come
     // un successo e disabilita Write; il consiglio di spegnere il controller
     // compare solo con la NVS letta `locked` (C0-11).
-    showOutcome(quickOutcomeView(run, { nvStatus: lastNvStatus }));
+    showOutcome(withLeftXNote(quickOutcomeView(run, { nvStatus: lastNvStatus }), controllerKey));
     log(outcomeLogLine(run));
     ops.endOp(op);
     startDriftTest();
@@ -3058,10 +3132,15 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   const comparison = wizardComparison(w.before, after);
   lastWizardComparison = comparison;
   w.reported = true;
+  // Firma X sinistra solo da un dopo VERIFICATO (stabile): un dopo instabile
+  // tenuto solo perché ≥15% non basta a limitare le Quick successive.
+  const leftXSeen = !!after && measuredAfter.stableFraction >= DRIFT_MIN_STABLE && hasLeftXSignature(after.xy);
+  if (leftXSeen) noteLeftXSignature(w.key);
   // Solo locale (il payload v1 porta soltanto sessioni quick).
   recordEvent('wizard', {
     done: true, before: w.before ?? null, after,
     samples: w.samples, timeouts: w.timeouts, cornerMisses: w.cornerMisses, escaped: w.escaped,
+    ...(leftXSeen ? { leftXSignature: true, board: w.device?.board ?? null } : {}),
   });
   // Completata ma ancora oltre refRadius: per F1 conta come un fallimento.
   if (after && farStart(after).length) noteWizardFarFailure(w, { after });
@@ -3073,7 +3152,7 @@ async function wizardSampleCorner(w, ensure, isCancelled) {
   wizardHideLive();
   // Prima e dopo anche nel pannello persistente (WS5), con lo stesso blocco di
   // Write della rapida (peggiore dell'inizio, ≥15%, asse incollato).
-  showOutcome(guidedOutcomeView({ before: w.before ?? null, after }, { nvStatus: lastNvStatus }));
+  showOutcome(withLeftXNote(guidedOutcomeView({ before: w.before ?? null, after }, { nvStatus: lastNvStatus }), w.key));
   $('wizard-msg').innerHTML = `${wizardResultHtml(comparison, w.escaped)}<br>The result stays on the page after you close this.`;
   btn.textContent = 'Done';
 }
@@ -3303,10 +3382,10 @@ async function wizardNext() {
     // Una sessione solo aperta non ha cambiato la RAM: il blocco basta.
     if (error.committed || w.committed) setUnsaved(true);
     closeModal('modal-wizard');
-    showOutcome(guidedOutcomeView(
+    showOutcome(withFirmwareLine(guidedOutcomeView(
       { before: w.before ?? null, error, committed: error.committed === true || !!w.committed, leftOpen },
       { nvStatus: lastNvStatus },
-    ));
+    ), w.device, leftOpen && (w.step ?? 0) === 0));
     log(`Wizard error: ${error.message}`);
   } finally {
     w.running = false;
@@ -3713,7 +3792,8 @@ async function startRange() {
       if (ds5 === controller) {
         closeModal('modal-range');
         log(`Range start failed: ${error.message}`);
-        showOutcome(rangeStartFailedView({ error, again: refusals > 1, clearedBy: powerCycleClearedBy.get(key) ?? null }));
+        showOutcome(withFirmwareLine(rangeStartFailedView({ error, again: refusals > 1, clearedBy: powerCycleClearedBy.get(key) ?? null }),
+          { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null }, true));
       }
       return;
     }
@@ -4288,6 +4368,10 @@ $('btn-quick').addEventListener('click', () => {
     offerQuickRoute(entry.action);
     $('quick-msg').innerHTML = `<b>${esc(entry.text)}</b> If someone was touching the sticks during the drift test, use Try Quick anyway.`;
   }
+  // Firma X sinistra già vista: detto una volta, all'apertura, prima di ogni
+  // comando (l'intro non viene riscritta finché la corsa non parte). La nota
+  // completa se nessun pannello l'ha ancora mostrata.
+  if (leftXCapped(deviceKey)) $('quick-msg').innerHTML += ` ${takeLeftXNote(deviceKey) ?? LEFT_X_CAPPED_NOTE}`;
   openQuickModal();
 });
 $('btn-quick-cancel').addEventListener('click', cancelQuickCalibration);

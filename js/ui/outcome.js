@@ -111,6 +111,16 @@ export const RANGE_THEN_CENTER = `Afterwards the page measures the center again:
 // su 13 con un range completo in mezzo, 29 su 93 senza.
 export const RANGE_MOVES_CENTER = 'In shared results the center was off after most Range calibrations; this isn’t confirmed on hardware yet.';
 
+// Firma "cattura X sinistra" (hasLeftXSignature in js/calib/quick-policy.js):
+// la pagina la ricorda per controller e le Quick successive fanno una passata.
+// Telemetria v2 (27/9–18/10, aggregati): sugli stessi controller anche Guided e
+// Range lasciavano lo stesso residuo verso −X. È un indizio, non verificato
+// sull'hardware (R1-X): "may", mai "won't". `FOUND` va nel pannello la prima
+// volta che la firma compare sul controller, `CAPPED` nel modale delle Quick
+// limitate che seguono.
+export const LEFT_X_FOUND_NOTE = 'On this controller each pass tends to leave the left stick a little to the left of center, so from now on Quick does one pass only. Calibration may not fix this: in shared results Guided and Range often left the same offset on controllers like this one.';
+export const LEFT_X_CAPPED_NOTE = 'On this controller each pass tends to leave the left stick a little to the left of center, so Quick does <b>one pass only</b>. Calibration may not fix this.';
+
 const SIDES = ['Left', 'Right'];
 
 // Stick a riposo oltre refRadius (farStartPct, 50%): telemetria v2 (build
@@ -744,6 +754,22 @@ export function rangeRecheckView({ before = null, after }) {
     RANGE_MOVES_CENTER,
   ], [ACTION.quickNow, ACTION.retest]);
 }
+
+// Scheda + firmware su cui, nella telemetria v2, nessuna calibrazione è mai
+// partita: BDM-050 con fw 17760256 (0x010F0000), 21 avvii dal 29/9 al 16/10
+// (9 Quick, 4 Guided, 8 Range), zero riusciti, tutti calibBegin/rangeBegin
+// rifiutati o senza risposta valida → error con needsPowerCycle. Lo stesso
+// BDM-050 con fw 17825834 (0x0110002A) funziona (81 Quick centrati), e altre
+// schede con 17760256 pure. Un indizio dai dati, non verificato sull'hardware:
+// la pagina avvisa e consiglia l'aggiornamento, non blocca (come per H0).
+const FIRMWARE_REFUSALS = Object.freeze([{ board: 'BDM-050', fw: 17760256 }]);
+export function firmwareRefusesCalibration({ board = null, fw = null } = {}) {
+  return FIRMWARE_REFUSALS.some(r => r.board === board && r.fw === fw);
+}
+const FIRMWARE_UPDATE_HOW = 'on a PS5: Settings → Accessories → Controllers → Wireless Controller Device Software; on Windows: Sony’s “Firmware updater for DualSense wireless controller”';
+// Avviso alla connessione (#fw-warning) e riga nei pannelli di un avvio fallito.
+export const FIRMWARE_WARNING = `In our data so far, calibration has not worked on this board with this firmware. Update the controller firmware first (${FIRMWARE_UPDATE_HOW}), then reconnect. You can still try calibrating.`;
+export const FIRMWARE_UPDATE_LINE = `In our data so far, calibration hasn’t started on this board with this firmware: update the controller firmware (${FIRMWARE_UPDATE_HOW}), then reconnect.`;
 
 // rangeBegin inviato ma non accettato (codice di rifiuto, risposta incoerente
 // o persa dopo l'invio). Telemetria v2 27/9–12/10: 9 range 'error' su 28 erano

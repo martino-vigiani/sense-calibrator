@@ -149,6 +149,18 @@ export const QUICK_DEFAULTS = Object.freeze({
   noisyStartPct: 3,
 });
 
+// Assi (summarizeResult().xy) delle passate verificate con una misura
+// ordinaria, cioè stabile e sotto il tetto: la diagnostica di verifica la marca
+// `accepted`. Una lettura ≥15% tenuta come `implausible` (anche instabile) non
+// c'è. La diagnostica ha un limite (8 passate, 16 record) che con i parametri
+// della pagina (4 passate × 2 tentativi) non si raggiunge.
+export function stablePassXY(session) {
+  const passes = session?.passes ?? [];
+  const xy = session?.passXY ?? [];
+  const accepted = new Set((session?.verification?.attempts ?? []).filter(a => a.accepted).map(a => a.pass));
+  return passes.flatMap((w, i) => (w !== null && accepted.has(i + 1) && xy[i] ? [xy[i]] : []));
+}
+
 // Esiti:
 //   'preflight'        nessun comando inviato (preflight, baseline o tenuta
 //                      prima della passata 1 falliti); il ritorno porta
@@ -619,7 +631,7 @@ export async function runQuick({
       // `otherWorst`: lo stick migliore. Se è già al pavimento, le passate
       // oltre la regola precedente sono limitate (rischiano di rovinarlo).
       const otherWorst = Math.min(result.left.offset, result.right.offset);
-      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed }, p);
+      const decision = decideAfterPass({ pass, worst, beforeWorst, prevWorst, bestWorst, bestPass, otherWorst, extraUsed, xy: session.passXY.at(-1) }, p);
       ({ prevWorst, bestWorst, bestPass, extraUsed } = decision);
       log(`Pass ${pass}: residual offset ${worst.toFixed(2)}%`);
       if (decision.reason === 'target') break;
@@ -635,6 +647,14 @@ export async function runQuick({
         log(`Pass ${pass} came out worse than the previous one: trying again instead of stopping.`);
       if (decision.reason === 'converged') {
         log('Converged: residual offset at the noise floor, further passes won’t help.');
+        break;
+      }
+      if (decision.reason === 'left-x-signature') {
+        // Solo con leftXSignatureStop (spento di default: vedi quick-policy.js).
+        // Solo locale, né v1 né v2 lo portano.
+        session.leftXSignature = true;
+        session.stop = 'left-x-signature';
+        log(`Pass ${pass}: the left stick ended to the left of center with Y exact, a pattern that repeats on this controller: stopping, another pass tends to write the same error.`);
         break;
       }
       if (decision.reason === 'near-ceiling') {

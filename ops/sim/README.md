@@ -310,6 +310,51 @@ catastrophic at 4 passes, 12.0% at 2, 9.7% at 1). Going from 1 to 4 passes adds 
 the 119 sessions at the default are over the ceiling after pass 1 already. More passes also
 keep writing the same error, which is why the model cannot show an advantage for them here.
 
+**Left-X signature: one-pass cap, in-run stop off (2026-10-19).** The page remembers a controller
+whose verified Quick pass or done Guided showed the signature (`hasLeftXSignature`: left X ≤ −4 LSB,
+|left Y| ≤ 1 LSB, right stick within one step) and runs later Quicks on it with `maxPasses: 1` (the
+`maxPasses` 1 row above; the simulator has no visits, so the cap is not run here). Only a pass
+verified by a stable reading below the ceiling marks a controller, and the left stick must be under
+15%. Capped runs stay out of v1 (`leftXCap`); in v2, from build 20261019, a one-pass Quick event may be
+a capped run and cannot be told apart (known limit, contract unchanged): reports comparing pass counts
+across builds must account for it. A stop inside the
+run (`leftXSignatureStop`) exists only as a simulator switch and is **off by default**: the model
+favours it, real data does not (replay below), and worse-than-start rises even in the model. The
+gate 2 goldens are unchanged. Paired runs with the switch, off → `--params '{"leftXSignatureStop":true}'`
+(model-verified, 714 sessions):
+
+| Scenario, seed | Final true residual ≥15% | `catastrophic` | Final true residual <1.25% | Centered outcome | Worse-than-start | Mean `calibEnd`s | Signature stops |
+|---|---|---|---|---|---|---|---|
+| left-x-capture, 1 | 16.7% → 10.9% | 16.5% → 10.8% | 22.3% → 21.8% | 21.1% → 20.9% | 30.8% → 37.0% | 2.48 → 1.16 | 383 |
+| left-x-capture, 2 | 16.1% → 11.3% | 16.1% → 11.3% | 21.8% → 21.3% | 18.9% → 18.6% | 32.1% → 38.1% | 2.51 → 1.19 | 390 |
+| left-x-capture, 3 | 16.8% → 11.5% | 16.8% → 11.5% | 22.0% → 21.1% | 20.2% → 19.9% | 31.0% → 37.4% | 2.49 → 1.19 | 387 |
+| normal, 1 | 0.6% → 0.6% | 0.6% → 0.6% | 76.2% → 76.2% | 66.7% → 66.7% | 4.1% → 4.1% | 1.39 → 1.37 | 8 |
+| hold, 1 | 1.1% → 1.1% | 0.7% → 0.7% | 74.6% → 74.6% | 67.5% → 67.5% | 3.8% → 3.8% | 1.38 → 1.35 | 8 |
+| rim-hold, 1 | 0.6% → 0.6% | 0.6% → 0.6% | 76.2% → 76.2% | 67.5% → 67.5% | 3.6% → 3.6% | 1.40 → 1.38 | 9 |
+
+Worse-than-start rises on left-x-capture because sessions that used to end over the ceiling
+(`catastrophic` takes precedence) now end on their first pass, which is often worse than the start.
+On the stopped sessions the true residual is better in 130–147, the same in 117–135 and worse in
+105–128 of about 385 (mean −1.7 to −2.4 points); 3–6 of them would have ended centered with more
+passes. In normal, hold and rim-hold the safety gates (`safety-gates.mjs`) are identical on and off:
+final ≥15% 4/5/4, attributable 0/1/0, pass rate and worse-than-start deltas 0, 12 samples per commit,
+no sample after a timeout; the 8–9 stopped sessions change only `residual-deterministic` ↔ `residual`
+labels and the true residual by −0.17 to +0.10 points on average.
+
+**Real-data replay (v2 events 27 Sep–18 Oct, 1,106 Quick events with `passAxes`, aggregates only).**
+Verified passes with the signature: BDM-040 40/206, BDM-030 1/277, every other board 0. 18 sessions
+show it (17 BDM-040, 1 BDM-030), 17 on pass 1. 13 would have stopped earlier (12 BDM-040), 28 passes
+fewer. Their 27 later passes: none reached 15%, 1 was within one step (5.11 → 0.55 on pass 4), 13
+were better than the signature pass, 10 worse, 4 the same; final against the stop point: better 6
+(two by more than a point), same 4, worse 3. The 4 catastrophic sessions with the signature were
+already ≥15% on that pass, so the stop prevents none of the real catastrophic results. Across runs
+(same visit and board, after a Quick or a done Guided with the signature; Guided showed it on BDM-040
+7, BDM-050 5, BDM-010 1): 15 later Quicks, 8 with more than one pass; their 13 passes after the
+first: 1 reached 15% (one of the 6 catastrophic results), none within one step, 5 better and 5
+worse than pass 1. So the cap would have prevented one real catastrophic result and lost no centered
+one, while the in-run stop would have prevented none and given up one centering and two improvements
+of more than a point: that is why it ships off.
+
 Run it with `node ops/sim/run.mjs --n 714 --scenario left-x-capture --workers 4 --out left-x.json`
 (real population needs the telemetry; add `--population synthetic` without it). The test
 `test/sim-left-x-capture.test.js` covers the draw, the pairing and the bias placement on the
