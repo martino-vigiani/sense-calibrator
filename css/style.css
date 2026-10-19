@@ -283,6 +283,13 @@ main {
   text-align: left;
 }
 
+/* Firmware noto per rifiutare la calibrazione (dentro la card del
+   controller): largo come la card. */
+.fw-warning {
+  max-width: none;
+  margin: 14px 0 0;
+}
+
 /* Contatto instabile (dentro la card del test drift): largo come la card,
    non centrato come gli avvisi della landing. */
 .contact-fault {

@@ -27,6 +27,7 @@ import {
   driftMessage, flashSummary, guidedFarStartCopy, guidedOutcomeView, outcomeHtml, outcomeLogLine, powerCycleReminderView, quickOutcomeView,
   driftRestedInside, quickEntryRoute, quickPreflightCheckRoute, quickPreflightRoute, rangeOutcomeView, rangeRecheckView, rangeStartFailedView,
   revertAdvice, saveCtaFor, stickTier, unsavedLostView, writeLockFor, LEFT_X_CAPPED_NOTE, LEFT_X_FOUND_NOTE,
+  FIRMWARE_UPDATE_LINE, FIRMWARE_WARNING, firmwareRefusesCalibration,
 } from './ui/outcome.js';
 import { HANDS_OFF_LABELS, createHandsOffMeter, renderHandsOff } from './ui/hands-off.js';
 import { CONNECT_CHECKLIST, connectErrorCopy } from './ui/connect-help.js';
@@ -789,7 +790,23 @@ function renderDeviceInfo(info) {
   $('device-info').innerHTML = rows
     .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
     .join('');
+  renderFirmwareWarning(info);
 }
+
+// Scheda + firmware su cui la calibrazione non è mai partita nei dati
+// (firmwareRefusesCalibration): avviso nella scheda del controller, nessun
+// blocco. Regione live: il testo si scrive solo quando cambia, e teardown lo
+// svuota, così una nuova connessione lo annuncia di nuovo.
+function renderFirmwareWarning(info) {
+  const device = { board: info?.board ?? null, fw: info?.fwversion ?? null };
+  const on = firmwareRefusesCalibration(device);
+  setLive($('fw-warning'), on ? FIRMWARE_WARNING : '');
+  $('fw-warning').classList.toggle('hidden', !on);
+  if (on) recordEvent('firmware-warning', device);
+}
+// La riga sull'aggiornamento in coda a un pannello di avvio fallito.
+const withFirmwareLine = (view, device, failedStart) => (failedStart && firmwareRefusesCalibration(device ?? {})
+  ? { ...view, lines: [...view.lines, FIRMWARE_UPDATE_LINE] } : view);
 
 function finalizeInterruptedWizard(w, { now = false } = {}) {
   if (!w?.beginSent || w.reported || !(w.sessionOpen || w.guard || w.committed)) return;
@@ -849,6 +866,7 @@ function teardown(message = null) {
   flashing = false;
   battery = null;
   deviceInfo = null;
+  renderFirmwareWarning(null);
   nvStatus = null;
   oldFirmwareAck = false;
   rangeSession = null;
@@ -2643,7 +2661,10 @@ async function quickCalibrate({ anyway = false } = {}) {
     session.err = String(error.message || error).slice(0, 120);
     recordSessionOnce(session);
     closeModal('modal-quick');
-    showOutcome(quickOutcomeView({ outcome: 'error', error, committed, needsPowerCycle, worst: null, session }, { nvStatus: lastNvStatus }));
+    // Avvio rifiutato (sessione lasciata aperta, nessuna passata): su una
+    // combinazione scheda + firmware nota, la riga sull'aggiornamento.
+    const failedStart = needsPowerCycle && !(session.passes?.length);
+    showOutcome(withFirmwareLine(quickOutcomeView({ outcome: 'error', error, committed, needsPowerCycle, worst: null, session }, { nvStatus: lastNvStatus }), quickDevice, failedStart));
     log(`Quick calibration error: ${error.message}`);
   };
   try {
@@ -3361,10 +3382,10 @@ async function wizardNext() {
     // Una sessione solo aperta non ha cambiato la RAM: il blocco basta.
     if (error.committed || w.committed) setUnsaved(true);
     closeModal('modal-wizard');
-    showOutcome(guidedOutcomeView(
+    showOutcome(withFirmwareLine(guidedOutcomeView(
       { before: w.before ?? null, error, committed: error.committed === true || !!w.committed, leftOpen },
       { nvStatus: lastNvStatus },
-    ));
+    ), w.device, leftOpen && (w.step ?? 0) === 0));
     log(`Wizard error: ${error.message}`);
   } finally {
     w.running = false;
@@ -3771,7 +3792,8 @@ async function startRange() {
       if (ds5 === controller) {
         closeModal('modal-range');
         log(`Range start failed: ${error.message}`);
-        showOutcome(rangeStartFailedView({ error, again: refusals > 1, clearedBy: powerCycleClearedBy.get(key) ?? null }));
+        showOutcome(withFirmwareLine(rangeStartFailedView({ error, again: refusals > 1, clearedBy: powerCycleClearedBy.get(key) ?? null }),
+          { board: deviceInfo?.board ?? null, fw: deviceInfo?.fwversion ?? null }, true));
       }
       return;
     }

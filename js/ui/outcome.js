@@ -755,6 +755,22 @@ export function rangeRecheckView({ before = null, after }) {
   ], [ACTION.quickNow, ACTION.retest]);
 }
 
+// Scheda + firmware su cui, nella telemetria v2, nessuna calibrazione è mai
+// partita: BDM-050 con fw 17760256 (0x010F0000), 21 avvii dal 29/9 al 16/10
+// (9 Quick, 4 Guided, 8 Range), zero riusciti, tutti calibBegin/rangeBegin
+// rifiutati o senza risposta valida → error con needsPowerCycle. Lo stesso
+// BDM-050 con fw 17825834 (0x0110002A) funziona (81 Quick centrati), e altre
+// schede con 17760256 pure. Un indizio dai dati, non verificato sull'hardware:
+// la pagina avvisa e consiglia l'aggiornamento, non blocca (come per H0).
+const FIRMWARE_REFUSALS = Object.freeze([{ board: 'BDM-050', fw: 17760256 }]);
+export function firmwareRefusesCalibration({ board = null, fw = null } = {}) {
+  return FIRMWARE_REFUSALS.some(r => r.board === board && r.fw === fw);
+}
+const FIRMWARE_UPDATE_HOW = 'on a PS5: Settings → Accessories → Controllers → Wireless Controller Device Software; on Windows: Sony’s “Firmware updater for DualSense wireless controller”';
+// Avviso alla connessione (#fw-warning) e riga nei pannelli di un avvio fallito.
+export const FIRMWARE_WARNING = `In our data so far, calibration has not worked on this board with this firmware. Update the controller firmware first (${FIRMWARE_UPDATE_HOW}), then reconnect. You can still try calibrating.`;
+export const FIRMWARE_UPDATE_LINE = `In our data so far, calibration hasn’t started on this board with this firmware: update the controller firmware (${FIRMWARE_UPDATE_HOW}), then reconnect.`;
+
 // rangeBegin inviato ma non accettato (codice di rifiuto, risposta incoerente
 // o persa dopo l'invio). Telemetria v2 27/9–12/10: 9 range 'error' su 28 erano
 // avvii falliti a durS 0, 7 dei quali ripetuti nella stessa visita dopo un
