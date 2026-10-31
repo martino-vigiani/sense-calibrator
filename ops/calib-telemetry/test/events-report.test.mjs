@@ -272,6 +272,32 @@ test('after a centering: rest windows by time since calibration and by operation
   assert.deepEqual([l.sticks, l.wideSpread, l.offCenterMedian, l.both], [3, 1, 1, 0],
     'V1 left tight and centered, V1 right wide (3.2 LSB), V2 left tight but 3.1% off; under 5 releases or none are skipped');
   assert.equal(l.p95SpreadLsb.max, 3.2);
+  assert.equal(l.shifted, 1, 'V2 left: median 4 LSB from center, farther than its own 0.6 LSB spread');
+  assert.deepEqual([l.medianDistLsb.p50, l.medianDistLsb.max], [0.5, 4]);
+});
+
+test('after a centering: one count per centering, split by releases and by Write within a time band', () => {
+  const by = buildEventsReport(timingPopulation(), { minimumCohortSize: 1 }).afterCalibration.restAfterCentering.byCalibration;
+  assert.deepEqual(by.all, { n: 2, offCenter: 2, rate: 1 }, 'V1 and V2 once each; legacy and mismatch rows of V3 left out');
+  assert.deepEqual(by.releases.none, { n: 2, offCenter: 1, rate: 0.5 }, 'V1 centered with no release, V2 off with none');
+  assert.deepEqual(by.releases.some, { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(by.bySinceCal['<1m'].all, { n: 1, offCenter: 0, rate: 0 });
+  assert.deepEqual(by.bySinceCal['5-15m'].releases.some, { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(by.bySinceCal['>=60m'].flash.with, { n: 1, offCenter: 1, rate: 1 });
+  assert.deepEqual(by.bySinceCal['1-5m'].all, { n: 0, offCenter: 0, rate: null });
+});
+
+test('after a centering: a long visit counts once per centering, not once per window', () => {
+  const centered = { after: [0.55, 0.55] };
+  const restAt = (seq, off) => {
+    const e = rest('e5e5e5e5', seq, 1, { sinceCalS: 60 + seq * 30, opsSince: ['quick'], landings: 0 });
+    e.sticks = e.sticks.map((s, i) => ({ ...s, off: i === 0 ? off : 0.55 }));
+    return e;
+  };
+  const events = [quick('e5e5e5e5', 0, centered), ...[1, 2, 3, 4, 5].map(s => restAt(s, OFF)), quick('e5e5e5e5', 6, centered), restAt(7, 0.55)];
+  const r = buildEventsReport(`${events.map(e => line(e)).join('\n')}\n`, { minimumCohortSize: 1 }).afterCalibration.restAfterCentering;
+  assert.deepEqual(r.all, { n: 6, offCenter: 5, rate: 0.833 });
+  assert.deepEqual(r.byCalibration.all, { n: 2, offCenter: 1, rate: 0.5 }, 'the second centering is its own count');
 });
 
 test('after a centering: rates and the landing block are withheld below the cohort size', () => {

@@ -351,13 +351,14 @@ export function formatEventsSummary(report) {
   const rest = report.restNoise.all;
   const repeats = report.residualAxes.quickPassRepeats.all;
   const after = report.afterCalibration.restAfterCentering.all;
+  const afterCal = report.afterCalibration.restAfterCentering.byCalibration.all;
   const pct = v => (v === null || v === undefined ? 'n/a' : `${(v * 100).toFixed(1)}%`);
   return [
     `events ${report.input.accepted} (invalid ${report.input.invalidEvent + report.input.invalidJson})`,
     `visits ${report.counts.visits}`,
     `quick saved ${q ? `${q.saved}/${q.n} (${pct(q.saveRate)})` : 'n/a'}`,
     `rest windows ${rest.n}`,
-    `off center after a centering ${after.offCenter}/${after.n} (${pct(after.rate)})`,
+    `off center after a centering ${after.offCenter}/${after.n} windows (${pct(after.rate)}), ${afterCal.offCenter}/${afterCal.n} centerings (${pct(afterCal.rate)})`,
     rest.suppressed ? 'noise suppressed' : `right p95 median ${rest.right.p95Lsb.p50} LSB`,
     repeats.suppressed ? `axis repeats suppressed (${repeats.eligibleRuns} eligible Quick runs)` : `axis repeats ${repeats.runs.withExactRepeat}/${repeats.runs.eligible} eligible Quick runs (${pct(repeats.runs.rateAmongEligible)})`,
   ].join(' · ');
