@@ -72,11 +72,20 @@ export function diagnosticsReport(events) {
 //     precedenti non hanno i campi: contano in `legacy`, mai in una fascia.
 //     `bySequence` ricava Range e Write dagli eventi della visita (anche per
 //     le righe vecchie): riconnessione e riavvio non si vedono lì.
+//     Le finestre arrivano ogni 30 s: una visita lunga ne porta molte e pesa
+//     più delle altre. `byCalibration` conta invece una volta ogni centraggio
+//     (visita + calibrazione), fuori centro se almeno una sua finestra della
+//     cella lo è, e separa le cause che nelle finestre si confondono: per
+//     fascia di sinceCalS, con o senza rilasci dal centraggio (`landings`) e
+//     con o senza Write (il Write arriva dopo, quindi va letto nella stessa
+//     fascia di tempo). Solo righe con i campi di timing.
 // (b) Eventi `landing` (l'ultimo per visita e calibrazione, ref): per stick
 //     con almeno MIN_LANDINGS rilasci, quanti hanno il p95 della dispersione
 //     oltre un passo del reticolo (ONE_STEP_PCT ≈ 1.58 LSB: due arrivi che
 //     differiscono solo fra i byte 127 e 128 su entrambi gli assi stanno a
 //     1.41 LSB, sotto) e quanti hanno la mediana oltre 1.25% dal centro.
+//     `shifted`: mediana oltre 1.25% e oltre la propria dispersione p50, cioè
+//     rilasci raccolti lontano dal centro più che sparsi attorno ad esso.
 //     Nessun verdetto: le due firme (usura, calibrazione persa) sono descritte,
 //     non attribuite a un controller.
 export const SINCE_CAL_BANDS = Object.freeze([
@@ -102,6 +111,12 @@ export function afterCalibrationReport(events, { minimumCohortSize = 5 } = {}) {
   const calibrationOnly = cell();
   const bySequence = Object.fromEntries(['range', 'flash'].map(op => [op, { with: cell(), without: cell() }]));
   const latestLanding = new Map();
+  // Per centraggio: chiave di cella → { anchorKey → fuori centro? }
+  const perCal = new Map();
+  const mark = (cellKey, anchorKey, off) => {
+    const m = perCal.get(cellKey) ?? perCal.set(cellKey, new Map()).get(cellKey);
+    m.set(anchorKey, (m.get(anchorKey) ?? false) || off);
+  };
 
   for (const [sid, list] of bySid) {
     list.sort((a, b) => a.seq - b.seq);
@@ -124,31 +139,58 @@ export function afterCalibrationReport(events, { minimumCohortSize = 5 } = {}) {
         // Un rest nuovo senza calibrazione mentre la visita ne mostra una
         // centrata: evento di calibrazione da un altro controller, o perso.
         if (e.sinceCalS === null || !Array.isArray(e.opsSince)) { add(bands.mismatch, off); continue; }
-        add(bands[bandFor(e.sinceCalS)], off);
+        const band = bandFor(e.sinceCalS);
+        add(bands[band], off);
         for (const op of AFTER_OPS) add(withOp[op][e.opsSince.includes(op) ? 'with' : 'without'], off);
         if (e.opsSince.length <= 1) add(calibrationOnly, off);
+        const cal = `${sid}:${anchor.seq}`;
+        const releases = e.landings > 0 ? 'some' : 'none';
+        const flash = e.opsSince.includes('flash') ? 'with' : 'without';
+        for (const k of ['all', `band:${band}`, `releases:${releases}`, `${band}:releases:${releases}`, `${band}:flash:${flash}`]) {
+          mark(k, cal, off);
+        }
       }
     }
   }
 
   const m = minimumCohortSize;
   const pair = o => ({ with: close(o.with, m), without: close(o.without, m) });
-  const sticks = { n: 0, wideSpread: 0, offCenterMedian: 0, both: 0, afterCalibration: 0, p95SpreadLsb: [] };
+  const calCell = k => {
+    const offs = [...(perCal.get(k)?.values() ?? [])];
+    return close({ n: offs.length, offCenter: offs.filter(Boolean).length }, m);
+  };
+  const byCalibration = {
+    all: calCell('all'),
+    releases: { none: calCell('releases:none'), some: calCell('releases:some') },
+    bySinceCal: Object.fromEntries(SINCE_CAL_BANDS.map(([b]) => [b, {
+      all: calCell(`band:${b}`),
+      releases: { none: calCell(`${b}:releases:none`), some: calCell(`${b}:releases:some`) },
+      flash: { with: calCell(`${b}:flash:with`), without: calCell(`${b}:flash:without`) },
+    }])),
+  };
+
+  const sticks = { n: 0, wideSpread: 0, offCenterMedian: 0, both: 0, shifted: 0, afterCalibration: 0, p95SpreadLsb: [], medianDistLsb: [] };
   for (const e of latestLanding.values()) {
     for (const st of e.sticks) {
       if (st.count < MIN_LANDINGS || !st.spread || !st.median) continue;
       const wide = st.spread[1] > WEAR_SPREAD_LSB;
-      const offCenter = Math.hypot(st.median[0], st.median[1]) / 2 * LSB_PCT > WITHIN_ONE_STEP_MAX;
+      const distLsb = Math.hypot(st.median[0], st.median[1]) / 2;
+      const offCenter = distLsb * LSB_PCT > WITHIN_ONE_STEP_MAX;
       sticks.n += 1;
       if (wide) sticks.wideSpread += 1;
       if (offCenter) sticks.offCenterMedian += 1;
       if (wide && offCenter) sticks.both += 1;
+      if (offCenter && distLsb > st.spread[0]) sticks.shifted += 1;
       if (e.sinceCalS !== null) sticks.afterCalibration += 1;
       sticks.p95SpreadLsb.push(st.spread[1]);
+      sticks.medianDistLsb.push(Math.round(distLsb * 100) / 100);
     }
   }
-  const spreads = sticks.p95SpreadLsb.sort((a, b) => a - b);
-  const q = p => spreads[Math.max(0, Math.ceil(p * spreads.length) - 1)];
+  const quantiles = list => {
+    const s = [...list].sort((a, b) => a - b);
+    const q = p => s[Math.max(0, Math.ceil(p * s.length) - 1)];
+    return { p10: q(0.1), p50: q(0.5), p90: q(0.9), max: s.at(-1) };
+  };
   return {
     definition: 'rest windows after a committed Quick or Guided whose result was within one step (≤1.25%); off center = either stick over 1.25%',
     restAfterCentering: {
@@ -156,18 +198,25 @@ export function afterCalibrationReport(events, { minimumCohortSize = 5 } = {}) {
       bySinceCal: Object.fromEntries(Object.entries(bands).map(([k, c]) => [k, close(c, m)])),
       byOpsSince: { ...Object.fromEntries(AFTER_OPS.map(op => [op, pair(withOp[op])])), calibrationOnly: close(calibrationOnly, m) },
       bySequence: Object.fromEntries(Object.entries(bySequence).map(([op, o]) => [op, pair(o)])),
+      byCalibration: {
+        definition: 'one count per centering (visit and calibration), off center if any of its rest windows in the cell is; rows with timing fields only; releases = landings since the centering',
+        ...byCalibration,
+      },
     },
     landings: {
-      definition: `latest landing event per visit and calibration; sticks with at least ${MIN_LANDINGS} releases; wide = p95 distance from the median over one lattice step (${Math.round(WEAR_SPREAD_LSB * 100) / 100} LSB); off center = median over 1.25%`,
+      definition: `latest landing event per visit and calibration; sticks with at least ${MIN_LANDINGS} releases; wide = p95 distance from the median over one lattice step (${Math.round(WEAR_SPREAD_LSB * 100) / 100} LSB); off center = median over 1.25%; shifted = off center and the median farther from center than the stick's own p50 spread`,
       events: latestLanding.size,
       sticks: sticks.n,
       ...(sticks.n < m ? { suppressed: true } : {
         wideSpread: sticks.wideSpread,
         offCenterMedian: sticks.offCenterMedian,
         both: sticks.both,
+        shifted: sticks.shifted,
         afterCalibration: sticks.afterCalibration,
         wideSpreadRate: ratio(sticks.n, sticks.wideSpread, m),
-        p95SpreadLsb: { p10: q(0.1), p50: q(0.5), p90: q(0.9), max: spreads.at(-1) },
+        shiftedRate: ratio(sticks.n, sticks.shifted, m),
+        p95SpreadLsb: quantiles(sticks.p95SpreadLsb),
+        medianDistLsb: quantiles(sticks.medianDistLsb),
       }),
     },
   };
